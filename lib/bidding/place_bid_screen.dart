@@ -1,0 +1,530 @@
+﻿import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import '../core/widgets/glass_button.dart';
+import '../services/bidding_service.dart';
+import '../bidding/bid_model.dart'; 
+import '../dashboard/components/bid_timer.dart'; // Ensure correct path
+
+class PlaceBidScreen extends StatefulWidget {
+  final Map<String, dynamic> productData;
+  final String docId;
+
+  const PlaceBidScreen({super.key, required this.productData, required this.docId});
+
+  @override
+  State<PlaceBidScreen> createState() => _PlaceBidScreenState();
+}
+
+class _PlaceBidScreenState extends State<PlaceBidScreen> {
+  final _bidController = TextEditingController();
+  final BiddingService _biddingService = BiddingService();
+  final AudioPlayer _audioPlayer = AudioPlayer();
+  
+  bool _isLoading = false;
+  double _calculatedCommission = 0.0;
+  double _netToSeller = 0.0;
+  double _currentHighestBid = 0.0;
+  String? _aiNudgeMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    // Base price ya highest bid se shuruat karein
+    _currentHighestBid = (widget.productData['highestBid'] ?? widget.productData['basePrice'] ?? 0.0).toDouble();
+    _bidController.text = (_currentHighestBid + 20).toString(); 
+    
+    _bidController.addListener(_onBidChanged);
+    _onBidChanged(); // Initial calculation
+  }
+
+  void _onBidChanged() {
+    _calculateBreakdown();
+    _updateAiNudge();
+  }
+
+  void _calculateBreakdown() {
+    double amount = double.tryParse(_bidController.text) ?? 0.0;
+    setState(() {
+      _calculatedCommission = amount * 0.01; // 1% Fee
+      _netToSeller = amount - _calculatedCommission;
+    });
+  }
+
+  void _updateAiNudge() {
+    double enteredAmount = double.tryParse(_bidController.text) ?? 0.0;
+    double basePrice = (widget.productData['basePrice'] ?? 0.0).toDouble();
+    
+    setState(() {
+      if (enteredAmount <= _currentHighestBid) {
+        _aiNudgeMessage = "Jeetne ke liye Rs. ${_currentHighestBid + 10} se zyada likhein.";
+      } else if (enteredAmount < basePrice * 1.1) {
+        _aiNudgeMessage = "Mashwara: Ye boli achi hai, par thori aur barhayein.";
+      } else {
+        _aiNudgeMessage = "Zabardast! Is boli par aapke jeetne ke chances zyada hain.";
+      }
+    });
+  }
+
+  void _adjustBid(int delta) {
+    double current = double.tryParse(_bidController.text) ?? _currentHighestBid;
+    setState(() {
+      _bidController.text = (current + delta).toString();
+    });
+  }
+
+  Future<void> _handlePlaceBid() async {
+    try {
+      final listingSnap = await FirebaseFirestore.instance
+          .collection('listings')
+          .doc(widget.docId)
+          .get();
+      if (!mounted) {
+        return;
+      }
+      final listingData = listingSnap.data() ?? <String, dynamic>{};
+      final bool isApproved = listingData['isApproved'] == true;
+      final DateTime? startTime = (listingData['startTime'] is Timestamp)
+          ? (listingData['startTime'] as Timestamp).toDate()
+          : null;
+      final String status = (listingData['status'] ?? '')
+          .toString()
+          .trim()
+          .toLowerCase();
+
+      if (_isDealLocked(status)) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(duration: Duration(seconds: 5), 
+            content: Text('Bidding is locked because this deal is already in progress.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
+      if (!isApproved || startTime == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(duration: Duration(seconds: 5), 
+            content: Text('Waiting for Admin Verification'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
+      double enteredBid = double.tryParse(_bidController.text) ?? 0.0;
+
+      if (enteredBid <= _currentHighestBid) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(duration: Duration(seconds: 5), 
+            content: Text("Boli current highest se zyada honi chahiye!"),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
+      setState(() => _isLoading = true);
+
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) throw Exception("Login zaroori hai.");
+
+      final newBid = BidModel(
+        listingId: widget.docId,
+        sellerId: widget.productData['sellerId'] ?? '',
+        buyerId: user.uid,
+        buyerName: user.displayName ?? "Kharidar",
+        buyerPhone: '',
+        productName: widget.productData['product'] ?? 'Fasal',
+        bidAmount: enteredBid,
+        createdAt: DateTime.now(),
+        status: 'pending',
+      );
+
+      await _biddingService.placeSmartBid(
+        bid: newBid,
+        marketPrice: (widget.productData['basePrice'] ?? 0.0).toDouble(),
+      );
+
+      await _audioPlayer.play(AssetSource('sounds/bid_success.mp3'));
+
+      if (mounted) _showSuccessDialog();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(duration: const Duration(seconds: 5), content: Text(e.toString().replaceAll("Exception: ", "")), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  bool _isDealLocked(String status) {
+    return status == 'awaiting_admin_approval' ||
+        status == 'escrow_confirmed' ||
+        status == 'dispatched' ||
+        status == 'delivered_pending_release' ||
+        status == 'completed';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const goldColor = Color(0xFFFFD700);
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF011A0A),
+      appBar: AppBar(
+        title: Text("${widget.productData['product'] ?? 'Fasal'} ki Boli", style: const TextStyle(color: Colors.white)),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        centerTitle: true,
+      ),
+      body: StreamBuilder<DocumentSnapshot>(
+        stream: _biddingService.getLiveListing(widget.docId),
+        builder: (context, snapshot) {
+          final Map<String, dynamic> liveData =
+              (snapshot.hasData && snapshot.data!.exists)
+                  ? ((snapshot.data!.data() as Map<String, dynamic>?) ?? <String, dynamic>{})
+                  : widget.productData;
+
+          final bool isApproved = liveData['isApproved'] == true;
+          final DateTime? startTime =
+              (liveData['startTime'] is Timestamp) ? (liveData['startTime'] as Timestamp).toDate() : null;
+          final DateTime? endTime =
+              (liveData['endTime'] is Timestamp) ? (liveData['endTime'] as Timestamp).toDate() : null;
+            final String listingStatus = (liveData['status'] ?? '')
+              .toString()
+              .trim()
+              .toLowerCase();
+            final bool isDealLocked = _isDealLocked(listingStatus);
+            final double quantity =
+              (liveData['quantity'] is num)
+              ? (liveData['quantity'] as num).toDouble()
+              : double.tryParse((liveData['quantity'] ?? '').toString()) ?? 0.0;
+            final double enteredBid = double.tryParse(_bidController.text) ?? 0.0;
+            final double totalPrice = quantity > 0 ? (enteredBid * quantity) : enteredBid;
+
+          final dynamic highestRaw = liveData['highestBid'] ?? liveData['basePrice'] ?? 0.0;
+          if (highestRaw is num) {
+            _currentHighestBid = highestRaw.toDouble();
+          }
+
+          return SingleChildScrollView(
+            child: Column(
+              children: [
+                // ⏱️ TIMER SECTION (TOP BARA DISPLAY)
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 20),
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.03),
+                    borderRadius: const BorderRadius.vertical(bottom: Radius.circular(30)),
+                  ),
+                  child: Column(
+                    children: [
+                      if (isApproved && startTime != null && endTime != null) ...[
+                        const Text("BOLI KHATAM HONE MEIN WAQT", 
+                          style: TextStyle(color: Colors.white60, fontSize: 10, letterSpacing: 2, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 12),
+                        Transform.scale(scale: 1.4, child: BidTimer(endTime: endTime)),
+                      ] else ...[
+                        const Text(
+                          'Verification Pending',
+                          style: TextStyle(
+                            color: Colors.orangeAccent,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ]
+                    ],
+                  ),
+                ),
+
+                Padding(
+                  padding: const EdgeInsets.all(20.0),
+                  child: Column(
+                    children: [
+                      // �x` Kisan ka Audio Note
+                      if (widget.productData['audioNoteUrl'] != null)
+                        _buildAudioSection(widget.productData['audioNoteUrl'], goldColor),
+
+                      const SizedBox(height: 20),
+                      _buildLiveBadge(_currentHighestBid),
+
+                      if (quantity > 0) ...[
+                        const SizedBox(height: 10),
+                        _buildTotalPriceBadge(quantity, totalPrice),
+                      ],
+
+                      const SizedBox(height: 25),
+                      
+                      // �S� AI NUDGE MESSAGE
+                      if (!isDealLocked && _aiNudgeMessage != null) _buildAiNudge(),
+
+                      TextField(
+                        controller: _bidController,
+                        readOnly: isDealLocked,
+                        keyboardType: TextInputType.number,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: goldColor, fontSize: 42, fontWeight: FontWeight.bold),
+                        decoration: InputDecoration(
+                          prefixText: "Rs. ",
+                          prefixStyle: const TextStyle(color: goldColor, fontSize: 22),
+                          enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: goldColor.withValues(alpha: 0.3))),
+                          focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: goldColor, width: 2)),
+                        ),
+                      ),
+                      
+                      const SizedBox(height: 20),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          _buildQuickButton(
+                            "+50",
+                            isDealLocked ? null : () => _adjustBid(50),
+                            goldColor,
+                          ),
+                          const SizedBox(width: 15),
+                          _buildQuickButton(
+                            "+100",
+                            isDealLocked ? null : () => _adjustBid(100),
+                            goldColor,
+                          ),
+                          const SizedBox(width: 15),
+                          _buildQuickButton(
+                            "+500",
+                            isDealLocked ? null : () => _adjustBid(500),
+                            goldColor,
+                          ),
+                        ],
+                      ),
+                      
+                      const SizedBox(height: 30),
+                      if (_calculatedCommission > 0) _buildPriceBreakdown(goldColor),
+                      
+                      const SizedBox(height: 40),
+                      if (isDealLocked)
+                        _buildDealLockedBadge()
+                      else if (isApproved && startTime != null)
+                        _buildSubmitButton(goldColor)
+                      else
+                        _buildVerificationPendingBadge(),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  // --- Widgets ---
+
+  Widget _buildAiNudge() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 15),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.blueAccent.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.blueAccent.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.lightbulb, color: Colors.blueAccent, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(_aiNudgeMessage!, 
+              style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLiveBadge(double amount) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.greenAccent.withValues(alpha: 0.5)),
+        borderRadius: BorderRadius.circular(50),
+        color: Colors.greenAccent.withValues(alpha: 0.05),
+      ),
+      child: Column(
+        children: [
+          const Text("AB TAK KI SAB SE BARI BOLI", style: TextStyle(color: Colors.greenAccent, fontSize: 9, fontWeight: FontWeight.bold)),
+          Text("Rs. ${amount.toInt()}", style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAudioSection(String url, Color goldColor) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(15)),
+      child: Row(
+        children: [
+          Icon(Icons.record_voice_over, color: goldColor),
+          const SizedBox(width: 15),
+          const Expanded(child: Text("Kisan ka message sunein", style: TextStyle(color: Colors.white70, fontSize: 13))),
+          IconButton(
+            onPressed: () => _audioPlayer.play(UrlSource(url)),
+            icon: Icon(Icons.play_circle_fill, color: goldColor, size: 35),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPriceBreakdown(Color goldColor) {
+    return Container(
+      padding: const EdgeInsets.all(15),
+      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(15)),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text("Digital Arhat Fee (1%):", style: TextStyle(color: Colors.white70)),
+              Text("- Rs. ${_calculatedCommission.toStringAsFixed(0)}", style: const TextStyle(color: Colors.redAccent)),
+            ],
+          ),
+          const Divider(color: Colors.white10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text("Kisan ko milenge:", style: TextStyle(color: Colors.white70)),
+              Text("Rs. ${_netToSeller.toStringAsFixed(0)}", style: TextStyle(color: goldColor, fontWeight: FontWeight.bold)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTotalPriceBadge(double quantity, double totalPrice) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white24),
+      ),
+      child: Text(
+        'Total Price (${quantity.toStringAsFixed(0)} x unit): Rs. ${totalPrice.toStringAsFixed(0)}',
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w700,
+          fontSize: 13,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildQuickButton(String label, VoidCallback? onTap, Color goldColor) {
+    return ActionChip(
+      label: Text(label, style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+      backgroundColor: goldColor,
+      onPressed: onTap,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+    );
+  }
+
+  Widget _buildSubmitButton(Color goldColor) {
+    return GlassButton(
+      label: 'Bismillah, Boli Confirm Karein',
+      onPressed: _isLoading ? null : _handlePlaceBid,
+      loading: _isLoading,
+      height: 60,
+      radius: 15,
+      textStyle: const TextStyle(
+        color: Colors.white,
+        fontSize: 18,
+        fontWeight: FontWeight.bold,
+      ),
+    );
+  }
+
+  Widget _buildVerificationPendingBadge() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+      decoration: BoxDecoration(
+        color: Colors.orange.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.orangeAccent),
+      ),
+      child: const Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.verified_user, color: Colors.orangeAccent),
+          SizedBox(width: 8),
+          Text(
+            'Waiting for Admin Verification',
+            style: TextStyle(color: Colors.orangeAccent, fontWeight: FontWeight.bold),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDealLockedBadge() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+      decoration: BoxDecoration(
+        color: Colors.orange.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.orangeAccent),
+      ),
+      child: const Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.lock_outline, color: Colors.orangeAccent),
+          SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Bidding locked: deal is already in progress.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.orangeAccent, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showSuccessDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF012A10),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text("Mubarak!", style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
+        content: const Text("Aapki boli lag chuki hai. Allah barkat dalay.", style: TextStyle(color: Colors.white70)),
+        actions: [
+          Center(
+            child: ElevatedButton(
+              onPressed: () { Navigator.pop(ctx); Navigator.pop(context); },
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+              child: const Text("Ameen", style: TextStyle(color: Colors.white)),
+            ),
+          )
+        ],
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _bidController.removeListener(_onBidChanged);
+    _bidController.dispose();
+    _audioPlayer.dispose();
+    super.dispose();
+  }
+}

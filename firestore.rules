@@ -1,0 +1,95 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdminUid() {
+      return isSignedIn() &&
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          (
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.userRole == 'admin' ||
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.userType == 'admin' ||
+            request.auth.token.admin == true
+          );
+    }
+
+    function immutableField(fieldName) {
+      return !(fieldName in resource.data) ||
+          ((fieldName in request.resource.data) &&
+           request.resource.data[fieldName] == resource.data[fieldName]);
+    }
+
+    function listingStatusPaymentConfirmGuard() {
+      return !(resource.data.listingStatus != 'payment_confirmed' &&
+               request.resource.data.listingStatus == 'payment_confirmed') ||
+          isAdminUid();
+    }
+
+    function receiptUrlImmutable() {
+      return immutableField('receiptUrl') &&
+          immutableField('paymentReceiptUrl') &&
+          immutableField('paymentScreenshotUrl');
+    }
+
+    function isDealChatActive(dealId) {
+      return (dealId is string) &&
+          dealId.size() > 0 &&
+          exists(/databases/$(database)/documents/deals/$(dealId)) &&
+          get(/databases/$(database)/documents/deals/$(dealId)).data.isChatActive == true;
+    }
+
+    function isListingChatActive(listingId) {
+      return (listingId is string) &&
+          listingId.size() > 0 &&
+          exists(/databases/$(database)/documents/listings/$(listingId)) &&
+          get(/databases/$(database)/documents/listings/$(listingId)).data.isChatActive == true;
+    }
+
+    function isChatRootActive(chatId) {
+      return exists(/databases/$(database)/documents/Chats/$(chatId)) &&
+          (
+            get(/databases/$(database)/documents/Chats/$(chatId)).data.isChatActive == true ||
+            isDealChatActive(get(/databases/$(database)/documents/Chats/$(chatId)).data.dealId) ||
+            isListingChatActive(get(/databases/$(database)/documents/Chats/$(chatId)).data.listingId)
+          );
+    }
+
+    match /listings/{listingId} {
+      allow read: if true;
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && listingStatusPaymentConfirmGuard() && receiptUrlImmutable();
+      allow delete: if isAdminUid();
+    }
+
+    match /deals/{dealId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if isAdminUid();
+
+      match /messages/{messageId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() && isDealChatActive(dealId);
+        allow update, delete: if false;
+      }
+    }
+
+    match /Chats/{chatId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if isAdminUid();
+
+      match /messages/{messageId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() && isChatRootActive(chatId);
+        allow update, delete: if false;
+      }
+    }
+
+    match /{document=**} {
+      allow read, write: if isSignedIn();
+    }
+  }
+}
