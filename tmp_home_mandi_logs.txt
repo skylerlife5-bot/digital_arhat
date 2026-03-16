@@ -1,0 +1,36 @@
+I/flutter (25603): [HomeMandi] StageB-nearestCity:Kasur field=city value=Kasur e
+I/flutter (25603): [HomeMandi] StageB-nearestCity:Kasur field=city value=قصور er
+I/flutter (25603): [HomeMandi] StageB-nearestCity:Kasur field=city value=kasur e
+I/flutter (25603): [HomeMandi] StageB-nearestCity:Kasur field=mandiName value=Ka
+I/flutter (25603): [HomeMandi] StageB-nearestCity:Kasur field=mandiName value=قص
+I/flutter (25603): [HomeMandi] StageB-nearestCity:Kasur field=mandiName value=ka
+I/flutter (25603): [HomeMandi] StageB-nearestCity:Kasur field=marketName value=K
+I/flutter (25603): [HomeMandi] StageB-nearestCity:Kasur field=marketName value=ق
+I/flutter (25603): [HomeMandi] StageB-nearestCity:Kasur field=marketName value=k
+I/flutter (25603): [HomeMandi] StageB-nearestCity:Kasur field=market value=Kasur
+I/flutter (25603): [HomeMandi] StageB-nearestCity:Kasur field=market value=قصور 
+I/flutter (25603): [HomeMandi] StageB-nearestCity:Kasur field=market value=kasur
+I/flutter (25603): [HomeMandi] StageB-nearestCity:Faisalabad querying fields=cit
+I/flutter (25603): [HomeMandi] StageB-nearestCity:Faisalabad field=city value=Fa
+I/flutter (25603): [HomeMandi] StageB-nearestCity:Faisalabad field=city value=فی
+I/flutter (25603): [HomeMandi] StageB-nearestCity:Faisalabad field=city value=fa
+I/flutter (25603): [HomeMandi] StageB-nearestCity:Faisalabad field=mandiName val
+I/flutter (25603): [HomeMandi] StageB-nearestCity:Faisalabad field=mandiName val
+I/flutter (25603): [HomeMandi] StageB-nearestCity:Faisalabad field=mandiName val
+I/flutter (25603): [HomeMandi] StageB-nearestCity:Faisalabad field=marketName va
+I/flutter (25603): [HomeMandi] StageB-nearestCity:Faisalabad field=marketName va
+I/flutter (25603): [HomeMandi] StageB-nearestCity:Faisalabad field=marketName va
+I/flutter (25603): [HomeMandi] StageB-nearestCity:Faisalabad field=market value=
+I/flutter (25603): [HomeMandi] StageB-nearestCity:Faisalabad field=market value=
+I/flutter (25603): [HomeMandi] StageB-nearestCity:Faisalabad field=market value=
+I/flutter (25603): [HomeMandi] StageB-nearestCity:Islamabad querying fields=city
+I/flutter (25603): [HomeMandi] StageB-nearestCity:Islamabad field=city value=Isl
+I/flutter (25603): [HomeMandi] StageB-nearestCity:Islamabad field=city value=اسل
+I/flutter (25603): [HomeMandi] StageB-nearestCity:Islamabad field=city value=isl
+I/flutter (25603): [HomeMandi] StageB-nearestCity:Islamabad field=mandiName valu
+I/flutter (25603): [HomeMandi] StageB-nearestCity:Islamabad field=mandiName valu
+I/flutter (25603): [HomeMandi] StageB-nearestCity:Islamabad field=mandiName valu
+I/flutter (25603): [HomeMandi] StageB-nearestCity:Islamabad field=marketName val
+I/flutter (25603): [HomeMandi] StageB-nearestCity:Islamabad field=marketName val
+I/flutter (25603): [HomeMandi] StageB-nearestCity:Islamabad field=marketName val
+I/flutter (25603): [HomeMandi] StageB-nearestCity:Islamabad field=market value=I

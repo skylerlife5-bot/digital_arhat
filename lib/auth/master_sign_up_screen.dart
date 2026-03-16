@@ -1527,7 +1527,7 @@ class _MasterSignUpScreenState extends State<MasterSignUpScreen>
                                 onTap: () => Navigator.of(context).pop(item),
                               );
                             },
-                            separatorBuilder: (_, __) => const SizedBox(height: 8),
+                            separatorBuilder: (_, _) => const SizedBox(height: 8),
                             itemCount: filtered.length,
                           ),
                   ),

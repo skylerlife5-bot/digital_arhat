@@ -1,0 +1,52 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(sellerId) {
+      return isSignedIn() && request.auth.uid == sellerId;
+    }
+
+    function forbiddenServerFieldsChanged() {
+      return (
+        request.resource.data.riskScore != resource.data.riskScore ||
+        request.resource.data.fraudFlags != resource.data.fraudFlags ||
+        request.resource.data.status != resource.data.status ||
+        request.resource.data.imageHashes != resource.data.imageHashes
+      );
+    }
+
+    match /listings/{listingId} {
+      allow create: if isSignedIn()
+        && request.resource.data.sellerId == request.auth.uid
+        && !('riskScore' in request.resource.data)
+        && !('fraudFlags' in request.resource.data)
+        && !('status' in request.resource.data)
+        && !('imageHashes' in request.resource.data);
+
+      allow update: if isOwner(resource.data.sellerId)
+        && !forbiddenServerFieldsChanged();
+
+      allow read: if true;
+      allow delete: if isOwner(resource.data.sellerId);
+    }
+
+    match /moderationQueue/{listingId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow update: if isOwner(userId)
+        && request.resource.data.lastListingAt == resource.data.lastListingAt
+        && request.resource.data.listingsToday == resource.data.listingsToday
+        && request.resource.data.trustScore == resource.data.trustScore
+        && request.resource.data.strikes == resource.data.strikes
+        && request.resource.data.isBanned == resource.data.isBanned;
+      allow create: if isOwner(userId);
+    }
+  }
+}

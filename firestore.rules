@@ -16,6 +16,36 @@ service cloud.firestore {
           );
     }
 
+    function isListingOwner(listingId) {
+      return isSignedIn() &&
+          exists(/databases/$(database)/documents/listings/$(listingId)) &&
+          get(/databases/$(database)/documents/listings/$(listingId)).data.sellerId == request.auth.uid;
+    }
+
+    function protectsListingAiFields() {
+      return immutableField('aiRiskScore') &&
+          immutableField('riskFlags') &&
+          immutableField('riskSummary') &&
+          immutableField('riskScore') &&
+          immutableField('heuristicRiskScore') &&
+          immutableField('aiReasons') &&
+          immutableField('aiReasonsUrdu') &&
+          immutableField('aiFlags') &&
+          immutableField('aiSuggestedAction') &&
+          immutableField('aiConfidence') &&
+          immutableField('aiUpdatedAt');
+    }
+
+    function protectsBidAiFields() {
+      return immutableField('aiBidRiskScore') &&
+          immutableField('aiBidRiskLevel') &&
+          immutableField('aiBidAdvice') &&
+          immutableField('aiBidAdviceUrdu') &&
+          immutableField('aiBidAdviceEn') &&
+          immutableField('aiBidFlags') &&
+          immutableField('aiBidUpdatedAt');
+    }
+
     function immutableField(fieldName) {
       return !(fieldName in resource.data) ||
           ((fieldName in request.resource.data) &&
@@ -32,6 +62,52 @@ service cloud.firestore {
       return immutableField('receiptUrl') &&
           immutableField('paymentReceiptUrl') &&
           immutableField('paymentScreenshotUrl');
+    }
+
+    function isBuyerExpiryStampUpdate() {
+      return isSignedIn() &&
+          request.resource.data.diff(resource.data).changedKeys().hasOnly([
+            'status',
+            'expiredAt',
+            'expiryUpdatedByClient'
+          ]) &&
+          request.resource.data.status == 'expired' &&
+          request.resource.data.expiryUpdatedByClient == true &&
+          (resource.data.createdAt is timestamp) &&
+          request.time >= resource.data.createdAt + duration.value(24, 'h');
+    }
+
+    function isBuyerBidListingUpdate() {
+      return isSignedIn() &&
+          request.resource.data.diff(resource.data).changedKeys().hasOnly([
+            'highestBid',
+            'highestBidAt',
+            'highestBidStatus',
+            'lastBidderName',
+            'lastBidderId',
+            'lastBidderToken',
+            'bid_count',
+            'totalBids',
+            'updatedAt'
+          ]) &&
+          request.resource.data.lastBidderId == request.auth.uid &&
+          request.resource.data.highestBid is number &&
+          request.resource.data.highestBidAt is timestamp &&
+          request.resource.data.updatedAt is timestamp &&
+          request.resource.data.highestBidStatus is string &&
+          request.resource.data.lastBidderName is string &&
+          request.resource.data.bid_count is number &&
+          request.resource.data.totalBids is number &&
+          (
+            !('highestBid' in resource.data) ||
+            !(resource.data.highestBid is number) ||
+            request.resource.data.highestBid > resource.data.highestBid ||
+            (
+              ('lastBidderId' in resource.data) &&
+              request.resource.data.highestBid == resource.data.highestBid &&
+              resource.data.lastBidderId == request.auth.uid
+            )
+          );
     }
 
     function isDealChatActive(dealId) {
@@ -59,9 +135,97 @@ service cloud.firestore {
 
     match /listings/{listingId} {
       allow read: if true;
-      allow create: if isSignedIn();
-      allow update: if isSignedIn() && listingStatusPaymentConfirmGuard() && receiptUrlImmutable();
+      allow create: if isSignedIn() &&
+          (
+            !('sellerId' in request.resource.data) ||
+            request.resource.data.sellerId == request.auth.uid
+          );
+      allow update: if isSignedIn() &&
+          (
+            isBuyerExpiryStampUpdate() ||
+            isBuyerBidListingUpdate() ||
+            (
+              listingStatusPaymentConfirmGuard() &&
+              receiptUrlImmutable() &&
+              (
+                isAdminUid() ||
+                (
+                  resource.data.sellerId == request.auth.uid &&
+                  protectsListingAiFields()
+                )
+              )
+            )
+          );
       allow delete: if isAdminUid();
+
+      match /bids/{bidId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() &&
+            request.resource.data.listingId == listingId &&
+            request.resource.data.buyerId == request.auth.uid &&
+            request.resource.data.bidAmount is number &&
+            request.resource.data.bidAmount > 0;
+        allow update: if isSignedIn() &&
+            (
+              isAdminUid() ||
+              request.auth.uid == resource.data.buyerId ||
+              isListingOwner(listingId)
+            ) &&
+            protectsBidAiFields();
+        allow delete: if isAdminUid();
+      }
+    }
+
+    match /bids/{bidId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() &&
+          request.resource.data.buyerId == request.auth.uid;
+      allow update: if isSignedIn() &&
+          (isAdminUid() || request.auth.uid == resource.data.buyerId) &&
+          protectsBidAiFields();
+      allow delete: if isAdminUid();
+    }
+
+    match /admin_alerts/{alertId} {
+      allow read: if isAdminUid();
+      allow create: if isSignedIn();
+      allow update, delete: if isAdminUid();
+    }
+
+    match /market_rates/{rateId} {
+      allow read: if isSignedIn();
+      allow write: if isAdminUid();
+    }
+
+    match /marketRates/{rateId} {
+      allow read: if isSignedIn();
+      allow write: if isAdminUid();
+    }
+
+    match /mandi_rates/{rateId} {
+      allow read: if true;
+      allow write: if isAdminUid();
+    }
+
+    match /pakistan_mandi_rates/{rateId} {
+      allow read: if true;
+      allow write: if isAdminUid();
+    }
+
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && userId == request.auth.uid;
+      allow update: if isSignedIn() &&
+          (
+            userId == request.auth.uid ||
+            isAdminUid()
+          );
+      allow delete: if isAdminUid();
+
+      match /watchlist/{listingId} {
+        allow read: if isSignedIn() && userId == request.auth.uid;
+        allow create, update, delete: if isSignedIn() && userId == request.auth.uid;
+      }
     }
 
     match /deals/{dealId} {
@@ -88,8 +252,52 @@ service cloud.firestore {
       }
     }
 
+    match /notifications/{notificationId} {
+      allow read: if isSignedIn() &&
+          (
+            isAdminUid() ||
+            resource.data.toUid == request.auth.uid ||
+            resource.data.userId == request.auth.uid
+          );
+
+      allow create: if isSignedIn() &&
+          request.resource.data.toUid is string &&
+          request.resource.data.toUid.size() > 0 &&
+          request.resource.data.userId == request.resource.data.toUid &&
+          request.resource.data.type is string &&
+          request.resource.data.type in [
+            'LISTING_APPROVED',
+            'NEW_BID_RECEIVED',
+            'BID_PLACED_CONFIRMATION',
+            'OUTBID',
+            'BID_ACCEPTED_CONFIRMATION',
+            'BID_ACCEPTED',
+            'AUCTION_ENDING_SOON',
+            'NEW_RELEVANT_LISTING'
+          ] &&
+          request.resource.data.listingId is string &&
+          request.resource.data.listingId.size() > 0 &&
+          request.resource.data.entityId == request.resource.data.listingId &&
+          request.resource.data.phase == 'PHASE_1' &&
+          request.resource.data.isRead == false &&
+          request.resource.data.tapAction == 'OPEN_LISTING_DETAILS' &&
+          request.resource.data.routeName == '/listing-details';
+
+      allow update: if isSignedIn() &&
+          (
+            isAdminUid() ||
+            resource.data.toUid == request.auth.uid
+          ) &&
+          request.resource.data.diff(resource.data).changedKeys().hasOnly([
+            'isRead'
+          ]);
+
+      allow delete: if isAdminUid();
+    }
+
     match /{document=**} {
-      allow read, write: if isSignedIn();
+      allow read: if isSignedIn();
+      allow write: if false;
     }
   }
 }

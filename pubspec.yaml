@@ -9,7 +9,6 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-
   cupertino_icons: 1.0.8
 
   # 🔥 Firebase Core & Services
@@ -20,25 +19,25 @@ dependencies:
   firebase_remote_config: ^6.1.4
   firebase_storage: ^13.0.6
   firebase_messaging: ^16.1.1
-  flutter_local_notifications: 20.1.0
+  flutter_local_notifications: ^21.0.0
 
-  fl_chart: 1.1.1
+  fl_chart: ^1.2.0
 
   # 🏗️ State Management
   provider: ^6.1.5+1
 
-  # 📸 Multimedia & Audio (Optimized)
+  # 📸 Multimedia & Audio
   image_picker: ^1.2.1
   flutter_image_compress: 2.4.0
   camera: ^0.12.0
   video_player: ^2.8.1
   video_compress: 3.1.4
-  record: 6.2.0                    # ✅ Locked for stability
-  audioplayers: 6.5.1 
-  path_provider: ^2.1.5 
+  record: 6.2.0
+  audioplayers: ^6.6.0
+  path_provider: ^2.1.5
   image: ^4.8.0
-  timezone: ^0.9.0
-  local_auth: ^2.3.0
+  timezone: ^0.11.0
+  local_auth: ^3.0.1
 
   # 🌐 HTTP & API
   http: ^1.6.0
@@ -60,19 +59,20 @@ dependencies:
   flutter_svg: ^2.2.3
   marquee: 2.3.0
   cached_network_image: 3.4.1
+  shared_preferences: ^2.5.3
   intl: 0.20.2
   package_info_plus: 9.0.0
   app_links: 7.0.0
 
   # 🤖 Google AI & ML Kit
   google_generative_ai: ^0.4.7
-  google_mlkit_face_detection: 0.13.2 
+  google_mlkit_face_detection: 0.13.2
   google_mlkit_text_recognition: 0.15.1
   google_mlkit_commons: 0.11.1
 
-  # 🏁 QR & Delivery Verification (Added Correctly Here)
-  qr_flutter: 4.1.0               # ✅ Kisan ke liye QR Generation
-  mobile_scanner: 7.2.0           # ✅ Buyer ke liye QR Scanning
+  # 🏁 QR & Delivery Verification
+  qr_flutter: 4.1.0
+  mobile_scanner: 7.2.0
 
 dev_dependencies:
   flutter_test:
@@ -85,14 +85,19 @@ flutter:
 
   assets:
     - assets/logo.png
+    - assets/images/
     - assets/images/logo.png
     - assets/images/circuit_pattern.png
     - assets/images/no_stock.svg
     - assets/lottie/sun.json
     - assets/lottie/rain.json
     - assets/lottie/cloudy.json
+    - assets/data/pakistan_locations.json
 
   fonts:
+    - family: JameelNoori
+      fonts:
+        - asset: assets/fonts/jameel_noori_nastaleeq.ttf
     - family: Jameel Noori
       fonts:
         - asset: assets/fonts/jameel_noori_nastaleeq.ttf
@@ -104,10 +109,3 @@ flutter_launcher_icons:
   adaptive_icon_foreground: assets/logo.png
   adaptive_icon_background: "#002810"
   remove_alpha_ios: true
-
-dependency_overrides:
-  test_api: 0.7.7
-  timezone: 0.9.4
-  video_player: 2.8.1
-  meta: ^1.18.1
-  material_color_utilities: ^0.13.0

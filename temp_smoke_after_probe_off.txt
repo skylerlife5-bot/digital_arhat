@@ -1,0 +1,11 @@
+--------- beginning of main
+03-16 00:25:54.178   656   656 I flutter : [MANDI_RENDER] finalSnapshotCandidates=7 finalSnapshotRendered=4
+03-16 00:25:54.950   656   656 E flutter : [ERROR:flutter/runtime/dart_vm_initializer.cc(40)] Unhandled Exception: [cloud_firestore/permission-denied] The caller does not have permission to execute the specified operation.
+03-16 00:25:54.950   656   656 E flutter : #0      FirebaseFirestoreHostApi.documentReferenceSet (package:cloud_firestore_platform_interface/src/pigeon/messages.pigeon.dart:1032:7)
+03-16 00:25:54.950   656   656 E flutter : <asynchronous suspension>
+03-16 00:25:54.950   656   656 E flutter : #1      MethodChannelDocumentReference.set (package:cloud_firestore_platform_interface/src/method_channel/method_channel_document_reference.dart:35:7)
+03-16 00:25:54.950   656   656 E flutter : <asynchronous suspension>
+03-16 00:25:54.950   656   656 E flutter : #2      BuyerEngagementService.recordRecentView (package:digital_arhat/services/buyer_engagement_service.dart:157:5)
+03-16 00:25:54.950   656   656 E flutter : <asynchronous suspension>
+03-16 00:25:54.950   656   656 E flutter : 
+03-16 00:25:54.974   656   656 I flutter : [MANDI_RENDER] finalSnapshotCandidates=7 finalSnapshotRendered=4

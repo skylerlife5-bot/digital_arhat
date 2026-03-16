@@ -1,0 +1,157 @@
+diff --git a/firestore.rules b/firestore.rules
+--- a/firestore.rules
++++ b/firestore.rules
+@@
+     function receiptUrlImmutable() {
+       return immutableField('receiptUrl') &&
+           immutableField('paymentReceiptUrl') &&
+           immutableField('paymentScreenshotUrl');
+     }
++
++    match /users/{userId} {
++      allow read: if isSignedIn();
++      allow create: if isSignedIn() && userId == request.auth.uid;
++      allow update: if isSignedIn() &&
++          (
++            userId == request.auth.uid ||
++            isAdminUid()
++          );
++      allow delete: if isAdminUid();
++
++      match /watchlist/{listingId} {
++        allow read: if isSignedIn() && userId == request.auth.uid;
++        allow create, update, delete: if isSignedIn() && userId == request.auth.uid;
++      }
++    }
+@@
+ diff --git a/functions/src/index.ts b/functions/src/index.ts
+--- a/functions/src/index.ts
++++ b/functions/src/index.ts
+@@
+ export const evaluateBidRiskHttp = onRequest({region: "asia-south1"}, async (req, res) => {
+@@
+ });
++
++async function applyWatchersDelta({
++  listingId,
++  uid,
++  delta,
++  eventId,
++}: {
++  listingId: string;
++  uid: string;
++  delta: 1 | -1;
++  eventId: string;
++}): Promise<void> {
++  const normalizedListingId = (listingId || "").trim();
++  const normalizedUid = (uid || "").trim();
++  if (!normalizedListingId || !normalizedUid || !eventId.trim()) return;
++
++  const markerRef = db.collection("_functionEvents").doc(`watchers_${eventId}`);
++  const listingRef = db.collection("listings").doc(normalizedListingId);
++  const watchRef = db
++    .collection("users")
++    .doc(normalizedUid)
++    .collection("watchlist")
++    .doc(normalizedListingId);
++
++  await db.runTransaction(async (tx) => {
++    const markerSnap = await tx.get(markerRef);
++    if (markerSnap.exists) {
++      return;
++    }
++
++    const listingSnap = await tx.get(listingRef);
++    if (!listingSnap.exists) {
++      tx.set(markerRef, {
++        kind: "watchers_delta",
++        listingId: normalizedListingId,
++        uid: normalizedUid,
++        delta,
++        applied: false,
++        reason: "listing_not_found",
++        createdAt: FieldValue.serverTimestamp(),
++      });
++      return;
++    }
++
++    const listing = listingSnap.data() as Record<string, unknown>;
++    const saleType = String(listing.saleType || "").trim().toLowerCase();
++    if (saleType !== "auction") {
++      tx.set(markerRef, {
++        kind: "watchers_delta",
++        listingId: normalizedListingId,
++        uid: normalizedUid,
++        delta,
++        applied: false,
++        reason: "non_auction_listing",
++        createdAt: FieldValue.serverTimestamp(),
++      });
++      return;
++    }
++
++    const sellerId = String(listing.sellerId || "").trim();
++    if (sellerId && sellerId === normalizedUid) {
++      tx.delete(watchRef);
++      tx.set(markerRef, {
++        kind: "watchers_delta",
++        listingId: normalizedListingId,
++        uid: normalizedUid,
++        delta,
++        applied: false,
++        reason: "seller_cannot_watch_own_listing",
++        createdAt: FieldValue.serverTimestamp(),
++      });
++      return;
++    }
++
++    const current = toNumber(listing.watchersCount, 0);
++    const next = Math.max(0, current + delta);
++
++    tx.set(
++      listingRef,
++      {
++        watchersCount: next,
++        updatedAt: FieldValue.serverTimestamp(),
++      },
++      {merge: true},
++    );
++    tx.set(markerRef, {
++      kind: "watchers_delta",
++      listingId: normalizedListingId,
++      uid: normalizedUid,
++      delta,
++      applied: true,
++      nextCount: next,
++      createdAt: FieldValue.serverTimestamp(),
++    });
++  });
++}
++
++export const onWatchlistCreated = onDocumentCreated(
++  {document: "users/{uid}/watchlist/{listingId}", region: "asia-south1"},
++  async (event) => {
++    const uid = String(event.params.uid || "").trim();
++    const listingId = String(event.params.listingId || "").trim();
++    await applyWatchersDelta({
++      listingId,
++      uid,
++      delta: 1,
++      eventId: event.id,
++    });
++  },
++);
++
++export const onWatchlistDeleted = onDocumentDeleted(
++  {document: "users/{uid}/watchlist/{listingId}", region: "asia-south1"},
++  async (event) => {
++    const uid = String(event.params.uid || "").trim();
++    const listingId = String(event.params.listingId || "").trim();
++    await applyWatchersDelta({
++      listingId,
++      uid,
++      delta: -1,
++      eventId: event.id,
++    });
++  },
++);

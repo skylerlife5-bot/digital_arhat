@@ -1,0 +1,1822 @@
+﻿
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+<meta name="keywords" content="Agriculture Commodity Daily Prices in Punjab Pakistan, Grains,Vegetables,Fruit Prices,rice,wheat,sugarcane,cotton,potato,tomato,ginger,garlic,groundnut,white grain, black grain,mash,moong, masoor puls,mango,apple,grapes,banana" />
+<meta name="copyright" content="www.amis.pk" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+<head id="ctl00_theHead"><link rel="stylesheet" href="css/w3.css" type="text/css" /><link href="css/StyleSheet.css" rel="stylesheet" type="text/css" />
+
+<script type="text/javascript" src="js/global.js"></script>
+
+<script>
+  (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+  m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+  ga('create', 'UA-66071340-1', 'auto');
+  ga('send', 'pageview');
+
+</script>
+     <script type="text/javascript">
+         function price_addelement() {
+
+             var eleprice = document.getElementById("Prices");
+
+
+             if (eleprice.style.display == "block") {
+                 eleprice.style.display = "none";
+
+             } else {
+                 if (document.getElementById("pub1").style.display == "block" || document.getElementById("stakeholder").style.display == "block" || document.getElementById("import").style.display == "block") {
+                     document.getElementById("pub1").style.display = "none";
+                     document.getElementById("stakeholder").style.display = "none";
+                     document.getElementById("import").style.display = "none";
+                     // document.getElementById("contacts").style.display = "none"
+                 }
+                 eleprice.style.display = "block";
+
+             }
+             //alert(myUL);
+         }
+
+         function pub() {
+
+
+
+             var i;
+             var ele = document.getElementById("pub1");
+
+
+             if (ele.style.display == "block") {
+                 ele.style.display = "none";
+             } else {
+                 if (document.getElementById("Prices").style.display == "block" || document.getElementById("stakeholder").style.display == "block" || document.getElementById("import").style.display == "block") {
+                     document.getElementById("Prices").style.display = "none";
+                     document.getElementById("stakeholder").style.display = "none";
+                     document.getElementById("import").style.display = "none";
+                     //   document.getElementById("contacts").style.display = "none"
+                 }
+
+                 ele.style.display = "block";
+             }
+
+
+
+         }
+
+         function stake() {
+
+
+
+
+             var stakeele = document.getElementById("stakeholder");
+
+
+             if (stakeele.style.display == "block") {
+                 stakeele.style.display = "none";
+             } else {
+
+                 if (document.getElementById("Prices").style.display == "block" || document.getElementById("pub1").style.display == "block" || document.getElementById("import").style.display == "block") {
+                     document.getElementById("Prices").style.display = "none";
+                     document.getElementById("pub1").style.display = "none";
+                     document.getElementById("import").style.display = "none";
+                     //document.getElementById("contacts").style.display = "none"
+                 }
+                 stakeele.style.display = "block";
+             }
+
+
+
+         }
+
+            function stat() {
+    
+    
+    
+    
+                var contactele = document.getElementById("stats");
+    
+    
+                if (contactele.style.display == "block") {
+                    contactele.style.display = "none";
+                } else {
+                
+                            if (document.getElementById("Prices").style.display == "block" || document.getElementById("pub1").style.display == "block" || document.getElementById("import").style.display == "block" || document.getElementById("stakeholder").style.display == "block") {
+                    document.getElementById("Prices").style.display = "none";
+                    document.getElementById("pub1").style.display = "none";
+                    document.getElementById("import").style.display = "none";
+                    document.getElementById("stakeholder").style.display = "none"
+                }
+                    contactele.style.display = "block";
+                }
+    
+    
+    
+            }
+         function importe() {
+
+
+
+
+             var contactele = document.getElementById("import");
+
+
+             if (contactele.style.display == "block") {
+                 contactele.style.display = "none";
+             } else {
+                 if (document.getElementById("Prices").style.display == "block" || document.getElementById("pub1").style.display == "block" ) {
+                     document.getElementById("Prices").style.display = "none";
+                     document.getElementById("pub1").style.display = "none";
+                     document.getElementById("contacts").style.display = "none";
+                     //document.getElementById("stakeholder").style.display = "none"
+                 }
+                 contactele.style.display = "block";
+             }
+
+
+
+         }
+        </script>
+     <style>
+* {
+  box-sizing: border-box;
+}
+
+.row::after {
+  content: "";
+  clear: both;
+  display: table;
+}
+
+[class*="col-"] {
+  float: left;
+  padding: 05px;
+}
+
+html {
+  font-family: "Lucida Sans", sans-serif;
+}
+
+.header {
+  background-color: #9933cc;
+  color: #ffffff;
+  padding: 05px;
+}
+
+.menu ul {
+  list-style-type: none;
+  margin: 0;
+  padding: 0;
+}
+
+
+
+.aside {
+  background-color: #33b5e5;
+  padding: 05px;
+  color: #ffffff;
+  text-align: center;
+  font-size: 14px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
+}
+
+.footer {
+  background-color: #0099cc;
+  color: #ffffff;
+  text-align: center;
+  font-size: 12px;
+  padding: 00px;
+}
+
+/* For mobile phones: */
+[class*="col-"] {
+  width: 100%;
+}
+
+@media only screen and (min-width: 550px) {
+  /* For tablets: */
+  .col-s-1 {width: 8.33%;}
+  .col-s-2 {width: 16.66%;}
+  .col-s-3 {width: 25%;}
+  .col-s-4 {width: 33.33%;}
+  .col-s-5 {width: 41.66%;}
+  .col-s-6 {width: 50%;}
+  .col-s-7 {width: 58.33%;}
+  .col-s-8 {width: 66.66%;}
+  .col-s-9 {width: 75%;}
+  .col-s-10 {width: 83.33%;}
+  .col-s-11 {width: 91.66%;}
+  .col-s-12 {width: 100%;}
+}
+@media only screen and (min-width: 800px) {
+  /* For desktop: */
+  .col-1 {width: 8.33%;}
+  .col-2 {width: 16.66%;}
+  .col-3 {width: 25%;}
+  .col-4 {width: 33.33%;}
+  .col-5 {width: 41.66%;}
+  .col-6 {width: 50%;}
+  .col-7 {width: 58.33%;}
+  .col-8 {width: 66.66%;}
+  .col-9 {width: 75%;}
+  .col-10 {width: 83.33%;}
+  .col-11 {width: 91.66%;}
+  .col-12 {width: 100%;}
+}
+</style>
+
+<title>
+	Browse Prices
+</title></head>
+<BODY id =home>
+
+<SCRIPT language=javascript 
+src="AJAX/CommunityBar.ashx" 
+type=text/javascript>
+</SCRIPT>
+
+
+
+<form name="aspnetForm" method="post" action="./BrowsePrices.aspx?searchType=0" id="aspnetForm">
+<div>
+<input type="hidden" name="__VIEWSTATE" id="__VIEWSTATE" value="/wEPDwUKMTcyMTAzNTQwNA9kFgJmD2QWAgIDD2QWBAIQD2QWAgIBDzwrAAkBAA8WBB4IRGF0YUtleXMWAB4LXyFJdGVtQ291bnQChAFkFogCAgEPZBYCZg8VAUc8QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTQxJz5BcHBsZSAoQW1tcmUpPC9BPmQCAg9kFgJmDxUBSDxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9ODInPkFwcGxlIChHYXRjaGEpPC9BPmQCAw9kFgJmDxUBSDxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9NDAnPkFwcGxlIChHb2xkZW4pPC9BPmQCBA9kFgJmDxUBUzxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9NzcnPkFwcGxlIEthbGEgS3VsbHUgKE1hZGFuaSk8L0E+ZAIFD2QWAmYPFQFTPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD0zOSc+QXBwbGUgS2FsYSBLdWxsdSAoUGFoYXJpKTwvQT5kAgYPZBYCZg8VAUc8QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTk0Jz5BcHJpY290IFdoaXRlPC9BPmQCBw9kFgJmDxUBSDxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9OTMnPkFwcmljb3QgWWVsbG93PC9BPmQCCA9kFgJmDxUBRzxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9NDInPkJhbmFuYShET1pFTik8L0E+ZAIJD2QWAmYPFQFAPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD01MCc+QmFub2xhPC9BPmQCCg9kFgJmDxUBRTxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9NTEnPkJhbm9sYSBDYWtlPC9BPmQCCw9kFgJmDxUBRzxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9MTM4Jz5CYXJsZXko2KzZiCk8L0E+ZAIMD2QWAmYPFQFAPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD0xMzAnPkJhdGhvPC9BPmQCDQ9kFgJmDxUBUzxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9MzEnPkJpdHRlciBHb3VyZCAo2qnYsduM2YTYpyk8L0E+ZAIOD2QWAmYPFQFQPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD0xMDInPkJvdHRsZSBHb3VyZCAo2qnYr9mIKTwvQT5kAg8PZBYCZg8VAUE8QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTI4Jz5CcmluamFsPC9BPmQCEA9kFgJmDxUBTjxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9MTI3Jz5Ccm93biBTdWdhcijYtNqp2LEpPC9BPmQCEQ9kFgJmDxUBQTxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9NjQnPkNhYmJhZ2U8L0E+ZAISD2QWAmYPFQFBPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD0xMTcnPkNhbm9sYTwvQT5kAhMPZBYCZg8VAVQ8QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTg1Jz5DYXBzaWN1bSAo2LTZhdmE24Eg2YXYsdqGKTwvQT5kAhQPZBYCZg8VAUA8QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTM4Jz5DYXJyb3Q8L0E+ZAIVD2QWAmYPFQFHPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD0xMDknPkNhcnJvdCBDaGluYTwvQT5kAhYPZBYCZg8VAUU8QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTM0Jz5DYXVsaWZsb3dlcjwvQT5kAhcPZBYCZg8VAUw8QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTEwNyc+Q29jb3lhbSjYp9ix2YjbjCk8L0E+ZAIYD2QWAmYPFQFCPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD0xMjAnPkNvY3VudXQ8L0E+ZAIZD2QWAmYPFQFRPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD0xMTQnPkNvcmlhbmRlciAo2K/avtmG24zYpyk8L0E+ZAIaD2QWAmYPFQFLPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD03NCc+Q3VjdW1iZXIgKEtoZWVyYSk8L0E+ZAIbD2QWAmYPFQFHPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD04MSc+RGF0ZXMgKEFzZWVsKTwvQT5kAhwPZBYCZg8VAUc8QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTE0MSc+RGF0ZXMoSXJhbmkpPC9BPmQCHQ9kFgJmDxUBUDxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9MTA1Jz5GZW51Z3JlZWso2YXbjNiq2r7bjCk8L0E+ZAIeD2QWAmYPFQFcPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD0xMjgnPmZldXRyYWwgZWFybHkoMTAwIFBjcykg2YHYsdmI2bnYsTwvQT5kAh8PZBYCZg8VAUg8QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTI0Jz5HYXJsaWMgKENoaW5hKTwvQT5kAiAPZBYCZg8VAUg8QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTczJz5HYXJsaWMgKExvY2FsKTwvQT5kAiEPZBYCZg8VAUc8QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTY4Jz5HaW5nZXIgKFRoYWkpPC9BPmQCIg9kFgJmDxUBRzxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9MjUnPkdpbmdlcihDaGluYSk8L0E+ZAIjD2QWAmYPFQFDPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD05Jz5HcmFtIEJsYWNrPC9BPmQCJA9kFgJmDxUBTzxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9OTknPkdyYW0gRmxvdXIgKNio24zYs9mGKTwvQT5kAiUPZBYCZg8VAUQ8QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTEwJz5HcmFtIFB1bHNlPC9BPmQCJg9kFgJmDxUBTjxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9NjcnPkdyYW0gV2hpdGUoSW1wb3J0ZWQpPC9BPmQCJw9kFgJmDxUBSjxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9OCc+R3JhbSBXaGl0ZShsb2NhbCk8L0E+ZAIoD2QWAmYPFQFMPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD02MSc+R3JhcGVmcnVpdCgxMDBQY3MpPC9BPmQCKQ9kFgJmDxUBSDxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9NDcnPkdyYXBlcyAoT3RoZXIpPC9BPmQCKg9kFgJmDxUBRTxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9OTYnPkdyYXBlcyBHb2xhPC9BPmQCKw9kFgJmDxUBSzxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9OTcnPkdyYXBlcyBTdW5kZWtoYW5pPC9BPmQCLA9kFgJmDxUBWDxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9MTI2Jz5ncmVlbiBjaGlja3BlYXMo2obavtmI2YTbjNinKTwvQT5kAi0PZBYCZg8VAUY8QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTg0Jz5HcmVlbiBDaGlsbGk8L0E+ZAIuD2QWAmYPFQFGPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD01Mic+R3JlZW4gRm9kZGVyPC9BPmQCLw9kFgJmDxUBRjxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9MTI5Jz5HcmVlbiBPbmlvbjwvQT5kAjAPZBYCZg8VAUM8QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTYzJz5Hcm91bmRudXQ8L0E+ZAIxD2QWAmYPFQE/PEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD00Myc+R3VhdmE8L0E+ZAIyD2QWAmYPFQFIPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD02NSc+SmFnZ2VyeSAo2q/akSk8L0E+ZAIzD2QWAmYPFQFAPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD0xMDQnPkphbWFuPC9BPmQCNA9kFgJmDxUBSTxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9MTE5Jz5qdWp1YmUo2KjbjNixKTwvQT5kAjUPZBYCZg8VAUk8QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTQ1Jz5LaW5ub3cgKDEwMFBjcyk8L0E+ZAI2D2QWAmYPFQFgPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD0zMCc+TGFkeSBGaW5nZXIvT2tyYSAo2KjavtmG2ojbjCDYqtmI2LHbjCk8L0E+ZAI3D2QWAmYPFQFHPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD04Nyc+TGVtb24gKENoaW5hKTwvQT5kAjgPZBYCZg8VAUY8QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTg2Jz5MZW1vbiAoRGVzaSk8L0E+ZAI5D2QWAmYPFQFHPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD04Myc+TGVtb24gKE90aGVyKTwvQT5kAjoPZBYCZg8VAUE8QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTE0MCc+TG9xdWF0PC9BPmQCOw9kFgJmDxUBQDxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9NzknPkx5Y2hlZTwvQT5kAjwPZBYCZg8VAT88QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTE3Jz5NYWl6ZTwvQT5kAj0PZBYCZg8VAUc8QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTc4Jz5NYW5nbyAoTWFsZGEpPC9BPmQCPg9kFgJmDxUBRDxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9OTInPk1hbmdvIERlc2k8L0E+ZAI/D2QWAmYPFQFHPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD05MSc+TWFuZ28gU2FoYXJuaTwvQT5kAkAPZBYCZg8VAUw8QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTYyJz5NYW5nbyhBbndlciBSYXRvbCk8L0E+ZAJBD2QWAmYPFQFIPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD00OCc+TWFuZ28oQ2hvdW5zYSk8L0E+ZAJCD2QWAmYPFQFIPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD01NSc+TWFuZ28oRGVzYWhyaSk8L0E+ZAJDD2QWAmYPFQFIPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD01Nic+TWFuZ28oU2luZGhyaSk8L0E+ZAJED2QWAmYPFQE+PEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD0xMyc+TWFzaDwvQT5kAkUPZBYCZg8VAVU8QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTE0Jz5NYXNoIFB1bHNlKEltcG9ydGVkKSB3YXNoZWQ8L0E+ZAJGD2QWAmYPFQFLPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD02Nic+TWFzaCBQdWxzZShsb2NhbCk8L0E+ZAJHD2QWAmYPFQFRPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD03Mic+TWFzb29yIFB1bHNlIChJbXBvcnRlZCk8L0E+ZAJID2QWAmYPFQFNPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD0xNic+TWFzb29yIFB1bHNlKGxvY2FsKTwvQT5kAkkPZBYCZg8VAVE8QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTcwJz5NYXNvb3IgV2hvbGUgKEltcG9ydGVkKTwvQT5kAkoPZBYCZg8VAU08QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTE1Jz5NYXNvb3IgV2hvbGUobG9jYWwpPC9BPmQCSw9kFgJmDxUBPzxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9NzUnPk1lbG9uPC9BPmQCTA9kFgJmDxUBQDxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9MTgnPk1pbGxldDwvQT5kAk0PZBYCZg8VAU08QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTExNSc+TWludCjZvtmI2K/bjNmG24EpPC9BPmQCTg9kFgJmDxUBQjxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9MTA2Jz5Nb25ncmF5PC9BPmQCTw9kFgJmDxUBPzxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9MTEnPk1vb25nPC9BPmQCUA9kFgJmDxUBRTxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9MTInPk1vb25nIFB1bHNlPC9BPmQCUQ9kFgJmDxUBSTxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9NjAnPk11c2FtYmkoMTAwUGNzKTwvQT5kAlIPZBYCZg8VAVw8QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTEwOCc+TXVzdGFyZCBHcmVlbnMo2LPYp9qvINiz2LHYs9mI2ropPC9BPmQCUw9kFgJmDxUBRzxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9MTIyJz5NdXN0YXJkIHNlZWQ8L0E+ZAJUD2QWAmYPFQE/PEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD0yMyc+T25pb248L0E+ZAJVD2QWAmYPFQFIPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD00NCc+T3JhbmdlKDEwMFBjcyk8L0E+ZAJWD2QWAmYPFQFFPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD02Jz5QYWRkeSAoSVJSSSk8L0E+ZAJXD2QWAmYPFQFGPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD01Jz5QYWRkeSBCYXNtYXRpPC9BPmQCWA9kFgJmDxUBRzxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9MTEyJz5QYWRkeSBLYWluYXQ8L0E+ZAJZD2QWAmYPFQFNPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD0xMjQnPlBhcGF5YSjZvtm+24zYqtinKTwvQT5kAloPZBYCZg8VAT88QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTg4Jz5QZWFjaDwvQT5kAlsPZBYCZg8VAUc8QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTg5Jz5QZWFjaCBTcGVjaWFsPC9BPmQCXA9kFgJmDxUBPjxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9OTgnPlBlYXI8L0E+ZAJdD2QWAmYPFQE+PEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD0zNSc+UGVhczwvQT5kAl4PZBYCZg8VAVk8QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTExMCc+UGVyc2ltbW9uKNis2KfZvtin2YbbjCDZvtq+2YQpPC9BPmQCXw9kFgJmDxUBPjxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9OTAnPlBsdW08L0E+ZAJgD2QWAmYPFQFKPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD05NSc+UG9tZWdyYW5hdGUgRGVzaTwvQT5kAmEPZBYCZg8VAU08QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTU5Jz5Qb21lZ3JhbmF0ZShCYWRhbmEpPC9BPmQCYg9kFgJmDxUBTzxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9NDYnPlBvbWVncmFuYXRlKEthbmRoYXJpKTwvQT5kAmMPZBYCZg8VAUY8QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTIxJz5Qb3RhdG8gRnJlc2g8L0E+ZAJkD2QWAmYPFQFGPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD0yMic+UG90YXRvIFN0b3JlPC9BPmQCZQ9kFgJmDxUBTDxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9MTM0Jz5Qb3RhdG8gU3VnYXIgZnJlZTwvQT5kAmYPZBYCZg8VAUE8QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTMzJz5QdW1wa2luPC9BPmQCZw9kFgJmDxUBQDxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9MzcnPlJhZGlzaDwvQT5kAmgPZBYCZg8VAUo8QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTIwJz5SYXBlU2VlZCAoVG9yeWEpPC9BPmQCaQ9kFgJmDxUBUDxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9MjknPlJlZCBDaGlsbGkgV2hvbGUgKERyeSk8L0E+ZAJqD2QWAmYPFQFEPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD00Jz5SaWNlIChJUlJJKTwvQT5kAmsPZBYCZg8VAUw8QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTU4Jz5SaWNlIEJhc21hdGkgKDM4NSk8L0E+ZAJsD2QWAmYPFQFRPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD0zJz5SaWNlIEJhc21hdGkgU3VwZXIgKE5ldyk8L0E+ZAJtD2QWAmYPFQFSPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD01Nyc+UmljZSBCYXNtYXRpIFN1cGVyIChPbGQpPC9BPmQCbg9kFgJmDxUBTDxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9MTEzJz5SaWNlIEthaW5hdCAoTmV3KTwvQT5kAm8PZBYCZg8VAU08QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTQ5Jz5TZWVkIENvdHRvbihQaHV0dGkpPC9BPmQCcA9kFgJmDxUBSTxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9MTE4Jz5TZXNhbWUo2KrZkNmEKTwvQT5kAnEPZBYCZg8VAUE8QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTE5Jz5Tb3JnaHVtPC9BPmQCcg9kFgJmDxUBQTxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9MjcnPlNwaW5hY2g8L0E+ZAJzD2QWAmYPFQFEPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD04MCc+U3RyYXdiZXJyeTwvQT5kAnQPZBYCZg8VAT48QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTcnPlN1Z2FyPC9BPmQCdQ9kFgJmDxUBUzxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9MTI1Jz5zdWdhcmNhbmUo2q/ZhtqIINuM2LHbjCk8L0E+ZAJ2D2QWAmYPFQFRPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD0xMzYnPlN1Z2VyIEJlZXQo2obZgtmG2K/YsSk8L0E+ZAJ3D2QWAmYPFQFEPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD0xMTYnPlN1bmZsb3dlcjwvQT5kAngPZBYCZg8VAUs8QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTEwMCc+U3dlZXQgTXVzayBNZWxvbjwvQT5kAnkPZBYCZg8VAVU8QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTEwMSc+U3dlZXQgTXVzayBNZWxvbiAoU2hpcmVlbik8L0E+ZAJ6D2QWAmYPFQFYPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD0xMTEnPlN3ZWV0IFBvdGF0byjYtNqp2LEg2YLZhtiv24wpPC9BPmQCew9kFgJmDxUBRDxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9MzInPlRpbmRhIERlc2k8L0E+ZAJ8D2QWAmYPFQFCPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD0xMzUnPlRpbmRpYW48L0E+ZAJ9D2QWAmYPFQFAPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD0yNic+VG9tYXRvPC9BPmQCfg9kFgJmDxUBXDxBIGhyZWY9J1ZpZXdQcmljZXMuYXNweD9zZWFyY2hUeXBlPTAmY29tbW9kaXR5SWQ9MTIzJz5UdXJtZXJpYyBXaG9sZSjYq9in2KjYqiDbgdmE2K/bjCk8L0E+ZAJ/D2QWAmYPFQFAPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD0zNic+VHVybmlwPC9BPmQCgAEPZBYCZg8VAVk8QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTEzNyc+V2F0ZXIgY2hlc3RudXQo2LPZhtqv2r7Yp9qR2KcpPC9BPmQCgQEPZBYCZg8VAUQ8QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTc2Jz5XYXRlcm1lbG9uPC9BPmQCggEPZBYCZg8VAT48QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTEnPldoZWF0PC9BPmQCgwEPZBYCZg8VAUU8QSBocmVmPSdWaWV3UHJpY2VzLmFzcHg/c2VhcmNoVHlwZT0wJmNvbW1vZGl0eUlkPTUzJz5XaGVhdCBTdHJhdzwvQT5kAoQBD2QWAmYPFQFXPEEgaHJlZj0nVmlld1ByaWNlcy5hc3B4P3NlYXJjaFR5cGU9MCZjb21tb2RpdHlJZD0xMDMnPlp1Y2NoaW5pICjar9q+24zYpyDYqtmI2LHbjCk8L0E+ZAISD2QWBGYPZBYCZg8PFgIeCEltYWdlVXJsBStodHRwOi8vd3d3LmFtaXMucGsvaW1hZ2VzL2FtaXMtdXJkdS1uZXcucG5nZGQCAQ8PFgIfAgUjaHR0cDovL3d3dy5hbWlzLnBrL2ltYWdlcy9uZXczOC5naWZkZGTR0rI2gyTJTicK8g1Z4s0LscEctA==" />
+</div>
+
+<div>
+
+	<input type="hidden" name="__VIEWSTATEGENERATOR" id="__VIEWSTATEGENERATOR" value="201D2525" />
+</div>
+
+<DIV id=wrapper1>
+<DIV id=container style="text-align: left">
+   
+      <!-- BEGIN PAGE HEADER MODULE -->
+     
+    <div id="content-header-wrapper"><span class="site-breadcrumb" 
+id="ctl00_ctlSiteTabsTop_SiteMapPath1" ><span  ></span><span style="padding-left:15%"> <a href="../Default.aspx" style="padding-right:-20%">AMIS Home</a>
+&gt; </span><span></span><a 
+id="ctl00_ctlSiteTabsTop_SiteMapPath1_SkipLink"></a></span> 
+                      <div id="picklanguage" style =" margin-top:-13%">                  <p ><a id="ctl00_hyperlinkEnglish" class="language-poster-button-active" href="default.aspx">English</a>  <a id="ctl00_hyperlinkUrdu" href="Defaulturdu.aspx">اردو</a> </p>
+                          </div>
+         <div id="nav-utility1">
+<p>
+
+              
+                    <div style="text-align:right">    Not logged in |
+						<a id="ctl00_LoginView2_linkLogin" class="infoTextSmall" href="/login.aspx?ReturnUrl=%2fBrowsePrices.aspx%3fsearchType%3d0">SignIn</a>
+                        |
+                        <a id="ctl00_LoginView2_linkRegister" class="infoTextSmall" href="/account/Register.aspx">Join</a>
+                    </div>
+					
+
+                                            
+                                            </p></div>
+        </div>
+    <img src="/images/Header.jpg" style="width:100%" />
+<DIV id=colcx1 style="text-align: left">
+    <div> <br/>
+        <br />
+        <br />
+    </div>
+
+  <div class="row">
+  <div class="col-3 col-s-3 menu"> 
+            <div class="sidebar">
+                <div class="sidebarheader">Services</div>
+                <div id="master_sidebarServices" class="sidebarcontent" style="text-align: left;padding-top:0;padding-bottom:0; padding-left:0" >
+                 
+
+
+                        <div id="navigation1">
+ <ul id="mainmanu" >
+
+ <li  onclick ="price_addelement()" id ="pricehead"><a href="javascript:void(0);">Auction/WholeSale Prices</a>
+ <ul class ="content1" id ="Prices">
+ <li>
+                     <a href= "http://www.amis.pk/DistrictCities.aspx">Prices By City</a>
+</li>
+     <li>
+                    
+                    <a href="http://www.amis.pk/BrowsePrices.aspx?searchType=0">Prices by Commodity</a>
+               </li>
+     <li>
+                    
+                    <a href= "http://www.amis.pk/Daily%20Market%20Changes.aspx">Daily Price Change</a>
+                   </li>
+     <li>
+                   
+                    <a href= "http://www.amis.pk/Reports/DistrictMC.aspx">Prices of 36 District Markets</a>
+                    </li>
+     <li>
+                    <a href="http://www.amis.pk/Reports/DistrictMajor.aspx">Prices of 10 Major Markets</a>
+                    
+         </li>
+         <li>
+                    
+                    <a href="http://www.amis.pk/DailyTrendAcrossPunjab.aspx">Commodity Price Trend across Punjab</a>
+                    </li>
+
+     <li>
+                   
+                    <a href= "http://www.amis.pk/Price%20Trends.aspx">Commodity Price Trend over Day</a>
+                    </li>
+     <li>
+                   
+                    <a href= "http://www.amis.pk/Prices.aspx?toptabid=1&tabid=0">Price Reports</a>
+                    </li>
+
+     <li>
+                   
+                    <a href= "http://www.amis.pk/HistoricalPrices.aspx">Historical Prices</a>
+                    </li>
+   
+ </ul>
+ </li>
+<li><a href="http://www.amis.pk/Arrivalreports">Arrival Quantity Reports</a></li>
+<li onclick="stat()" ><a href="javascript:void(0);">Agri Statistics</a>
+   <ul  class ="content1" id ="stats"> 
+     <li><a href="http://www.amis.pk/Agristatistics/Statistics.aspx">Crop Wise Statistics</a></li>
+     <li><a href="http://www.amis.pk/Agristatistics/Condiments.aspx">Fruit & Vegetable Condiments</a></li>
+ </ul>
+         </li>
+      <li><a href="http://www.amis.pk/Agristatistics/DistrictWise/DistrictWiseData.aspx">District Wise Crop Data</a></li>
+      
+      <li>
+                             
+                    <a href="http://www.amis.pk/Reports/InternationCommodityPriceReports.aspx">International Commodity Prices</a>
+                    </li>
+  
+             
+     <li><a href="http://www.amis.pk/Crop%20Data/Select%20Year.aspx">World Crop Data</a></li>
+       
+     <li onclick="importe()" ><a href="javascript:void(0);">Import/Export</a>
+   <ul  class ="content1" id ="import"> 
+     <li><a href="/Import and Export of Agricultural Commodities/ImportAndExport.html">Import/Export of Agri Commodities</a></li>
+     <li><a href="http://www.amis.pk/FBS/PBS.aspx">Import and Export Statistics</a></li>
+ </ul>
+         </li>
+     <li><a href="http://www.amis.pk/Agristatistics/SupportPrice/Default.aspx">Support Price</a></li>
+ 
+<li ><a href="/PostHarvestPractise.aspx">Post Harvest Practices</a></li>
+<li ><a href="/PrefeasibilityStudies.aspx">Pre-Feasibility Studies</a></li>
+<li ><a href="/QualityStandards.aspx">Quality Standards</a></li>
+ <li ><a href="/pdf/CropPattern.pdf">Crop Harvest Calendar</a></li>
+     <li ><a href="http://www.amis.pk/FoodProcessing.aspx">Food Processing</a></li>
+<li ><a href="/Laws.aspx">Laws/Ordinance/Notifications</a></li>
+
+     
+     <li onclick="pub()"> <a href="javascript:void(0);">Publications</a>
+   <ul  class ="content1" id ="pub1"> 
+<li ><a href="http://www.amis.pk/Marketingroundupyearwise.aspx">Market Roundups</a></li>
+<li ><a href="http://www.amis.pk/Market%20Analysis.aspx">Supply and Price Analysis</a></li>
+<li ><a href="http://www.amis.pk/Publications.aspx">Research Reports</a></li>
+       <li ><a href="http://www.amis.pk/Trainingmanual.aspx">Training Manual</a></li>
+
+   </ul> 
+</li>
+      <li><a href="/FoodInFocus.aspx">Food In Focus</a></li> 
+     <li><a href="javascript:window.open('https://play.google.com/store/apps/details?id=pitb.gov.pk.amis','Android'); void(0);">Download Android Application</a></li>
+   <li><a href="/PAMRA.aspx">PAMRA</a></li> 
+       
+      <li ><a href="/Contacts.aspx">Departmental Contact</a>
+    
+</li>
+
+    
+   
+       <li ><a href="http://www.amis.pk/PDF/Markets in the Punjab.pdf">Fruit, Vagetable and Grain Markets</a></li> 
+    
+      <li onclick="stake()" ><a href="javascript:void(0);">StakeHolders Contact</a>
+   <ul  class ="content1" id ="stakeholder"> 
+<li ><a href="/ListOfStakeholders/list_of_traders_and_exporters.html">List of Exporters and Traders</a></li>
+<li ><a href="/AgriMarketingStakeholders/AgriMarketingStakeholders.aspx">List of AgriMarketing Stakeholders</a></li>
+<li ><a href="/AgroIndustries.aspx">Agro-Based Industries</a></li>
+   </ul> </li>
+    <li ><a href="/Aboutus.aspx">About Us</a></li>
+
+         
+ 
+    
+
+ </ul>
+ 
+ </div>  
+                </div>
+            </div>
+            
+            
+            
+            <div class="sidebar">
+                <div class="sidebarheader">Markets</div>
+                <div id="master_sidebarWalkthroughs" class="sidebarcontent" style="text-align: left;padding-top:0;padding-bottom:0; padding-left:0">
+             
+
+
+                    <div id="navigationdataentry1">
+ 
+  <ul>
+ <li>
+                     <a href= "/Markets/Dashboard.aspx" title="Data Entry MC DashBoard">Data Entry MC DashBoard</a></li>
+   
+   
+
+     
+
+
+<li>
+                     <a href= "/IntlCommodityPrices/CommodityPrices.aspx" title="Enter International market prices">Enter International Market Prices</a></li>
+     
+<li>
+                     <a href= "/Todays Unavailable Commodities.aspx" >Today's Unavailable Commodities</a></li>
+     <li>
+                     <a href= "/RateStatistics.aspx" >Daily Rate Upload Time</a></li>
+
+      
+
+     </ul>
+     </div>
+                </div>
+            </div>
+     
+      </div>
+<div class="col-9 col-s-9">
+<div class=colpadding >
+<div id=master_content>
+
+            <div id="master_contentplaceholder">
+    <div class="demoarea">
+    
+    <DIV class=yatlayB><!-- BODY:LHS:BEGIN -->
+<DIV id=new_car_head_text>
+ <div class="demoheading">Prices, Charts and Reports of Different Cities/Commodities</div>
+<P>Please click on the city/commodity name to view current prices.  </P></DIV>
+
+ <div id="yatnclandingfind">
+
+ <div class="yatnclandingfindhd">
+      <h3>Get Prices</h3>
+   </div>
+   <div class="yatnclandingfindbd">
+   <div class="yatnclandingfindmake">
+         <h4>Prices by Cities/Commodities</h4>
+         <table id="ctl00_cphPage_commoditiesList" class="browsecitiestable" cellspacing="0" border="0" style="border-collapse:collapse;">
+	<tr>
+		<td colspan="3">
+
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=41'>Apple (Ammre)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=82'>Apple (Gatcha)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=40'>Apple (Golden)</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=77'>Apple Kala Kullu (Madani)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=39'>Apple Kala Kullu (Pahari)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=94'>Apricot White</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=93'>Apricot Yellow</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=42'>Banana(DOZEN)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=50'>Banola</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=51'>Banola Cake</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=138'>Barley(جو)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=130'>Batho</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=31'>Bitter Gourd (کریلا)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=102'>Bottle Gourd (کدو)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=28'>Brinjal</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=127'>Brown Sugar(شکر)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=64'>Cabbage</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=117'>Canola</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=85'>Capsicum (شملہ مرچ)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=38'>Carrot</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=109'>Carrot China</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=34'>Cauliflower</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=107'>Cocoyam(اروی)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=120'>Cocunut</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=114'>Coriander (دھنیا)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=74'>Cucumber (Kheera)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=81'>Dates (Aseel)</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=141'>Dates(Irani)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=105'>Fenugreek(میتھی)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=128'>feutral early(100 Pcs) فروٹر</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=24'>Garlic (China)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=73'>Garlic (Local)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=68'>Ginger (Thai)</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=25'>Ginger(China)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=9'>Gram Black</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=99'>Gram Flour (بیسن)</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=10'>Gram Pulse</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=67'>Gram White(Imported)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=8'>Gram White(local)</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=61'>Grapefruit(100Pcs)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=47'>Grapes (Other)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=96'>Grapes Gola</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=97'>Grapes Sundekhani</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=126'>green chickpeas(چھولیا)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=84'>Green Chilli</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=52'>Green Fodder</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=129'>Green Onion</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=63'>Groundnut</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=43'>Guava</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=65'>Jaggery (گڑ)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=104'>Jaman</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=119'>jujube(بیر)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=45'>Kinnow (100Pcs)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=30'>Lady Finger/Okra (بھنڈی توری)</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=87'>Lemon (China)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=86'>Lemon (Desi)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=83'>Lemon (Other)</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=140'>Loquat</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=79'>Lychee</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=17'>Maize</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=78'>Mango (Malda)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=92'>Mango Desi</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=91'>Mango Saharni</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=62'>Mango(Anwer Ratol)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=48'>Mango(Chounsa)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=55'>Mango(Desahri)</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=56'>Mango(Sindhri)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=13'>Mash</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=14'>Mash Pulse(Imported) washed</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=66'>Mash Pulse(local)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=72'>Masoor Pulse (Imported)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=16'>Masoor Pulse(local)</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=70'>Masoor Whole (Imported)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=15'>Masoor Whole(local)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=75'>Melon</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=18'>Millet</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=115'>Mint(پودینہ)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=106'>Mongray</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=11'>Moong</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=12'>Moong Pulse</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=60'>Musambi(100Pcs)</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=108'>Mustard Greens(ساگ سرسوں)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=122'>Mustard seed</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=23'>Onion</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=44'>Orange(100Pcs)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=6'>Paddy (IRRI)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=5'>Paddy Basmati</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=112'>Paddy Kainat</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=124'>Papaya(پپیتا)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=88'>Peach</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=89'>Peach Special</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=98'>Pear</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=35'>Peas</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=110'>Persimmon(جاپانی پھل)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=90'>Plum</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=95'>Pomegranate Desi</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=59'>Pomegranate(Badana)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=46'>Pomegranate(Kandhari)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=21'>Potato Fresh</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=22'>Potato Store</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=134'>Potato Sugar free</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=33'>Pumpkin</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=37'>Radish</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=20'>RapeSeed (Torya)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=29'>Red Chilli Whole (Dry)</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=4'>Rice (IRRI)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=58'>Rice Basmati (385)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=3'>Rice Basmati Super (New)</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=57'>Rice Basmati Super (Old)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=113'>Rice Kainat (New)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=49'>Seed Cotton(Phutti)</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=118'>Sesame(تِل)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=19'>Sorghum</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=27'>Spinach</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=80'>Strawberry</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=7'>Sugar</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=125'>sugarcane(گنڈ یری)</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=136'>Suger Beet(چقندر)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=116'>Sunflower</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=100'>Sweet Musk Melon</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=101'>Sweet Musk Melon (Shireen)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=111'>Sweet Potato(شکر قندی)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=32'>Tinda Desi</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=135'>Tindian</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=26'>Tomato</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=123'>Turmeric Whole(ثابت ہلدی)</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=36'>Turnip</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=137'>Water chestnut(سنگھاڑا)</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=76'>Watermelon</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=1'>Wheat</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=53'>Wheat Straw</A>
+
+
+  
+
+
+ 
+</td><td>
+           
+<A href='ViewPrices.aspx?searchType=0&commodityId=103'>Zucchini (گھیا توری)</A>
+
+
+  
+
+
+ 
+</td>
+	</tr><tr>
+		<td colspan="3">
+
+</td>
+	</tr>
+</table>
+ </div> 
+ </div> 
+ </div> 
+         
+
+</DIV>
+</div> 
+    
+    <div class="demobottom"></div>
+</div>
+      
+            </DIV> 
+                                 </DIV> 
+    </div>
+   
+ <link href="~/css/StyleSheet.css" rel="stylesheet" type="text/css" />
+<div id="fb-root"></div>
+<script>(function(d, s, id) {
+  var js, fjs = d.getElementsByTagName(s)[0];
+  if (d.getElementById(id)) return;
+  js = d.createElement(s); js.id = id;
+  js.src = "//connect.facebook.net/en_US/sdk.js#xfbml=1&version=v2.8";
+  fjs.parentNode.insertBefore(js, fjs);
+}(document, 'script', 'facebook-jssdk'));</script>
+<DIV class=md id=footer>
+    <a id="ctl00_ModuleFooter_HyperLink1" href="Default.aspx"><img id="ctl00_ModuleFooter_Image1" src="http://www.amis.pk/images/amis-urdu-new.png" longdesc="Default.aspx" style="border-width:0px;" /><br />
+    </a>
+    <br />
+<UL id=overture>
+  <LI class=first><A 
+  href="/Advertise.aspx">Advertisements/Tenders </A>
+  
+      <img id="ctl00_ModuleFooter_imagefooter" src="http://www.amis.pk/images/new38.gif" style="border-width:0px;" />
+  <LI><A 
+  href="/Search.aspx">Search 
+  Marketing</A> 
+  
+  
+  <LI><A 
+  href="/Contactus.aspx">Contact Us</A>
+  </LI>
+  <LI><A 
+  href="https://play.google.com/store/apps/details?id=pitb.gov.pk.amis">Download Android Application <img src="images/giphy.gif" style="height:2%;width:2%;border-width:0px;" /> </A>
+  </LI>
+  </UL>
+<UL id=copyright>
+  <LI class=first>Copyright © 2006-2026 Agriculture Marketing Information Service(AMIS), Directorate of Agriculture (Economics & Marketing) Punjab, Lahore. All rights reserved.
+  
+  <A 
+  href="/Default.aspx">AMIS Home</A> 
+  
+  </UL>
+  like us<br/><div class="fb-like" data-href="https://www.facebook.com/Agriculture-Marketing-Information-Service-1681750532067935" data-width="50%" data-layout="standard" data-action="like" data-show-faces="true" data-share="true"></div>
+  
+
+
+</DIV>
+ 
+
+  
+
+                      
+    </DIV> </DIV>
+</DIV> 
+</DIV> 
+    </DIV>
+    </div>
+
+</form>
+
+</BODY></HTML>
+

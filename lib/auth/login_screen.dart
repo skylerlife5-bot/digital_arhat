@@ -132,10 +132,8 @@ class _SignInScreenState extends State<SignInScreen> {
 
       final bool isAuthenticated = await auth.authenticate(
         localizedReason: 'App kholnay ke liye fingerprint scan karein',
-        options: const AuthenticationOptions(
-          stickyAuth: true,
-          biometricOnly: true,
-        ),
+        biometricOnly: true,
+        persistAcrossBackgrounding: true,
       );
 
       if (!mounted) return;

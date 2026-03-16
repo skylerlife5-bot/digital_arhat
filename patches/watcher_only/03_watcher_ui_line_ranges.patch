@@ -1,0 +1,48 @@
+diff --git a/lib/dashboard/buyer/buyer_home_screen.dart b/lib/dashboard/buyer/buyer_home_screen.dart
+--- a/lib/dashboard/buyer/buyer_home_screen.dart
++++ b/lib/dashboard/buyer/buyer_home_screen.dart
+@@
+ import '../components/bid_dialog.dart';
+ import 'market_listing_card.dart';
++import 'watchlist_screen.dart';
+@@
+       appBar: CustomAppBar(
+         centerTitle: true,
+         backgroundColor: Colors.transparent,
+         titleWidget: const AppLogo(height: 30),
+         actions: [
++          IconButton(
++            tooltip: 'Watchlist',
++            onPressed: () {
++              Navigator.of(context).push(
++                MaterialPageRoute<void>(builder: (_) => WatchlistScreen()),
++              );
++            },
++            icon: const Icon(
++              Icons.favorite_border_rounded,
++              color: Color(0xFFD4AF37),
++            ),
++          ),
+           IconButton(
+             tooltip: 'Notifications',
+@@
+   String? _watchersLabel(Map<String, dynamic> listing) {
+@@
+     final resolved = parseInt(listing['watchersCount']);
+     if (resolved <= 0) return null;
+     return '👁️ $resolved watching';
+   }
++
++diff --git a/lib/dashboard/buyer/buyer_listing_detail_screen.dart b/lib/dashboard/buyer/buyer_listing_detail_screen.dart
++--- a/lib/dashboard/buyer/buyer_listing_detail_screen.dart
+++++ b/lib/dashboard/buyer/buyer_listing_detail_screen.dart
++@@
++              final watchersCount = _readInt(data['watchersCount']);
++@@
++                  final saved = await _engagementService.toggleWatchlist(
++                    listingId: widget.listingId,
++                    listingData: data,
++                  );
++@@
++                        : 'Removed from watchlist',
++

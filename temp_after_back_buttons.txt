@@ -1,0 +1,11 @@
+Button: [Logout / لاگ آؤٹ] bounds=[954,90][1080,217] enabled=true
+Button: [All Pakistan] bounds=[66,780][424,906] enabled=true
+Button: [Punjab] bounds=[443,780][663,906] enabled=true
+Button: [Sindh] bounds=[682,780][880,906] enabled=true
+Button: [KPK] bounds=[898,780][1014,906] enabled=true
+Button: [Watch] bounds=[68,1909][319,2035] enabled=true
+Button: [Home&#10;Tab 1 of 5] bounds=[32,2096][235,2194] enabled=true
+Button: [Market&#10;Tab 2 of 5] bounds=[235,2096][438,2194] enabled=true
+Button: [Post&#10;Tab 3 of 5] bounds=[438,2096][642,2194] enabled=true
+Button: [Alerts&#10;Tab 4 of 5] bounds=[642,2096][845,2194] enabled=true
+Button: [Account&#10;Tab 5 of 5] bounds=[845,2096][1049,2194] enabled=true

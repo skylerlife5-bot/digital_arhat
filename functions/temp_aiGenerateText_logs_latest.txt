@@ -1,0 +1,109 @@
+﻿2026-03-16T11:55:52.611990Z E aigeneratetext: 
+2026-03-16T11:55:52.890954Z ? aigeneratetext: aiGenerateText_failed {
+  error: 'Error: GEMINI_HTTP_400|model=gemini-2.0-flash|keySource=secret|body={\n' +
+    '  "error": {\n' +
+    '    "code": 400,\n' +
+    '    "message": "API key not valid. Please pass a valid API key.",\n' +
+    '    "status": "INVALID_ARGUMENT",\n' +
+    '    "details": [\n' +
+    '      {\n' +
+    '        "@type": "type.googleapis.com/google.rpc.ErrorInfo",\n' +
+    '        "reason": "API_KEY_INVALID",\n' +
+    '        "domain": "googleapis.com",\n' +
+    '        "metadata": {\n' +
+    '          "service": "generativelanguage.googleapis.com"\n' +
+    '        }\n' +
+    '      },\n' +
+    '      {'
+}
+
+2026-03-16T12:23:23.152536843Z N aiGenerateText: {"@type":"type.googleapis.com/google.cloud.audit.AuditLog","status":{},"authenticationInfo":{"principalEmail":"amir.rana0114@gmail.com","principalSubject":"user:amir.rana0114@gmail.com","oauthInfo":{"oauthClientId":"563584335869-fgrhgmd47bqnekij5i8b5pr03ho849e6.apps.googleusercontent.com"}},"requestMetadata":{"callerIp":"2400:adc5:19f:8700:1d73:4ef1:dbe6:5f17","callerSuppliedUserAgent":"FirebaseCLI/15.5.1,gzip(gfe),gzip(gfe)","requestAttributes":{"time":"2026-03-16T12:23:21.795376329Z","auth":{}},"destinationAttributes":{}},"serviceName":"cloudfunctions.googleapis.com","methodName":"google.cloud.functions.v2.FunctionService.UpdateFunction","authorizationInfo":[{"resource":"projects/digital-arhat/locations/asia-south1/functions/aiGenerateText","permission":"cloudfunctions.functions.update","granted":true,"resourceAttributes":{"service":"cloudfunctions.googleapis.com","name":"projects/digital-arhat/locations/asia-south1/functions/aiGenerateText","type":"cloudfunctions.googleapis.com/Function"},"permissionType":"ADMIN_WRITE"}],"resourceName":"projects/digital-arhat/locations/asia-south1/functions/aiGenerateText","request":{"@type":"type.googleapis.com/google.cloud.functions.v2.UpdateFunctionRequest","function":{"service_config":{"available_cpu":"1","available_memory":"256Mi","max_instance_request_concurrency":80,"secret_environment_variables":[{"project_id":"digital-arhat","key":"GEMINI_API_KEY","version":"3","secret":"GEMINI_API_KEY"},{"version":"1","key":"GOOGLE_API_KEY","secret":"GOOGLE_API_KEY","project_id":"digital-arhat"},{"project_id":"digital-arhat","key":"GOOGLE_GENAI_API_KEY","version":"1","secret":"GOOGLE_GENAI_API_KEY"},{"project_id":"digital-arhat","version":"1","key":"OPENWEATHER_API_KEY","secret":"OPENWEATHER_API_KEY"}]},"name":"projects/digital-arhat/locations/asia-south1/functions/aiGenerateText","labels":{"deployment-tool":"cli-firebase","firebase-functions-hash":"a5481ebf0e68f4548d9021fbb6e54483a08c8af3"},"build_config":{"runtime":"nodejs20","entry_point":"aiGenerateText","source":{}}},"update_mask":{"paths":["name","build_config.runtime","build_config.entry_point","build_config.source.storage_source.bucket","build_config.source.storage_source.object","build_config.environment_variables","build_config.source_token","service_config.environment_variables","service_config.secret_environment_variables","service_config.ingress_settings","service_config.timeout_seconds","service_config.service_account_email","service_config.available_memory","service_config.min_instance_count","service_config.max_instance_count","service_config.max_instance_request_concurrency","service_config.available_cpu","service_config.vpc_connector","service_config.vpc_connector_egress_settings","labels"]}},"response":{"@type":"type.googleapis.com/google.longrunning.Operation"},"resourceLocation":{"currentLocations":["asia-south1"]}}
+2026-03-16T12:24:04.878201Z I aigeneratetext: Starting new instance. Reason: DEPLOYMENT_ROLLOUT - Instance started due to traffic shifting between revisions due to deployment, traffic split adjustment, or deployment health check.
+2026-03-16T12:24:06.732211Z ? aigeneratetext: FUNCTIONS ENTRY START
+2026-03-16T12:24:06.732703Z ? aigeneratetext: FUNCTIONS ENV CHECK DEFERRED
+2026-03-16T12:24:06.734324Z ? aigeneratetext: FUNCTIONS EXPORTS READY
+2026-03-16T12:24:06.742259Z I aigeneratetext: Default STARTUP TCP probe succeeded after 1 attempt for container "worker" on port 8080.
+2026-03-16T12:24:08.302473585Z N aiGenerateText: {"@type":"type.googleapis.com/google.cloud.audit.AuditLog","status":{},"authenticationInfo":{"principalEmail":"amir.rana0114@gmail.com","principalSubject":"user:amir.rana0114@gmail.com","oauthInfo":{"oauthClientId":"563584335869-fgrhgmd47bqnekij5i8b5pr03ho849e6.apps.googleusercontent.com"}},"requestMetadata":{"requestAttributes":{},"destinationAttributes":{}},"serviceName":"cloudfunctions.googleapis.com","methodName":"google.cloud.functions.v2.FunctionService.UpdateFunction","resourceName":"projects/digital-arhat/locations/asia-south1/functions/aiGenerateText","response":{"name":"projects/digital-arhat/locations/asia-south1/functions/aiGenerateText","buildConfig":{"entryPoint":"aiGenerateText","source":{},"dockerRegistry":"ARTIFACT_REGISTRY","dockerRepository":"projects/digital-arhat/locations/asia-south1/repositories/gcf-artifacts","serviceAccount":"projects/digital-arhat/serviceAccounts/1075457548923-compute@developer.gserviceaccount.com","automaticUpdatePolicy":{},"runtime":"nodejs20"},"serviceConfig":{"serviceAccountEmail":"1075457548923-compute@developer.gserviceaccount.com","allTrafficOnLatestRevision":true,"secretEnvironmentVariables":[{"key":"GEMINI_API_KEY","projectId":"digital-arhat","secret":"GEMINI_API_KEY","version":"3"},{"key":"GOOGLE_API_KEY","projectId":"digital-arhat","secret":"GOOGLE_API_KEY","version":"1"},{"projectId":"digital-arhat","secret":"GOOGLE_GENAI_API_KEY","version":"1","key":"GOOGLE_GENAI_API_KEY"},{"version":"1","key":"OPENWEATHER_API_KEY","projectId":"digital-arhat","secret":"OPENWEATHER_API_KEY"}],"timeoutSeconds":60,"availableCpu":"1","revision":"aigeneratetext-00007-zoy","maxInstanceCount":3,"uri":"https://aigeneratetext-idbv5z7wia-el.a.run.app","maxInstanceRequestConcurrency":80,"availableMemory":"256Mi","ingressSettings":"ALLOW_ALL"},"labels":{"deployment-tool":"cli-firebase","firebase-functions-hash":"a5481ebf0e68f4548d9021fbb6e54483a08c8af3"},"url":"https://asia-south1-digital-arhat.cloudfunctions.net/aiGenerateText","satisfiesPzs":true,"updateTime":"2026-03-16T12:23:23.142890196Z","createTime":"2026-03-10T20:22:02.633567626Z","state":"ACTIVE","satisfiesPzi":true,"environment":"GEN_2","@type":"type.googleapis.com/google.cloud.functions.v2.Function"},"resourceLocation":{"currentLocations":["asia-south1"]}}
+2026-03-16T12:25:30.213906737Z N aiGenerateText: {"@type":"type.googleapis.com/google.cloud.audit.AuditLog","status":{},"authenticationInfo":{"principalEmail":"amir.rana0114@gmail.com","principalSubject":"user:amir.rana0114@gmail.com","oauthInfo":{"oauthClientId":"563584335869-fgrhgmd47bqnekij5i8b5pr03ho849e6.apps.googleusercontent.com"}},"requestMetadata":{"callerIp":"2400:adc5:19f:8700:1d73:4ef1:dbe6:5f17","callerSuppliedUserAgent":"FirebaseCLI/15.5.1,gzip(gfe),gzip(gfe)","requestAttributes":{"time":"2026-03-16T12:25:28.924428106Z","auth":{}},"destinationAttributes":{}},"serviceName":"cloudfunctions.googleapis.com","methodName":"google.cloud.functions.v2.FunctionService.UpdateFunction","authorizationInfo":[{"resource":"projects/digital-arhat/locations/asia-south1/functions/aiGenerateText","permission":"cloudfunctions.functions.update","granted":true,"resourceAttributes":{"service":"cloudfunctions.googleapis.com","name":"projects/digital-arhat/locations/asia-south1/functions/aiGenerateText","type":"cloudfunctions.googleapis.com/Function"},"permissionType":"ADMIN_WRITE"}],"resourceName":"projects/digital-arhat/locations/asia-south1/functions/aiGenerateText","request":{"update_mask":{"paths":["name","build_config.runtime","build_config.entry_point","build_config.source.storage_source.bucket","build_config.source.storage_source.object","build_config.environment_variables","build_config.source_token","service_config.environment_variables","service_config.secret_environment_variables","service_config.ingress_settings","service_config.timeout_seconds","service_config.service_account_email","service_config.available_memory","service_config.min_instance_count","service_config.max_instance_count","service_config.max_instance_request_concurrency","service_config.available_cpu","service_config.vpc_connector","service_config.vpc_connector_egress_settings","labels"]},"@type":"type.googleapis.com/google.cloud.functions.v2.UpdateFunctionRequest","function":{"service_config":{"available_memory":"256Mi","available_cpu":"1","max_instance_request_concurrency":80,"secret_environment_variables":[{"secret":"GEMINI_API_KEY","key":"GEMINI_API_KEY","version":"3","project_id":"digital-arhat"},{"version":"1","project_id":"digital-arhat","secret":"GOOGLE_API_KEY","key":"GOOGLE_API_KEY"},{"secret":"GOOGLE_GENAI_API_KEY","key":"GOOGLE_GENAI_API_KEY","project_id":"digital-arhat","version":"1"},{"version":"1","project_id":"digital-arhat","key":"OPENWEATHER_API_KEY","secret":"OPENWEATHER_API_KEY"}]},"build_config":{"source":{},"entry_point":"aiGenerateText","runtime":"nodejs20"},"labels":{"firebase-functions-hash":"a5481ebf0e68f4548d9021fbb6e54483a08c8af3","deployment-tool":"cli-firebase"},"name":"projects/digital-arhat/locations/asia-south1/functions/aiGenerateText"}},"response":{"@type":"type.googleapis.com/google.longrunning.Operation"},"resourceLocation":{"currentLocations":["asia-south1"]}}
+2026-03-16T12:26:12.361115Z I aigeneratetext: Starting new instance. Reason: DEPLOYMENT_ROLLOUT - Instance started due to traffic shifting between revisions due to deployment, traffic split adjustment, or deployment health check.
+2026-03-16T12:26:14.595626Z ? aigeneratetext: FUNCTIONS ENTRY START
+2026-03-16T12:26:14.596399Z ? aigeneratetext: FUNCTIONS ENV CHECK DEFERRED
+2026-03-16T12:26:14.598442Z ? aigeneratetext: FUNCTIONS EXPORTS READY
+2026-03-16T12:26:14.609344Z I aigeneratetext: Default STARTUP TCP probe succeeded after 1 attempt for container "worker" on port 8080.
+2026-03-16T12:26:16.183869558Z N aiGenerateText: {"@type":"type.googleapis.com/google.cloud.audit.AuditLog","status":{},"authenticationInfo":{"principalEmail":"amir.rana0114@gmail.com","principalSubject":"user:amir.rana0114@gmail.com","oauthInfo":{"oauthClientId":"563584335869-fgrhgmd47bqnekij5i8b5pr03ho849e6.apps.googleusercontent.com"}},"requestMetadata":{"requestAttributes":{},"destinationAttributes":{}},"serviceName":"cloudfunctions.googleapis.com","methodName":"google.cloud.functions.v2.FunctionService.UpdateFunction","resourceName":"projects/digital-arhat/locations/asia-south1/functions/aiGenerateText","response":{"url":"https://asia-south1-digital-arhat.cloudfunctions.net/aiGenerateText","@type":"type.googleapis.com/google.cloud.functions.v2.Function","satisfiesPzs":true,"buildConfig":{"source":{},"dockerRegistry":"ARTIFACT_REGISTRY","dockerRepository":"projects/digital-arhat/locations/asia-south1/repositories/gcf-artifacts","serviceAccount":"projects/digital-arhat/serviceAccounts/1075457548923-compute@developer.gserviceaccount.com","automaticUpdatePolicy":{},"runtime":"nodejs20","entryPoint":"aiGenerateText"},"state":"ACTIVE","satisfiesPzi":true,"environment":"GEN_2","createTime":"2026-03-10T20:22:02.633567626Z","labels":{"deployment-tool":"cli-firebase","firebase-functions-hash":"a5481ebf0e68f4548d9021fbb6e54483a08c8af3"},"name":"projects/digital-arhat/locations/asia-south1/functions/aiGenerateText","serviceConfig":{"availableMemory":"256Mi","availableCpu":"1","ingressSettings":"ALLOW_ALL","allTrafficOnLatestRevision":true,"secretEnvironmentVariables":[{"key":"GEMINI_API_KEY","projectId":"digital-arhat","secret":"GEMINI_API_KEY","version":"3"},{"projectId":"digital-arhat","secret":"GOOGLE_API_KEY","version":"1","key":"GOOGLE_API_KEY"},{"projectId":"digital-arhat","secret":"GOOGLE_GENAI_API_KEY","version":"1","key":"GOOGLE_GENAI_API_KEY"},{"key":"OPENWEATHER_API_KEY","projectId":"digital-arhat","secret":"OPENWEATHER_API_KEY","version":"1"}],"timeoutSeconds":60,"uri":"https://aigeneratetext-idbv5z7wia-el.a.run.app","maxInstanceRequestConcurrency":80,"maxInstanceCount":3,"revision":"aigeneratetext-00008-fey","serviceAccountEmail":"1075457548923-compute@developer.gserviceaccount.com"},"updateTime":"2026-03-16T12:25:30.204014037Z"},"resourceLocation":{"currentLocations":["asia-south1"]}}
+2026-03-16T12:27:19.050074Z E aigeneratetext: 
+2026-03-16T12:27:19.948709Z ? aigeneratetext: aiGenerateText_failed {
+  error: 'Error: GEMINI_AUTH_REJECTED|status=400|model=gemini-2.0-flash|keySource=secret:GOOGLE_GENAI_API_KEY|body={\n' +
+    '  "error": {\n' +
+    '    "code": 400,\n' +
+    '    "message": "API key not valid. Please pass a valid API key.",\n' +
+    '    "status": "INVALID_ARGUMENT",\n' +
+    '    "details": [\n' +
+    '      {\n' +
+    '        "@type": "type.googleapis.com/google.rpc.ErrorInfo",\n' +
+    '        "reason": "API_KEY_INVALID",\n' +
+    '        "domain": "googleapis.com",\n' +
+    '        "metadata": {\n' +
+    '          "service": "generativelanguage.googleapis.com"\n' +
+    '        }\n' +
+    '      },\n' +
+    '      {\n' +
+    '   ||GEMINI_AUTH_REJECTED|status=400|model=gemini-2.0-flash|keySource=secret:GEMINI_API_KEY|body={\n' +
+    '  "error": {\n' +
+    '    "code": 400,\n' +
+    '    "message": "API key not valid. Please pass a valid API key.",\n' +
+    '    "status": "INVALID_ARGUMENT",\n' +
+    '    "details": [\n' +
+    '      {\n' +
+    '        "@type": "type.googleapis.com/google.rpc.ErrorInfo",\n' +
+    '        "reason": "API_KEY_INVALID",\n' +
+    '        "domain": "googleapis.com",\n' +
+    '        "metadata": {\n' +
+    '          "service": "generativelanguage.googleapis.com"\n' +
+    '        }\n' +
+    '      },\n' +
+    '      {\n' +
+    '   ||GEMINI_QUOTA_EXCEEDED|status=429|model=gemini-2.0-flash|keySource=secret:GOOGLE_API_KEY|body={\n' +
+    '  "error": {\n' +
+    '    "code": 429,\n' +
+    '    "message": "You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 0,'
+}
+
+2026-03-16T12:27:35.170971Z E aigeneratetext: 
+2026-03-16T12:27:35.690865Z ? aigeneratetext: aiGenerateText_failed {
+  error: 'Error: GEMINI_AUTH_REJECTED|status=400|model=gemini-2.0-flash|keySource=secret:GOOGLE_GENAI_API_KEY|body={\n' +
+    '  "error": {\n' +
+    '    "code": 400,\n' +
+    '    "message": "API key not valid. Please pass a valid API key.",\n' +
+    '    "status": "INVALID_ARGUMENT",\n' +
+    '    "details": [\n' +
+    '      {\n' +
+    '        "@type": "type.googleapis.com/google.rpc.ErrorInfo",\n' +
+    '        "reason": "API_KEY_INVALID",\n' +
+    '        "domain": "googleapis.com",\n' +
+    '        "metadata": {\n' +
+    '          "service": "generativelanguage.googleapis.com"\n' +
+    '        }\n' +
+    '      },\n' +
+    '      {\n' +
+    '   ||GEMINI_AUTH_REJECTED|status=400|model=gemini-2.0-flash|keySource=secret:GEMINI_API_KEY|body={\n' +
+    '  "error": {\n' +
+    '    "code": 400,\n' +
+    '    "message": "API key not valid. Please pass a valid API key.",\n' +
+    '    "status": "INVALID_ARGUMENT",\n' +
+    '    "details": [\n' +
+    '      {\n' +
+    '        "@type": "type.googleapis.com/google.rpc.ErrorInfo",\n' +
+    '        "reason": "API_KEY_INVALID",\n' +
+    '        "domain": "googleapis.com",\n' +
+    '        "metadata": {\n' +
+    '          "service": "generativelanguage.googleapis.com"\n' +
+    '        }\n' +
+    '      },\n' +
+    '      {\n' +
+    '   ||GEMINI_QUOTA_EXCEEDED|status=429|model=gemini-2.0-flash|keySource=secret:GOOGLE_API_KEY|body={\n' +
+    '  "error": {\n' +
+    '    "code": 429,\n' +
+    '    "message": "You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, l'
+}
+
