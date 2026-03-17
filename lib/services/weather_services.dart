@@ -1,76 +1,128 @@
-﻿import 'dart:io';
-import 'package:weather/weather.dart';
+﻿import 'dart:convert';
+
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:http/http.dart' as http;
+
+import '../firebase_options.dart';
 import 'ai_generative_service.dart';
 
 class WeatherService {
-  // API Configuration
-  static const String _apiKey = "5b51e91b66ec10b88380f02540a3423f";
-  static final WeatherFactory _weatherFactory = WeatherFactory(_apiKey);
+  static const String _fallbackDistrict = 'Punjab';
+
+  String get _projectId {
+    try {
+      return DefaultFirebaseOptions.currentPlatform.projectId;
+    } catch (_) {
+      return DefaultFirebaseOptions.android.projectId;
+    }
+  }
+
+  String get _functionsBaseUrl =>
+      'https://asia-south1-$_projectId.cloudfunctions.net';
 
   final MandiIntelligenceService _aiService = MandiIntelligenceService();
 
-  /// �S& Professional Weather Fetching with Detailed Response
   Future<Map<String, dynamic>> getWeatherData(String district) async {
-    final String cityName = '$district,PK';
+    final normalizedDistrict = district.trim().isEmpty
+        ? _fallbackDistrict
+        : district.trim();
+
+    final idToken = await FirebaseAuth.instance.currentUser?.getIdToken();
 
     try {
-      final weather = await _weatherFactory
-          .currentWeatherByCityName(cityName)
+      final response = await http
+          .post(
+            Uri.parse('$_functionsBaseUrl/weatherCurrentHttp'),
+            headers: <String, String>{
+              'Content-Type': 'application/json',
+              if (idToken != null && idToken.trim().isNotEmpty)
+                'Authorization': 'Bearer $idToken',
+            },
+            body: jsonEncode(<String, dynamic>{'district': normalizedDistrict}),
+          )
           .timeout(const Duration(seconds: 12));
 
-      final double temp = weather.temperature?.celsius ?? 0.0;
-      final String condition = (weather.weatherMain ?? 'Clear').toString();
-      final String description =
-          (weather.weatherDescription ?? condition).toString();
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return _weatherUnavailableResponse(
+          'موسمی سروس عارضی طور پر دستیاب نہیں۔',
+        );
+      }
+
+      final Map<String, dynamic> decoded = response.body.trim().isEmpty
+          ? <String, dynamic>{}
+          : (jsonDecode(response.body) as Map<String, dynamic>);
+
+      final double temp = _parseTemperature(decoded['temp']);
+      final String condition = _sanitizeWeatherText(
+        '${decoded['condition'] ?? 'Clear'}',
+        fallback: 'Clear',
+      );
+      final String description = _sanitizeWeatherText(
+        '${decoded['description'] ?? condition}',
+        fallback: condition,
+      );
+      final String conditionUr = _conditionToUrdu(condition);
 
       if (temp == 0.0 && condition.trim().isEmpty) {
-        return _weatherUnavailableResponse('Weather payload invalid hai.');
+        return _weatherUnavailableResponse('موسمی معلومات مکمل نہیں ہیں۔');
       }
 
       return {
         'success': true,
         'temp': temp,
         'condition': _sanitizeWeatherText(condition, fallback: 'Clear'),
+        'conditionUr': conditionUr,
         'description': _sanitizeWeatherText(description, fallback: condition),
-        'humidity': _parseInt(weather.humidity),
-        'windSpeed': _parseTemperature(weather.windSpeed),
-        'isRainLikely': _checkRain(condition),
+        'humidity': _parseInt(decoded['humidity']),
+        'windSpeed': _parseTemperature(decoded['windSpeed']),
+        'isRainLikely':
+            decoded['isRainLikely'] == true || _checkRain(condition),
       };
-    } on SocketException {
-      return _weatherUnavailableResponse("Internet connection ka masla hai.");
-    } catch (e) {
-      return _weatherUnavailableResponse("Weather data dastyab nahi hai.");
+    } catch (_) {
+      return _weatherUnavailableResponse('موسمی معلومات دستیاب نہیں۔');
     }
   }
 
-  /// �x� AI Advisory Logic (Professional Integration)
   Future<String> getAIAdvisory(
     String condition,
     dynamic tempValue,
-    String crop,
-  ) async {
+    String crop, {
+    String? category,
+    String? subcategory,
+    String? district,
+  }) async {
     final double temp = _parseTemperature(tempValue);
+    final cropUr = _toUrduCropLabel(subcategory ?? category ?? crop);
+    final districtUr = _normalizeDistrict(district);
+    final conditionUr = _conditionToUrdu(condition);
 
     try {
-      // 1. Trying Gemini for Smart Advisory
-      final String advice = await _aiService.getWeatherAlert(
+      final String aiAdvice = await _aiService.getWeatherAlert(
         condition: condition,
         temperature: temp,
-        crop: crop,
+        crop: cropUr,
       );
 
-      // Agar AI koi error ya empty response de to fallback use karein
-      if (advice.isEmpty || advice.contains("error")) {
-        return _getRuleBasedAdvisory(condition, temp, crop);
+      final clean = _normalizeAdvisory(aiAdvice);
+      if (clean.isEmpty || _containsLatin(clean) || _looksTechnical(clean)) {
+        return _getRuleBasedAdvisory(
+          condition: conditionUr,
+          temp: temp,
+          crop: cropUr,
+          district: districtUr,
+        );
       }
 
-      return advice;
-    } catch (e) {
-      return _getRuleBasedAdvisory(condition, temp, crop);
+      return clean;
+    } catch (_) {
+      return _getRuleBasedAdvisory(
+        condition: conditionUr,
+        temp: temp,
+        crop: cropUr,
+        district: districtUr,
+      );
     }
   }
-
-  /// --- Helper Methods ---
 
   bool _checkRain(String condition) {
     final rainTerms = ['rain', 'drizzle', 'thunderstorm', 'shower'];
@@ -94,8 +146,9 @@ class WeatherService {
     return {
       'success': false,
       'temp': 0.0,
-      'condition': 'Weather Unavailable',
-      'description': 'Weather Unavailable',
+      'condition': 'Unavailable',
+      'conditionUr': 'موسم دستیاب نہیں',
+      'description': 'موسم دستیاب نہیں',
       'humidity': 0,
       'windSpeed': 0.0,
       'isRainLikely': false,
@@ -136,21 +189,109 @@ class WeatherService {
     return words.join(' ');
   }
 
-  /// �S& Rule-Based Fallback (Safe Mode)
-  String _getRuleBasedAdvisory(String condition, double temp, String crop) {
-    String cond = condition.toLowerCase();
+  String _getRuleBasedAdvisory({
+    required String condition,
+    required double temp,
+    required String crop,
+    required String district,
+  }) {
+    final cond = condition.toLowerCase();
+    final districtLabel = _normalizeDistrict(district).trim().isEmpty
+        ? 'آپ کے علاقے'
+        : _normalizeDistrict(district);
 
     if (_checkRain(cond)) {
-      return "آئ�R ا�رٹ: بارش کا ا�&کا�  ہ�� $crop ک�R کٹائ�R ر��ک د�Rں ا��ر � کاس�R آب کا ا� تظا�& کر�Rں�";
+      return 'آج $districtLabel میں بارش کا امکان ہے۔ $crop کو نمی اور کھلے ذخیرے سے محفوظ رکھیں۔';
     }
     if (temp > 38) {
-      return "شد�Rد گر�&�R ($temp°C)� $crop ک�� ��� س� ب� ا� � ک� ��R� ہ�کا پا� �R �گائ�Rں�";
+      return 'آج $districtLabel میں درجہ حرارت زیادہ ہے۔ $crop کے لیے آبپاشی کا وقفہ کم رکھیں اور سایہ کا انتظام کریں۔';
     }
     if (temp < 10 && temp != 0.0) {
-      return "سرد�R ا��ر ک��ر� کا خطرہ� $crop ک�R حفاظت ک� ��R� دھ��اں �Rا ہ�کا پا� �R استع�&ا� کر�Rں�";
+      return 'آج $districtLabel میں سردی میں اضافہ ہے۔ $crop کو ٹھنڈی ہوا اور کہر سے بچانے کے لیے حفاظتی ڈھانپ استعمال کریں۔';
     }
 
-    return "�&��س�& $crop ک� ��R� سازگار ہ�� زرع�R �&اہر�R�  ک� �&طاب� �&ع�&��� ک� کا�& جار�R رکھ�Rں�";
+    return 'آج $districtLabel میں موسم نسبتاً سازگار ہے۔ $crop کے لیے معمول کے مطابق آبپاشی اور ذخیرہ کاری جاری رکھیں۔';
+  }
+
+  String _normalizeAdvisory(String raw) {
+    final cleaned = raw
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .replaceAll('*', '')
+        .trim();
+    if (cleaned.isEmpty) return '';
+    return cleaned;
+  }
+
+  bool _containsLatin(String text) {
+    return RegExp(r'[A-Za-z]').hasMatch(text);
+  }
+
+  bool _looksTechnical(String text) {
+    final lower = text.toLowerCase();
+    return lower.contains('debug') ||
+        lower.contains('error') ||
+        lower.contains('stack') ||
+        lower.contains('exception');
+  }
+
+  String _normalizeDistrict(String? district) {
+    final value = (district ?? '').trim();
+    if (value.isEmpty) return '';
+    final lower = value.toLowerCase();
+    const urduMap = <String, String>{
+      'lahore': 'لاہور',
+      'kasur': 'قصور',
+      'multan': 'ملتان',
+      'faisalabad': 'فیصل آباد',
+      'islamabad': 'اسلام آباد',
+      'karachi': 'کراچی',
+      'peshawar': 'پشاور',
+      'quetta': 'کوئٹہ',
+      'punjab': 'پنجاب',
+      'sindh': 'سندھ',
+    };
+    if (urduMap.containsKey(lower)) {
+      return urduMap[lower]!;
+    }
+    return value;
+  }
+
+  String _toUrduCropLabel(String value) {
+    final v = value.trim().toLowerCase();
+    if (v.isEmpty) return 'عمومی فصل';
+
+    if (v.contains('wheat') || v.contains('گندم')) return 'گندم';
+    if (v.contains('rice') || v.contains('چاول') || v.contains('دھان')) {
+      return 'چاول';
+    }
+    if (v.contains('cotton') || v.contains('کپاس')) return 'کپاس';
+    if (v.contains('maize') || v.contains('corn') || v.contains('مکئی')) {
+      return 'مکئی';
+    }
+    if (v.contains('sugarcane') || v.contains('گنا')) return 'گنا';
+    if (v.contains('vegetable') || v.contains('سبزی')) return 'سبزیاں';
+    if (v.contains('fruit') || v.contains('پھل')) return 'پھل';
+    if (v.contains('livestock') || v.contains('مویشی')) return 'مویشی';
+    if (v.contains('milk') || v.contains('دودھ')) return 'دودھ';
+    if (v.contains('seed') || v.contains('بیج')) return 'بیج';
+    if (v.contains('fertilizer') || v.contains('کھاد')) return 'کھاد';
+
+    if (_containsLatin(v)) return 'عمومی فصل';
+    return value;
+  }
+
+  String _conditionToUrdu(String condition) {
+    final c = condition.trim().toLowerCase();
+    if (c.isEmpty) return 'صاف موسم';
+    if (c.contains('thunder')) return 'گرج چمک کے ساتھ بارش';
+    if (c.contains('drizzle')) return 'ہلکی بارش';
+    if (c.contains('rain') || c.contains('shower')) return 'بارش';
+    if (c.contains('cloud')) return 'ابر آلود';
+    if (c.contains('mist') || c.contains('fog') || c.contains('haze')) {
+      return 'دھند';
+    }
+    if (c.contains('wind')) return 'تیز ہوا';
+    if (c.contains('sun') || c.contains('clear')) return 'صاف موسم';
+    return _containsLatin(condition) ? 'موسمی صورتحال' : condition;
   }
 }
-

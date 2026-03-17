@@ -18,7 +18,9 @@ class AppEntry extends StatelessWidget {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
             backgroundColor: Color(0xFF011A0A),
-            body: Center(child: CircularProgressIndicator(color: Color(0xFFFFD700))),
+            body: Center(
+              child: CircularProgressIndicator(color: Color(0xFFFFD700)),
+            ),
           );
         }
 
@@ -37,7 +39,9 @@ class AppEntry extends StatelessWidget {
             if (userSnap.connectionState == ConnectionState.waiting) {
               return const Scaffold(
                 backgroundColor: Color(0xFF011A0A),
-                body: Center(child: CircularProgressIndicator(color: Color(0xFFFFD700))),
+                body: Center(
+                  child: CircularProgressIndicator(color: Color(0xFFFFD700)),
+                ),
               );
             }
 
@@ -49,19 +53,32 @@ class AppEntry extends StatelessWidget {
             // Extract User Data
             var userData = userSnap.data!.data() as Map<String, dynamic>;
             String role =
-              (userData['userRole'] ?? userData['role'] ?? userData['userType'] ?? '')
-                .toString()
-                .trim()
-                .toLowerCase();
+                (userData['userRole'] ??
+                        userData['role'] ??
+                        userData['userType'] ??
+                        '')
+                    .toString()
+                    .trim()
+                    .toLowerCase();
             bool isApproved = userData['isApproved'] ?? false;
 
             // 4. Role-Based Routing
             if (role == 'buyer') {
               // �S& FIX: BuyerDashboard ko userData pass kar diya aur 'const' hata diya
-              return BuyerDashboard(userData: userData); 
-            } 
-            else if (role == 'seller' || role == 'arhat') {
+              return BuyerDashboard(userData: userData);
+            } else if (role == 'seller' || role == 'arhat') {
+              final String verificationStatus =
+                  (userData['verificationStatus'] ?? '')
+                      .toString()
+                      .trim()
+                      .toLowerCase();
+              final bool isVerified =
+                  userData['is_verified'] == true ||
+                  userData['isVerified'] == true;
               if (!isApproved && role == 'arhat') {
+                return const VerificationPendingScreen();
+              }
+              if (!isVerified || verificationStatus == 'pending_review') {
                 return const VerificationPendingScreen();
               }
               return SellerDashboard(userData: userData);

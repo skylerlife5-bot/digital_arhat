@@ -464,7 +464,7 @@ class _PayoutManagementScreenState extends State<PayoutManagementScreen> {
                               label: Text(
                                 busy
                                     ? 'Processing...'
-                                    : '�x� Release Funds to Seller',
+                                    : 'ðŸ’° Release Funds to Seller',
                               ),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.green,

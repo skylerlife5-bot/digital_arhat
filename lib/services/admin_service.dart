@@ -1,5 +1,6 @@
 ﻿import 'package:cloud_firestore/cloud_firestore.dart';
 import 'market_rate_service.dart';
+import 'phase1_notification_engine.dart';
 
 class FraudScoreResult {
   final double marketAverage;
@@ -29,6 +30,8 @@ class AdminService {
 
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final MarketRateService _marketRateService = MarketRateService();
+  final Phase1NotificationEngine _phase1Notifications =
+      Phase1NotificationEngine();
 
   Future<double> calculateTotalCommission() async {
     final listingSnap = await _db.collection('listings').get();
@@ -102,11 +105,24 @@ class AdminService {
   }
 
   Future<void> approveListingVisibility(String listingId) async {
+    final listingSnap = await _db.collection('listings').doc(listingId).get();
+    final listingData = listingSnap.data() ?? <String, dynamic>{};
+    final sellerId = (listingData['sellerId'] ?? '').toString().trim();
+
     await _db.collection('listings').doc(listingId).update({
       'isApproved': true,
       'status': 'active',
       'approvedAt': FieldValue.serverTimestamp(),
     });
+
+    if (sellerId.isNotEmpty) {
+      await _phase1Notifications.createOnce(
+        userId: sellerId,
+        type: Phase1NotificationType.listingApproved,
+        listingId: listingId,
+        targetRole: 'seller',
+      );
+    }
   }
 
   Future<void> forceActivateListing(String docId) async {

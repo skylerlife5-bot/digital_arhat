@@ -14,8 +14,6 @@ class AudioNoteWidget extends StatefulWidget {
 
 class _AudioNoteWidgetState extends State<AudioNoteWidget>
     with SingleTickerProviderStateMixin {
-  static const String _urduFont = 'Jameel Noori Nastaliq';
-
   late AudioRecorder _audioRecorder;
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
@@ -46,23 +44,34 @@ class _AudioNoteWidgetState extends State<AudioNoteWidget>
     super.dispose();
   }
 
-  // �x}"️ Recording Logic
   Future<void> _startRecording() async {
     try {
-      if (await _audioRecorder.hasPermission()) {
-        HapticFeedback.lightImpact();
-        final directory = await getApplicationDocumentsDirectory();
-        final path = '${directory.path}/audio_note_${DateTime.now().millisecondsSinceEpoch}.m4a';
-
-        const config = RecordConfig();
-        await _audioRecorder.start(config, path: path);
-
-        setState(() {
-          _isRecording = true;
-          _audioPath = null;
-        });
-        _pulseController.repeat(reverse: true);
+      final hasPermission = await _audioRecorder.hasPermission();
+      if (!hasPermission) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Please allow microphone permission / براہِ کرم مائیکروفون اجازت دیں',
+            ),
+          ),
+        );
+        return;
       }
+
+      HapticFeedback.lightImpact();
+      final directory = await getApplicationDocumentsDirectory();
+      final path =
+          '${directory.path}/audio_note_${DateTime.now().millisecondsSinceEpoch}.m4a';
+
+      const config = RecordConfig();
+      await _audioRecorder.start(config, path: path);
+
+      setState(() {
+        _isRecording = true;
+        _audioPath = null;
+      });
+      _pulseController.repeat(reverse: true);
     } catch (e) {
       debugPrint("Error starting record: $e");
     }
@@ -80,7 +89,6 @@ class _AudioNoteWidgetState extends State<AudioNoteWidget>
     widget.onRecordingComplete(path);
   }
 
-  // �x` Playback Logic
   void _playRecording() async {
     if (_audioPath != null) {
       HapticFeedback.lightImpact();
@@ -95,122 +103,130 @@ class _AudioNoteWidgetState extends State<AudioNoteWidget>
   @override
   Widget build(BuildContext context) {
     const goldColor = Color(0xFFFFD700);
+    const deepGreen = Color(0xFF0D2F1B);
+
+    String statusLabel;
+    if (_isRecording) {
+      statusLabel = 'Recording... / ریکارڈنگ جاری ہے';
+    } else if (_audioPath != null) {
+      statusLabel = 'Recorded successfully / کامیابی سے ریکارڈ ہوگیا';
+    } else {
+      statusLabel = 'Tap to record / ریکارڈ کرنے کے لیے دبائیں';
+    }
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.white.withAlpha(15),
+        color: const Color(0x1AFFFFFF),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: _isRecording ? goldColor : Colors.white10),
+        border: Border.all(
+          color: _isRecording
+              ? goldColor
+              : Colors.white.withValues(alpha: 0.2),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            "Audio Note / Awaazi Paigham",
+            'Voice note for buyers / خریدار کے لیے صوتی پیغام',
             style: TextStyle(
               color: Colors.white,
-              fontSize: 13,
+              fontSize: 13.5,
               fontWeight: FontWeight.w700,
-              fontFamily: _urduFont,
             ),
           ),
           const SizedBox(height: 2),
           const Text(
-            "Maal ke bare mein bol kar batayein",
+            'Explain quality, stock, or delivery details in your own voice / اپنی آواز میں معیار، اسٹاک، یا ترسیل کی تفصیل بتائیں',
             style: TextStyle(
               color: Colors.white70,
               fontSize: 11,
-              fontFamily: _urduFont,
             ),
           ),
           const SizedBox(height: 10),
-
-          if (_audioPath == null)
-            Center(
-              child: GestureDetector(
-                onLongPressStart: (_) => _startRecording(),
-                onLongPressEnd: (_) => _stopRecording(),
-              child: Column(
+          Row(
+            children: [
+              ScaleTransition(
+                scale: _pulseAnimation,
+                child: ElevatedButton.icon(
+                  onPressed: _isRecording ? _stopRecording : _startRecording,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _isRecording ? Colors.redAccent : goldColor,
+                    foregroundColor: Colors.black,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  icon: Icon(_isRecording ? Icons.stop : Icons.mic),
+                  label: Text(
+                    _isRecording
+                        ? 'Stop / بند کریں'
+                        : 'Record / ریکارڈ',
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  statusLabel,
+                  style: TextStyle(
+                    color: _isRecording
+                        ? Colors.red.shade200
+                        : Colors.white.withValues(alpha: 0.88),
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (_audioPath != null) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: deepGreen.withValues(alpha: 0.55),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
+              ),
+              child: Row(
                 children: [
-                  ScaleTransition(
-                    scale: _pulseAnimation,
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 220),
-                      height: 48,
-                      width: 48,
-                      decoration: BoxDecoration(
-                        color: _isRecording ? Colors.redAccent : goldColor,
-                        shape: BoxShape.circle,
-                        boxShadow: _isRecording
-                            ? [
-                                BoxShadow(
-                                  color: Colors.redAccent.withAlpha(95),
-                                  blurRadius: 14,
-                                  spreadRadius: 1,
-                                ),
-                              ]
-                            : [
-                                BoxShadow(
-                                  color: goldColor.withAlpha(70),
-                                  blurRadius: 9,
-                                ),
-                              ],
-                      ),
-                      child: Icon(
-                        _isRecording ? Icons.mic : Icons.mic_none,
-                        size: 22,
-                        color: Colors.black,
+                  IconButton(
+                    onPressed: _playRecording,
+                    icon: Icon(
+                      _isPlaying ? Icons.pause_circle : Icons.play_circle,
+                      color: goldColor,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      _isPlaying
+                          ? 'Playing... / چل رہا ہے'
+                          : 'Tap play to listen / سننے کے لیے پلے دبائیں',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.88),
+                        fontSize: 11.5,
                       ),
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _isRecording
-                        ? "Recording ho rahi hai... (Chorhein)"
-                        : "Mic daba kar rakhein",
-                    style: TextStyle(
-                      color: _isRecording ? Colors.redAccent : Colors.white38,
-                      fontSize: 10.5,
-                      fontFamily: _urduFont,
+                  TextButton.icon(
+                    onPressed: () {
+                      HapticFeedback.lightImpact();
+                      setState(() => _audioPath = null);
+                      widget.onRecordingComplete(null);
+                    },
+                    icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                    label: const Text(
+                      'Remove',
+                      style: TextStyle(color: Colors.redAccent),
                     ),
                   ),
                 ],
               ),
-              ),
-            )
-          else
-            // Preview & Delete Layout
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: [
-                IconButton(
-                  onPressed: () {
-                    HapticFeedback.lightImpact();
-                    setState(() => _audioPath = null);
-                    widget.onRecordingComplete(null);
-                  },
-                  icon: const Icon(Icons.delete_forever, color: Colors.redAccent),
-                ),
-                ElevatedButton.icon(
-                  onPressed: _playRecording,
-                  style: ElevatedButton.styleFrom(backgroundColor: goldColor),
-                  icon: Icon(_isPlaying ? Icons.pause : Icons.play_arrow, color: Colors.black),
-                  label: const Text(
-                    "Sunein",
-                    style: TextStyle(color: Colors.black, fontFamily: _urduFont),
-                  ),
-                ),
-                const Text(
-                  "Record ho gaya!",
-                  style: TextStyle(
-                    color: Colors.greenAccent,
-                    fontSize: 12,
-                    fontFamily: _urduFont,
-                  ),
-                ),
-              ],
             ),
+          ],
         ],
       ),
     );

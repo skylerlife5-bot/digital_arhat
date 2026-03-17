@@ -1,48 +1,103 @@
-﻿enum MandiType { crops, livestock, milk, fruit, vegetables }
+﻿enum MandiType {
+  crops,
+  fruit,
+  vegetables,
+  flowers,
+  livestock,
+  milk,
+  seeds,
+  fertilizer,
+  machinery,
+  tools,
+  dryFruits,
+  spices,
+}
 
 extension MandiTypeX on MandiType {
   String get wireValue {
     switch (this) {
       case MandiType.crops:
         return 'CROPS';
-      case MandiType.livestock:
-        return 'LIVESTOCK';
-      case MandiType.milk:
-        return 'MILK';
       case MandiType.fruit:
         return 'FRUIT';
       case MandiType.vegetables:
         return 'VEGETABLES';
+      case MandiType.flowers:
+        return 'FLOWERS';
+      case MandiType.livestock:
+        return 'LIVESTOCK';
+      case MandiType.milk:
+        return 'MILK_DAIRY';
+      case MandiType.seeds:
+        return 'SEEDS';
+      case MandiType.fertilizer:
+        return 'FERTILIZER';
+      case MandiType.machinery:
+        return 'MACHINERY';
+      case MandiType.tools:
+        return 'TOOLS';
+      case MandiType.dryFruits:
+        return 'DRY_FRUITS';
+      case MandiType.spices:
+        return 'SPICES';
     }
   }
 
   String get label {
     switch (this) {
       case MandiType.crops:
-        return 'Crop (Fasal)';
-      case MandiType.livestock:
-        return 'Livestock (Maweshi)';
-      case MandiType.milk:
-        return 'Milk (Doodh)';
+        return 'Crops / فصلیں';
       case MandiType.fruit:
-        return 'Fruit (Phal)';
+        return 'Fruits / پھل';
       case MandiType.vegetables:
-        return 'Veg (Sabzi)';
+        return 'Vegetables / سبزیاں';
+      case MandiType.flowers:
+        return 'Flowers / پھول';
+      case MandiType.livestock:
+        return 'Livestock / مویشی';
+      case MandiType.milk:
+        return 'Milk & Dairy / دودھ و ڈیری';
+      case MandiType.seeds:
+        return 'Seeds / بیج';
+      case MandiType.fertilizer:
+        return 'Fertilizer / کھاد';
+      case MandiType.machinery:
+        return 'Machinery / مشینری';
+      case MandiType.tools:
+        return 'Tools / اوزار';
+      case MandiType.dryFruits:
+        return 'Dry Fruits / خشک میوہ جات';
+      case MandiType.spices:
+        return 'Spices / مصالحہ جات';
     }
   }
 
   String get urduLabel {
     switch (this) {
       case MandiType.crops:
-        return 'غ�ہ/فص��Rں';
-      case MandiType.livestock:
-        return '�&���Rش�R';
-      case MandiType.milk:
-        return 'د��دھ �� ���Rر�R';
+        return 'فصلیں';
       case MandiType.fruit:
-        return 'پھ�';
+        return 'پھل';
       case MandiType.vegetables:
-        return 'سبز�Rاں';
+        return 'سبزیاں';
+      case MandiType.flowers:
+        return 'پھول';
+      case MandiType.livestock:
+        return 'مویشی';
+      case MandiType.milk:
+        return 'دودھ و ڈیری';
+      case MandiType.seeds:
+        return 'بیج';
+      case MandiType.fertilizer:
+        return 'کھاد';
+      case MandiType.machinery:
+        return 'مشینری';
+      case MandiType.tools:
+        return 'اوزار';
+      case MandiType.dryFruits:
+        return 'خشک میوہ جات';
+      case MandiType.spices:
+        return 'مصالحہ جات';
     }
   }
 }
@@ -64,7 +119,7 @@ extension ListingGradeX on ListingGrade {
   String get urduLabel {
     switch (this) {
       case ListingGrade.a:
-        return 'درجہ ا�ف';
+        return 'درجہ الف';
       case ListingGrade.b:
         return 'درجہ ب';
       case ListingGrade.c:
@@ -94,102 +149,222 @@ extension UnitTypeX on UnitType {
   String get urduLabel {
     switch (this) {
       case UnitType.peti:
-        return 'پ�Rٹ�R';
+        return 'پیٹی';
       case UnitType.mann:
-        return '�&� ';
+        return 'من';
       case UnitType.litre:
-        return '��Rٹر';
+        return 'لیٹر';
       case UnitType.kg:
-        return 'ک���';
+        return 'کلو';
       case UnitType.perHead:
-        return 'ف�R جا� ��ر';
+        return 'فی جانور';
     }
   }
 }
 
 class CategoryConstants {
   static const List<String> crops = [
-    'Wheat (Gandum)',
-    'Rice - Basmati',
-    'Rice - Irri',
-    'Cotton (Phutti)',
-    'Sugarcane (Kamad)',
-    'Maize (Makai)',
-    'Gram (Chana)',
-    'Mustard (Sarson/Raya)',
-    'Tobacco',
-    'Barley (Jao)',
-    'Millet (Bajra)',
-    'Sorghum (Jawar)',
-    'Sesame (Til)',
-    'Canola',
+    'Wheat / گندم',
+    'Rice Crop (Paddy) / دھان',
+    'Processed Rice / چاول',
+    'Cotton / کپاس',
+    'Sugarcane / گنا',
+    'Maize / مکئی',
+    'Gram / چنا',
+    'Mustard / سرسوں',
+    'Barley / جو',
+    'Millet / باجرا',
+    'Sorghum / جوار',
+    'Lentils / دالیں',
+    'Sunflower / سورج مکھی',
+    'Canola / کینولا',
   ];
 
-  static const List<String> vegetables = [
-    'Potato (Aloo)',
-    'Onion (Piaz)',
-    'Tomato (Tamatar)',
-    'Green Chili (Sabz Mirch)',
-    'Garlic (Lehsan)',
-    'Ginger (Adrak)',
-    'Okra (Bhindi)',
-    'Eggplant (Baingan)',
-    'Cauliflower (Phool Gobi)',
-    'Cabbage (Band Gobi)',
-    'Bitter Gourd (Karela)',
-    'Spinach (Palak)',
-    'Peas (Matar)',
-    'Radish (Mooli)',
-    'Carrot (Gajar)',
-    'Pumpkin (Kaddu)',
+  static const List<String> riceCropVarieties = [
+    'Basmati Paddy / باسمتی دھان',
+    'IRRI Paddy / اری دھان',
+    'Hybrid Paddy / ہائبرڈ دھان',
+    'Kainat Paddy / کائنات دھان',
+  ];
+
+  static const List<String> processedRiceVarieties = [
+    'Basmati Rice / باسمتی چاول',
+    'Super Basmati / سپر باسمتی',
+    'IRRI Rice / اری چاول',
+    'Sella Rice / سیلہ چاول',
+    'Broken Rice / ٹوٹا چاول',
+    'Brown Rice / براؤن چاول',
+    'Export Rice / ایکسپورٹ چاول',
   ];
 
   static const List<String> fruits = [
-    'Mango (Aam - Chaunsa/Sindhri/Anwar Ratol)',
-    'Citrus (Kinnow/Musambi)',
-    'Apple (Saib - Kala Kulu/Gacha)',
-    'Dates (Khajoor)',
-    'Guava (Amrood)',
-    'Banana (Kela)',
-    'Grapes (Angoor)',
-    'Pomegranate (Anar)',
-    'Apricot (Khubani)',
-    'Peach (Aaroo)',
-    'Plum (Aloo Bukhara)',
-    'Melon (Kharbooza)',
-    'Watermelon (Tarbooz)',
+    'Mango / آم',
+    'Kinnow / کینو',
+    'Orange / مالٹا',
+    'Apple / سیب',
+    'Banana / کیلا',
+    'Guava / امرود',
+    'Dates / کھجور',
+    'Pomegranate / انار',
+    'Peach / آڑو',
+    'Apricot / خوبانی',
+    'Plum / آلو بخارا',
+    'Grapes / انگور',
+    'Melon / خربوزہ',
+    'Watermelon / تربوز',
+  ];
+
+  static const List<String> vegetables = [
+    'Potato / آلو',
+    'Onion / پیاز',
+    'Tomato / ٹماٹر',
+    'Chili / مرچ',
+    'Garlic / لہسن',
+    'Ginger / ادرک',
+    'Okra / بھنڈی',
+    'Brinjal / بینگن',
+    'Cabbage / بند گوبھی',
+    'Cauliflower / پھول گوبھی',
+    'Spinach / پالک',
+    'Peas / مٹر',
+    'Carrot / گاجر',
+    'Radish / مولی',
+    'Turnip / شلجم',
+    'Capsicum / شملہ مرچ',
+  ];
+
+  static const List<String> flowers = [
+    'Rose / گلاب',
+    'Jasmine / چنبیلی',
+    'Marigold / گیندا',
+    'Tuberose / راجنی گندھا',
+    'Gladiolus / گلائیڈیولس',
+    'Chrysanthemum / گلِ داؤدی',
+    'Lotus / کنول',
+    'Seasonal Flowers / موسمی پھول',
+    'Loose Flowers / کھلے پھول',
+    'Garland Flowers / ہار کے پھول',
+    'Wedding Flowers / شادی کے پھول',
   ];
 
   static const List<String> livestock = [
-    'Cow (Gaaye)',
-    'Buffalo (Bhains)',
-    'Goat (Bakri)',
-    'Sheep (Bhair)',
-    'Camel (Oont)',
-    'Bull (Saand/Wacha)',
+    'Cow / گائے',
+    'Buffalo / بھینس',
+    'Bull / بیل',
+    'Goat / بکری',
+    'Sheep / بھیڑ',
+    'Camel / اونٹ',
+    'Calf / بچھڑا',
+    'Poultry / مرغی',
+    'Eggs / انڈے',
   ];
 
-  static const List<String> dairyAndPoultry = [
-    'Milk (Cow)',
-    'Milk (Buffalo)',
-    'Desi Ghee',
-    'Eggs (Farm)',
-    'Eggs (Desi)',
-    'Chicken (Broiler)',
+  static const List<String> milkAndDairy = [
+    'Raw Milk / کچا دودھ',
+    'Buffalo Milk / بھینس کا دودھ',
+    'Cow Milk / گائے کا دودھ',
+    'Yogurt / دہی',
+    'Butter / مکھن',
+    'Desi Ghee / دیسی گھی',
+    'Cream / بالائی',
   ];
+
+  static const List<String> seeds = [
+    'Wheat Seed / گندم بیج',
+    'Rice Seed / دھان بیج',
+    'Cotton Seed / کپاس بیج',
+    'Maize Seed / مکئی بیج',
+    'Vegetable Seeds / سبزی بیج',
+    'Fodder Seeds / چارہ بیج',
+    'Hybrid Seeds / ہائبرڈ بیج',
+  ];
+
+  static const List<String> fertilizer = [
+    'Urea / یوریا',
+    'DAP / ڈی اے پی',
+    'NP / این پی',
+    'NPK / این پی کے',
+    'SOP / پوٹاش',
+    'SSP / ایس ایس پی',
+    'Organic Fertilizer / نامیاتی کھاد',
+    'Compost / کمپوسٹ',
+  ];
+
+  static const List<String> machinery = [
+    'Tractor / ٹریکٹر',
+    'Harvester / ہارویسٹر',
+    'Seeder / سیڈر',
+    'Sprayer / سپرے مشین',
+    'Rotavator / روٹاویٹر',
+    'Plough / ہل',
+    'Thresher / تھریشر',
+  ];
+
+  static const List<String> tools = [
+    'Shovel / بیلچہ',
+    'Spade / پھاؤڑا',
+    'Hoe / کدال',
+    'Sickle / درانتی',
+    'Hand Sprayer / ہینڈ سپرے',
+    'Water Pump / واٹر پمپ',
+  ];
+
+  static const List<String> dryFruits = [
+    'Almond / بادام',
+    'Walnut / اخروٹ',
+    'Pistachio / پستہ',
+    'Raisins / کشمش',
+    'Cashew / کاجو',
+    'Dry Dates / خشک کھجور',
+  ];
+
+  static const List<String> spices = [
+    'Red Chili / لال مرچ',
+    'Turmeric / ہلدی',
+    'Coriander / دھنیا',
+    'Cumin / زیرہ',
+    'Black Pepper / کالی مرچ',
+    'Cloves / لونگ',
+    'Cardamom / الائچی',
+  ];
+
+  static List<String> riceVarietiesForProduct(String productLabel) {
+    final value = productLabel.toLowerCase();
+    if (value.contains('rice crop (paddy)') || value.contains('دھان')) {
+      return riceCropVarieties;
+    }
+    if (value.contains('processed rice') || value.contains('چاول')) {
+      return processedRiceVarieties;
+    }
+    return const <String>[];
+  }
 
   static List<String> itemsForMandiType(MandiType type) {
     switch (type) {
       case MandiType.crops:
         return crops;
-      case MandiType.vegetables:
-        return vegetables;
       case MandiType.fruit:
         return fruits;
+      case MandiType.vegetables:
+        return vegetables;
+      case MandiType.flowers:
+        return flowers;
       case MandiType.livestock:
         return livestock;
       case MandiType.milk:
-        return dairyAndPoultry;
+        return milkAndDairy;
+      case MandiType.seeds:
+        return seeds;
+      case MandiType.fertilizer:
+        return fertilizer;
+      case MandiType.machinery:
+        return machinery;
+      case MandiType.tools:
+        return tools;
+      case MandiType.dryFruits:
+        return dryFruits;
+      case MandiType.spices:
+        return spices;
     }
   }
 
@@ -197,13 +372,22 @@ class CategoryConstants {
     switch (type) {
       case MandiType.crops:
         return UnitType.mann;
-      case MandiType.vegetables:
       case MandiType.fruit:
+      case MandiType.vegetables:
+      case MandiType.flowers:
         return UnitType.kg;
       case MandiType.milk:
         return UnitType.litre;
       case MandiType.livestock:
         return UnitType.perHead;
+      case MandiType.seeds:
+      case MandiType.fertilizer:
+      case MandiType.spices:
+      case MandiType.dryFruits:
+        return UnitType.kg;
+      case MandiType.machinery:
+      case MandiType.tools:
+        return UnitType.peti;
     }
   }
 
@@ -211,13 +395,21 @@ class CategoryConstants {
     switch (type) {
       case MandiType.crops:
         return const [UnitType.mann, UnitType.kg];
-      case MandiType.vegetables:
       case MandiType.fruit:
+      case MandiType.vegetables:
+      case MandiType.flowers:
+      case MandiType.seeds:
+      case MandiType.fertilizer:
+      case MandiType.spices:
+      case MandiType.dryFruits:
         return const [UnitType.kg];
       case MandiType.milk:
         return const [UnitType.litre, UnitType.kg, UnitType.perHead];
       case MandiType.livestock:
         return const [UnitType.perHead];
+      case MandiType.machinery:
+      case MandiType.tools:
+        return const [UnitType.peti, UnitType.kg];
     }
   }
 
@@ -417,7 +609,8 @@ class AppConstants {
     pakistanLocations['Punjab'] ?? const <String>[],
   );
 
-  static List<String> get provinces => pakistanLocations.keys.toList(growable: false);
+  static List<String> get provinces =>
+      pakistanLocations.keys.toList(growable: false);
 
   static List<String> districtsForProvince(String? province) {
     if (province == null || province.trim().isEmpty) {
@@ -476,11 +669,11 @@ class AppConstants {
   // �x� App Info
   static const String appName = 'Digital Arhat';
   static const String currency = 'Rs.';
-  static const String firebaseDynamicLinkDomain = 'https://digitalarhat.page.link';
+  static const String firebaseDynamicLinkDomain =
+      'https://digitalarhat.page.link';
   static const String appDeepLinkBase = 'https://digitalarhat.app';
 
   // �x� Commission Rates
   static const double buyerFeeRate = 0.01; // 1%
   static const double sellerFeeRate = 0.01; // 1%
 }
-

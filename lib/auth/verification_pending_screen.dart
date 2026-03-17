@@ -25,7 +25,7 @@ class VerificationPendingScreen extends StatelessWidget {
               ),
             ),
           ),
-          
+
           Center(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 40.0),
@@ -34,20 +34,24 @@ class VerificationPendingScreen extends StatelessWidget {
                 children: [
                   // Animated Clock/Time Icon to show "Pending"
                   Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: const Color(0xFFFFD700).withValues(alpha: 0.1),
-                    ),
-                    child: const Icon(
-                      Icons.history_toggle_off_rounded,
-                      size: 100,
-                      color: Color(0xFFFFD700),
-                    ),
-                  )
-                  .animate(onPlay: (controller) => controller.repeat())
-                  .shimmer(duration: 2.seconds, color: Colors.white30)
-                  .scale(begin: const Offset(1, 1), end: const Offset(1.05, 1.05), curve: Curves.easeInOut),
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: const Color(0xFFFFD700).withValues(alpha: 0.1),
+                        ),
+                        child: const Icon(
+                          Icons.history_toggle_off_rounded,
+                          size: 100,
+                          color: Color(0xFFFFD700),
+                        ),
+                      )
+                      .animate(onPlay: (controller) => controller.repeat())
+                      .shimmer(duration: 2.seconds, color: Colors.white30)
+                      .scale(
+                        begin: const Offset(1, 1),
+                        end: const Offset(1.05, 1.05),
+                        curve: Curves.easeInOut,
+                      ),
 
                   const SizedBox(height: 40),
 
@@ -55,9 +59,9 @@ class VerificationPendingScreen extends StatelessWidget {
                   const Text(
                     "تصد�R� جار�R ہ�",
                     style: TextStyle(
-                      fontSize: 32, 
-                      fontFamily: 'Jameel Noori', 
-                      color: Color(0xFFFFD700)
+                      fontSize: 32,
+                      fontFamily: 'Jameel Noori',
+                      color: Color(0xFFFFD700),
                     ),
                   ).animate().fadeIn(duration: 800.ms).slideY(begin: 0.3),
 
@@ -68,10 +72,10 @@ class VerificationPendingScreen extends StatelessWidget {
                     "آپ ک�R فراہ�& کردہ �&ع����&ات ک�R جا� �  پ�تا� ک�R جا رہ�R ہ�� تصد�R� �&ک�&� ہ��ت� ہ�R آپ ک�� اط�اع د� د�R جائ� گ�R�",
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      color: Colors.white70, 
-                      fontSize: 16, 
+                      color: Colors.white70,
+                      fontSize: 16,
                       fontFamily: 'Jameel Noori',
-                      height: 1.5
+                      height: 1.5,
                     ),
                   ).animate().fadeIn(delay: 400.ms),
 
@@ -111,13 +115,20 @@ class VerificationPendingScreen extends StatelessWidget {
           SizedBox(
             width: 20,
             height: 20,
-            child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFFFD700)),
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: Color(0xFFFFD700),
+            ),
           ),
           SizedBox(width: 15),
           Expanded(
             child: Text(
               "Admin Verification: Pending",
-              style: TextStyle(color: Colors.white54, fontSize: 13, letterSpacing: 1),
+              style: TextStyle(
+                color: Colors.white54,
+                fontSize: 13,
+                letterSpacing: 1,
+              ),
             ),
           ),
         ],
@@ -132,20 +143,28 @@ class VerificationPendingScreen extends StatelessWidget {
         onPressed: () async {
           await FirebaseAuth.instance.signOut();
           if (!context.mounted) return;
-          Navigator.of(context).pushNamedAndRemoveUntil(
-            Routes.signIn,
-            (route) => false,
-          );
+          Navigator.of(
+            context,
+          ).pushNamedAndRemoveUntil(Routes.welcome, (route) => false);
         },
-        icon: const Icon(Icons.logout_rounded, color: Colors.redAccent, size: 20),
+        icon: const Icon(
+          Icons.logout_rounded,
+          color: Colors.redAccent,
+          size: 20,
+        ),
         label: const Text(
           "�اگ آؤٹ کر�Rں / Logout",
-          style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold),
+          style: TextStyle(
+            color: Colors.redAccent,
+            fontWeight: FontWeight.bold,
+          ),
         ),
         style: TextButton.styleFrom(
           padding: const EdgeInsets.symmetric(vertical: 15),
           side: BorderSide(color: Colors.redAccent.withValues(alpha: 0.3)),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
         ),
       ),
     );
@@ -160,7 +179,11 @@ class VerificationPendingScreen extends StatelessWidget {
         },
         child: const Text(
           "Continue to Dashboard (Testing)",
-          style: TextStyle(color: Colors.white38, fontSize: 12, decoration: TextDecoration.underline),
+          style: TextStyle(
+            color: Colors.white38,
+            fontSize: 12,
+            decoration: TextDecoration.underline,
+          ),
         ),
       ),
     );

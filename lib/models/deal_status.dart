@@ -1,4 +1,4 @@
-﻿enum DealStatus {
+enum DealStatus {
   active,
   pendingAdminApproval,
   awaitingPayment,
@@ -34,4 +34,3 @@ extension DealStatusParsing on String {
     return trim().toLowerCase() == status.value;
   }
 }
-

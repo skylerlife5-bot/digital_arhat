@@ -26,5 +26,18 @@ class AnalyticsService {
       'platform': 'flutter_app',
     });
   }
+
+  Future<void> logEvent({
+    required String event,
+    Map<String, dynamic> data = const <String, dynamic>{},
+  }) async {
+    await _db.collection('marketing_stats').add({
+      'event': event,
+      'uid': _auth.currentUser?.uid ?? '',
+      'createdAt': FieldValue.serverTimestamp(),
+      'platform': 'flutter_app',
+      ...data,
+    });
+  }
 }
 

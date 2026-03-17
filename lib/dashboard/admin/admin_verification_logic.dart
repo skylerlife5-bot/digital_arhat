@@ -1,4 +1,4 @@
-﻿import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 
 class AdminVerificationLogic {
@@ -210,4 +210,3 @@ class AdminVerificationLogic {
     return double.tryParse(value?.toString() ?? '') ?? 0.0;
   }
 }
-

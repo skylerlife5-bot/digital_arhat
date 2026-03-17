@@ -1,4 +1,4 @@
-﻿import 'dart:io';
+import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -8,11 +8,18 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../config/fee_policy.dart';
 import '../core/constants.dart';
 import '../core/security_filter.dart';
 import '../core/widgets/glass_button.dart';
-import '../dashboard/components/bid_dialog.dart';
+import '../dashboard/buyer/bid_bottom_sheet.dart';
 import '../models/deal_status.dart';
+import '../services/bid_eligibility_service.dart';
+import '../theme/app_colors.dart';
+
+// Legacy duplicate listing-detail implementation.
+// Canonical buyer runtime uses dashboard/buyer/buyer_listing_detail_screen.dart.
+
 class ListingDetailScreen extends StatefulWidget {
   const ListingDetailScreen({
     super.key,
@@ -38,7 +45,7 @@ class ListingDetailScreen extends StatefulWidget {
 }
 
 class _ListingDetailScreenState extends State<ListingDetailScreen> {
-  static const Color _gold = Color(0xFFFFD700);
+  static const Color _gold = AppColors.accentGold;
 
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -161,7 +168,9 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
                 : (_toDouble(data['highestBid']) > 0
                       ? _toDouble(data['highestBid'])
                       : _toDouble(data['price'])));
-      final double adminCommission = (finalPrice * 0.01).toDouble();
+        final double adminCommission = FeePolicy.bidFeeActive
+          ? (finalPrice * FeePolicy.bidFeeRate).toDouble()
+          : 0.0;
       final double sellerPayable = (finalPrice - adminCommission).toDouble();
       final payoutDetails = <String, dynamic>{
         'total': finalPrice,
@@ -196,7 +205,9 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
         'listingId': widget.listingId,
         'dealId': dealRef,
         'message':
-            'Payout Ready: Deal $dealRef completed. Commission Earned: Rs. ${_currencyFormat.format(adminCommission)}. Please release funds to Seller.',
+            FeePolicy.bidFeeActive
+              ? 'Payout Ready: Deal $dealRef completed. Commission Earned: Rs. ${_currencyFormat.format(adminCommission)}. Please release funds to Seller.'
+              : 'Payout Ready: Deal $dealRef completed. Please release funds to Seller.',
         'isRead': false,
         'createdAt': FieldValue.serverTimestamp(),
       });
@@ -238,18 +249,18 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
         children: [
           CircleAvatar(
             radius: 12,
-            backgroundColor: done ? Colors.green : Colors.white24,
+            backgroundColor: done ? AppColors.divider : AppColors.primaryText24,
             child: Icon(
               done ? Icons.check : Icons.radio_button_unchecked,
               size: 14,
-              color: Colors.white,
+              color: AppColors.primaryText,
             ),
           ),
           const SizedBox(height: 4),
           Text(
             label,
             style: TextStyle(
-              color: done ? Colors.greenAccent : Colors.white70,
+              color: done ? AppColors.dividerAccent : AppColors.secondaryText,
               fontSize: 11,
               fontWeight: FontWeight.w600,
             ),
@@ -263,7 +274,7 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
         child: Container(
           margin: const EdgeInsets.symmetric(horizontal: 6),
           height: 2,
-          color: done ? Colors.green : Colors.white24,
+          color: done ? AppColors.divider : AppColors.primaryText24,
         ),
       );
     }
@@ -272,9 +283,9 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
       width: double.infinity,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.08),
+        color: AppColors.primaryText.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white24),
+        border: Border.all(color: AppColors.primaryText24),
       ),
       child: Row(
         children: [
@@ -425,14 +436,14 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
         }
 
         return Scaffold(
-          backgroundColor: const Color(0xFF011A0A),
+          backgroundColor: AppColors.background,
           appBar: AppBar(
             backgroundColor: Colors.transparent,
             elevation: 0,
             title: Text(
               'Listing Ki Tafseel',
               style: GoogleFonts.poppins(
-                color: Colors.white,
+                color: AppColors.primaryText,
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -448,7 +459,7 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
               return const Center(
                 child: Text(
                   'Listing not found',
-                  style: TextStyle(color: Colors.white70),
+                  style: TextStyle(color: AppColors.secondaryText),
                 ),
               );
             }
@@ -508,7 +519,7 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
               return const Center(
                 child: Text(
                   'Listing is not available for this user right now.',
-                  style: TextStyle(color: Colors.white70),
+                  style: TextStyle(color: AppColors.secondaryText),
                 ),
               );
             }
@@ -563,16 +574,27 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
     required String rate,
     required String district,
   }) {
+    final highest = _toDouble(data['highestBid']);
+    final base = _toDouble(data['startingPrice']) > 0
+        ? _toDouble(data['startingPrice'])
+        : (_toDouble(data['basePrice']) > 0 ? _toDouble(data['basePrice']) : _toDouble(data['price']));
+    final probeAmount = (highest > 0 ? highest : base) + 1;
+    final bidEligibility = BidEligibilityService.evaluate(
+      buyerId: _auth.currentUser?.uid ?? '',
+      listingData: data,
+      bidAmount: probeAmount,
+    );
+
     return Column(
       children: [
         SizedBox(
           width: double.infinity,
           child: ElevatedButton.icon(
-            icon: const Icon(Icons.share, color: Colors.black),
+            icon: const Icon(Icons.share, color: AppColors.ctaTextDark),
             label: Text(
               'WhatsApp Par Share Karein',
               style: GoogleFonts.poppins(
-                color: Colors.black,
+                color: AppColors.ctaTextDark,
                 fontWeight: FontWeight.w700,
               ),
             ),
@@ -592,26 +614,35 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
         const SizedBox(height: 10),
         SizedBox(
           width: double.infinity,
-          child: OutlinedButton.icon(
-            icon: const Icon(Icons.handshake, color: _gold),
-            label: Text(
-              'Deal Shuru Karein (Escrow)',
-              style: GoogleFonts.poppins(
-                color: _gold,
-                fontWeight: FontWeight.w700,
+          child: Tooltip(
+            message: bidEligibility.allowed ? 'Place Bid' : bidEligibility.message,
+            child: OutlinedButton.icon(
+              icon: const Icon(Icons.handshake, color: _gold),
+              label: Text(
+                'Deal Shuru Karein (Escrow)',
+                style: GoogleFonts.poppins(
+                  color: _gold,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: _gold),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+              onPressed: !bidEligibility.allowed
+                  ? null
+                  : () async {
+                      await showModalBottomSheet<void>(
+                        context: context,
+                        backgroundColor: Colors.transparent,
+                        isScrollControlled: true,
+                        builder: (_) => BidBottomSheet(
+                          listingId: widget.listingId,
+                          listingData: data,
+                        ),
+                      );
+                    },
             ),
-            style: OutlinedButton.styleFrom(
-              side: const BorderSide(color: _gold),
-              padding: const EdgeInsets.symmetric(vertical: 14),
-            ),
-            onPressed: () {
-              showDialog(
-                context: context,
-                builder: (_) =>
-                    BidDialog(productData: data, listingId: widget.listingId),
-              );
-            },
           ),
         ),
         const SizedBox(height: 10),
@@ -626,10 +657,10 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
                 ),
               );
             },
-            icon: const Icon(Icons.chat_bubble_outline, color: Colors.white70),
+            icon: const Icon(Icons.chat_bubble_outline, color: AppColors.secondaryText),
             label: Text(
               'In-App Chat',
-              style: GoogleFonts.poppins(color: Colors.white70),
+              style: GoogleFonts.poppins(color: AppColors.secondaryText),
             ),
           ),
         ),
@@ -652,7 +683,9 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
     final double bidAmount =
         double.tryParse(data['bidAmount'].toString()) ?? detectedBidAmount;
     final double subTotal = quantity * bidAmount;
-    final double commission = subTotal * 0.01;
+    final double commission = FeePolicy.bidFeeActive
+      ? (subTotal * FeePolicy.bidFeeRate)
+      : 0.0;
     final double grandTotal = quantity > 0
         ? (subTotal + commission)
         : bidAmount;
@@ -677,13 +710,13 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
     const iban = 'PK93FAYS3456786000005200';
 
     return Scaffold(
-      backgroundColor: const Color(0xFF011A0A),
+      backgroundColor: AppColors.background,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
         title: const Text(
           'Escrow Payment',
-          style: TextStyle(color: Colors.white),
+          style: TextStyle(color: AppColors.primaryText),
         ),
       ),
       body: SafeArea(
@@ -726,16 +759,16 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
                   Text(
                     'Rs. ${grandTotal.toStringAsFixed(0)}',
                     style: TextStyle(
-                      color: Colors.green,
+                      color: AppColors.divider,
                       fontWeight: FontWeight.w900,
                       fontSize: 32,
                     ),
                   ),
-                  if (quantity > 0)
+                  if (quantity > 0 && FeePolicy.bidFeeActive)
                     Text(
-                      '(Includes 1% Commission: Rs. ${commission.toStringAsFixed(0)})',
+                      '(Includes ${(FeePolicy.bidFeeRate * 100).toStringAsFixed(0)}% Commission: Rs. ${commission.toStringAsFixed(0)})',
                       style: const TextStyle(
-                        color: Colors.white70,
+                        color: AppColors.secondaryText,
                         fontWeight: FontWeight.w600,
                         fontSize: 12,
                       ),
@@ -744,7 +777,7 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
                   const Text(
                     'Bank: Faysal Bank',
                     style: TextStyle(
-                      color: Colors.white,
+                      color: AppColors.primaryText,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -752,7 +785,7 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
                   const Text(
                     'Account: 3456786000005200',
                     style: TextStyle(
-                      color: Colors.white,
+                      color: AppColors.primaryText,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -765,7 +798,7 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            color: Colors.white,
+                            color: AppColors.primaryText,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
@@ -789,14 +822,14 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
                     width: double.infinity,
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: Colors.black26,
+                      color: AppColors.ctaTextDark26,
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: Colors.white24),
+                      border: Border.all(color: AppColors.primaryText24),
                     ),
                     child: const Text(
                       'Please upload the payment receipt after transfer for Admin verification.',
                       style: TextStyle(
-                        color: Colors.white,
+                        color: AppColors.primaryText,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -807,14 +840,14 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
             const SizedBox(height: 12),
             Row(
               children: [
-                const Icon(Icons.thermostat, size: 18, color: Colors.white70),
+                const Icon(Icons.thermostat, size: 18, color: AppColors.secondaryText),
                 const SizedBox(width: 6),
                 Flexible(
                   child: Text(
                     weatherLabel,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Colors.white70),
+                    style: const TextStyle(color: AppColors.secondaryText),
                   ),
                 ),
               ],
@@ -832,7 +865,7 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
                     ? null
                     : () => _confirmDelivery(data),
                 textStyle: TextStyle(
-                  color: Colors.white,
+                  color: AppColors.primaryText,
                   fontWeight: FontWeight.w800,
                   fontFamily: GoogleFonts.poppins().fontFamily,
                 ),
@@ -844,14 +877,14 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
-                  color: Colors.red.withValues(alpha: 0.2),
+                  color: AppColors.urgencyRed.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.redAccent),
+                  border: Border.all(color: AppColors.urgencyRedAccent),
                 ),
                 child: Text(
                   'Rejected: ${adminRejectionReason.isNotEmpty ? adminRejectionReason : 'Receipt invalid. Please upload again.'}',
                   style: const TextStyle(
-                    color: Colors.white,
+                    color: AppColors.primaryText,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -868,7 +901,7 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
                   await _uploadPaymentReceipt(data);
                 },
                 textStyle: GoogleFonts.poppins(
-                  color: Colors.white,
+                  color: AppColors.primaryText,
                   fontWeight: FontWeight.w800,
                 ),
               ),
@@ -879,7 +912,7 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
                     ? _receiptUploadProgress.clamp(0.0, 1.0)
                     : null,
                 color: _gold,
-                backgroundColor: Colors.white12,
+                backgroundColor: AppColors.primaryText12,
               ),
             ],
             if (verificationInProgress && hasUploadedReceipt) ...[
@@ -888,14 +921,14 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
-                  color: Colors.amber.withValues(alpha: 0.18),
+                  color: AppColors.accentGold.withValues(alpha: 0.18),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.amber.shade300),
+                  border: Border.all(color: AppColors.accentGold),
                 ),
                 child: const Text(
                   'Verification in Progress (Admin aap ki receipt check kar raha hai)',
                   style: TextStyle(
-                    color: Colors.white,
+                    color: AppColors.primaryText,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -960,15 +993,19 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
     required double bidAmount,
     required bool paymentConfirmed,
   }) {
-    final sellerFee = bidAmount * 0.01;
+    final sellerFee = FeePolicy.bidFeeActive
+      ? (bidAmount * FeePolicy.bidFeeRate)
+      : 0.0;
     final expectedPayout = bidAmount - sellerFee;
-    final totalRevenue = bidAmount * 0.02;
+    final totalRevenue = FeePolicy.bidFeeActive
+      ? (bidAmount * (FeePolicy.bidFeeRate * 2))
+      : 0.0;
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.1),
+        color: AppColors.primaryText.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: _gold.withValues(alpha: 0.72)),
       ),
@@ -980,7 +1017,7 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
                 ? 'Payment Confirmed / Adaigi ki tasdeeq ho gayi'
                 : 'Buyer has paid. Funds are being verified by Admin.',
             style: TextStyle(
-              color: Colors.white,
+              color: AppColors.primaryText,
               fontWeight: FontWeight.w800,
               fontSize: 18,
               fontFamily: GoogleFonts.poppins().fontFamily,
@@ -992,18 +1029,26 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
             'Rs. ${_money(expectedPayout)}',
             highlight: true,
           ),
-          _financialRow(
-            'Platform Profit (1% Buyer + 1% Seller)',
-            'Rs. ${_money(totalRevenue)}',
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'Expected Payout = Bid Amount - 1% Arhat Fee',
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.85),
-              fontSize: 12,
+          if (FeePolicy.bidFeeActive) ...[
+            _financialRow(
+              'Platform Profit (${(FeePolicy.bidFeeRate * 100).toStringAsFixed(0)}% Buyer + ${(FeePolicy.bidFeeRate * 100).toStringAsFixed(0)}% Seller)',
+              'Rs. ${_money(totalRevenue)}',
             ),
-          ),
+            const SizedBox(height: 6),
+            Text(
+              'Expected Payout = Bid Amount - ${(FeePolicy.bidFeeRate * 100).toStringAsFixed(0)}% Arhat Fee',
+              style: TextStyle(
+                color: AppColors.primaryText.withValues(alpha: 0.85),
+                fontSize: 12,
+              ),
+            ),
+          ] else ...[
+            const SizedBox(height: 6),
+            Text(
+              'No platform fee is currently applied.',
+              style: TextStyle(color: AppColors.secondaryText, fontSize: 12),
+            ),
+          ],
         ],
       ),
     );
@@ -1019,7 +1064,7 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
             child: Text(
               label,
               style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.9),
+                color: AppColors.primaryText.withValues(alpha: 0.9),
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -1028,7 +1073,7 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
           Text(
             value,
             style: TextStyle(
-              color: highlight ? _gold : Colors.white,
+              color: highlight ? _gold : AppColors.primaryText,
               fontWeight: FontWeight.w800,
             ),
           ),
@@ -1051,9 +1096,9 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.07),
+        color: AppColors.primaryText.withValues(alpha: 0.07),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white12),
+        border: Border.all(color: AppColors.primaryText12),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1061,7 +1106,7 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
           Text(
             product,
             style: const TextStyle(
-              color: Colors.white,
+              color: AppColors.primaryText,
               fontSize: 20,
               fontWeight: FontWeight.w800,
             ),
@@ -1070,7 +1115,7 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
           Text(
             'Category: $category',
             style: const TextStyle(
-              color: Colors.white70,
+              color: AppColors.secondaryText,
               fontSize: 13,
               fontWeight: FontWeight.w600,
             ),
@@ -1079,7 +1124,7 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
           Text(
             'Price: Rs. $rate ${unit.isNotEmpty ? '/ $unit' : ''}',
             style: const TextStyle(
-              color: Colors.green,
+              color: AppColors.divider,
               fontWeight: FontWeight.w900,
               fontSize: 30,
             ),
@@ -1087,31 +1132,31 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
           const SizedBox(height: 6),
           Row(
             children: [
-              const Icon(Icons.thermostat, size: 18, color: Colors.white70),
+              const Icon(Icons.thermostat, size: 18, color: AppColors.secondaryText),
               const SizedBox(width: 6),
               Flexible(
                 child: Text(
                   weatherLabel,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Colors.white70),
+                  style: const TextStyle(color: AppColors.secondaryText),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 6),
-          Text('District: $district', style: const TextStyle(color: Colors.white70)),
+          Text('District: $district', style: const TextStyle(color: AppColors.secondaryText)),
           const SizedBox(height: 4),
           Text(
             'Location: $location',
-            style: const TextStyle(color: Colors.white70),
+            style: const TextStyle(color: AppColors.secondaryText),
           ),
           const SizedBox(height: 8),
           Row(
             children: [
               Icon(
                 hasVideo ? Icons.verified : Icons.info_outline,
-                color: hasVideo ? Colors.greenAccent : Colors.white54,
+                color: hasVideo ? AppColors.dividerAccent : AppColors.primaryText54,
                 size: 18,
               ),
               const SizedBox(width: 6),
@@ -1122,7 +1167,7 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
                       : 'Video tafseel app ke andar dastiyab hai',
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  style: const TextStyle(color: AppColors.secondaryText, fontSize: 12),
                 ),
               ),
             ],
@@ -1137,14 +1182,14 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
       width: double.infinity,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.blueAccent.withValues(alpha: 0.13),
+        color: AppColors.dividerAccent.withValues(alpha: 0.13),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.blueAccent.withValues(alpha: 0.35)),
+        border: Border.all(color: AppColors.dividerAccent.withValues(alpha: 0.35)),
       ),
       child: const Text(
         'Privacy Guard: Farokht karne wale ka zaati number mukammal tor par makhfi hai. Sirf deal shuru karein ya in-app chat istemal karein. Tamam len den escrow se mehfooz hai.',
         style: TextStyle(
-          color: Colors.white,
+          color: AppColors.primaryText,
           fontSize: 12,
           fontWeight: FontWeight.w600,
         ),

@@ -2,6 +2,9 @@
 import '../../services/payment_service.dart';
 import '../../core/widgets/spiritual_header.dart';
 
+// Legacy duplicate screen retained for reference only.
+// Phase-1 runtime flow keeps escrow disabled and does not navigate here.
+
 class EscrowPaymentScreen extends StatelessWidget {
   final Map<String, dynamic> dealData;
   const EscrowPaymentScreen({super.key, required this.dealData});

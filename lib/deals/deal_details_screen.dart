@@ -24,7 +24,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen> {
   final DealService _dealService = DealService();
   bool _isLoading = false;
 
-  // �S& Check if the deal has moved past the initial awaiting state
+  // âœ… Check if the deal has moved past the initial awaiting state
   bool get _isUnlocked =>
       widget.deal.status != deal_status.DealStatus.awaitingPayment.value;
 
@@ -109,7 +109,7 @@ class _DealDetailsScreenState extends State<DealDetailsScreen> {
           BoxShadow(
             color: Colors.black.withValues(
               alpha: 0.05,
-            ), // �S& Fixed Opacity Error
+            ), // âœ… Fixed Opacity Error
             blurRadius: 10,
           ),
         ],

@@ -1,4 +1,4 @@
-﻿import 'package:audioplayers/audioplayers.dart';
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
@@ -334,4 +334,3 @@ class _MediaPreviewWidgetState extends State<MediaPreviewWidget> {
     );
   }
 }
-

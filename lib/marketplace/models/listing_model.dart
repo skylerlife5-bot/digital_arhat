@@ -12,11 +12,16 @@ class ListingModel {
   final ListingGrade? grade;
   final UnitType? unitType;
   final MandiType mandiType;
+  final String category;
+  final String subcategory;
   final bool isSuspicious;
   final String videoUrl;
   final bool isVerifiedSource;
+  final String country;
   final String province;
   final String district;
+  final String tehsil;
+  final String city;
   final String location;
   final Map<String, dynamic> locationData;
   final double? verificationLatitude;
@@ -40,11 +45,16 @@ class ListingModel {
     this.grade,
     this.unitType,
     this.mandiType = MandiType.crops,
+    this.category = '',
+    this.subcategory = '',
     this.isSuspicious = false,
     this.videoUrl = '',
     this.isVerifiedSource = false,
+    this.country = 'Pakistan',
     this.province = '',
     this.district = '',
+    this.tehsil = '',
+    this.city = '',
     this.location = '',
     this.locationData = const <String, dynamic>{},
     this.verificationLatitude,
@@ -68,11 +78,16 @@ class ListingModel {
       'grade': grade?.wireValue,
       'unitType': unitType?.wireValue,
       'mandiType': mandiType.wireValue,
+      'category': category,
+      'subcategory': subcategory,
       'isSuspicious': isSuspicious,
       'videoUrl': normalizedVideoUrl,
       'isVerifiedSource': normalizedVerifiedSource,
+      'country': country,
       'province': province,
       'district': district,
+      'tehsil': tehsil,
+      'city': city,
       'location': location,
       'locationData': locationData,
       'verificationGeo': {
@@ -92,12 +107,12 @@ class ListingModel {
         : const <String, dynamic>{};
     final locationDataRaw = map['locationData'];
     final locationData = locationDataRaw is Map
-      ? Map<String, dynamic>.from(locationDataRaw)
-      : <String, dynamic>{
-        'province': map['province']?.toString() ?? '',
-        'district': map['district']?.toString() ?? '',
-        'location': map['location']?.toString() ?? '',
-        };
+        ? Map<String, dynamic>.from(locationDataRaw)
+        : <String, dynamic>{
+            'province': map['province']?.toString() ?? '',
+            'district': map['district']?.toString() ?? '',
+            'location': map['location']?.toString() ?? '',
+          };
 
     double? parseDouble(dynamic value) {
       if (value is num) return value.toDouble();
@@ -139,7 +154,7 @@ class ListingModel {
 
     final videoUrl = (map['videoUrl'] ?? map['video'] ?? '').toString().trim();
     final isVerifiedSource =
-      map['isVerifiedSource'] == true && videoUrl.isNotEmpty;
+        map['isVerifiedSource'] == true && videoUrl.isNotEmpty;
 
     return ListingModel(
       id: id ?? map['id']?.toString(),
@@ -155,8 +170,13 @@ class ListingModel {
       isSuspicious: map['isSuspicious'] == true,
       videoUrl: videoUrl,
       isVerifiedSource: isVerifiedSource,
+      country: (map['country'] ?? 'Pakistan').toString(),
       province: (map['province'] ?? '').toString(),
       district: (map['district'] ?? '').toString(),
+      tehsil: (map['tehsil'] ?? '').toString(),
+      city: (map['city'] ?? '').toString(),
+      category: (map['category'] ?? map['mandiType'] ?? '').toString(),
+      subcategory: (map['subcategory'] ?? map['product'] ?? '').toString(),
       location: (map['location'] ?? '').toString(),
       locationData: locationData,
       verificationLatitude: parseDouble(verificationGeo['lat']),
@@ -167,4 +187,3 @@ class ListingModel {
     );
   }
 }
-

@@ -1,4 +1,4 @@
-﻿import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../components/escrow_control_panel_widget.dart';
@@ -149,7 +149,7 @@ class _AdminDealDetailsScreenState extends State<AdminDealDetailsScreen> {
         border: Border.all(color: Colors.red.shade400),
       ),
       child: const Text(
-        '�a�️ AI WARNING: This deal was flagged as High-Risk during bidding. Manual stock verification and an Admin Note are REQUIRED before fund release.',
+        '⚠️ AI WARNING: This deal was flagged as High-Risk during bidding. Manual stock verification and an Admin Note are REQUIRED before fund release.',
         style: TextStyle(color: Colors.red, fontWeight: FontWeight.w700),
       ),
     );
@@ -297,4 +297,3 @@ class _AdminDealDetailsScreenState extends State<AdminDealDetailsScreen> {
     return double.tryParse(value?.toString() ?? '') ?? 0.0;
   }
 }
-

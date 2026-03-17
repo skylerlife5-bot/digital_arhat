@@ -1,5 +1,7 @@
 ﻿import 'package:flutter/material.dart';
 
+import '../assets.dart';
+
 class AppLogo extends StatelessWidget {
   const AppLogo({
     super.key,
@@ -23,20 +25,18 @@ class AppLogo extends StatelessWidget {
         shape: BoxShape.circle,
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFFFFD700).withValues(alpha: 0.26),
-            blurRadius: (height * 0.24).clamp(10, 28).toDouble(),
-            spreadRadius: (height * 0.02).clamp(0.5, 2).toDouble(),
+            color: const Color(0xFFFFD700).withValues(alpha: 0.14),
+            blurRadius: (height * 0.18).clamp(6, 18).toDouble(),
+            spreadRadius: (height * 0.01).clamp(0, 1).toDouble(),
           ),
         ],
       ),
       child: Image.asset(
-        'assets/logo.png',
+        AppAssets.logoPath,
         fit: BoxFit.contain,
         filterQuality: FilterQuality.high,
         errorBuilder: (context, error, stackTrace) {
-          debugPrint(
-            'AppLogo missing/opaque asset. Use transparent PNG for best branding: assets/logo.png',
-          );
+          debugPrint('AppLogo missing logo asset: ${AppAssets.logoPath}');
           return Icon(
             Icons.agriculture_rounded,
             size: height * 0.55,
@@ -75,4 +75,3 @@ class AppLogo extends StatelessWidget {
     return Hero(tag: heroTag!, child: content);
   }
 }
-

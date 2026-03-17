@@ -1,14 +1,16 @@
 ﻿import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
-// cloud_firestore import hata diya gaya hai kyunke yahan direct use nahi ho raha
 import '../../core/constants.dart';
 import '../../core/app_colors.dart';
 import '../../core/widgets/customer_support_button.dart';
 import '../../core/widgets/glass_button.dart';
 import '../../services/bidding_service.dart';
+import '../../services/bid_eligibility_service.dart';
 import '../../services/marketplace_service.dart';
 import '../../bidding/bid_model.dart';
+import '../../config/fee_policy.dart';
 
 class BidDialog extends StatefulWidget {
   final Map<String, dynamic> productData;
@@ -43,7 +45,8 @@ class _BidDialogState extends State<BidDialog> {
   }
 
   double get _subtotal => _currentBidInput * _lotQuantity;
-  double get _fee => _subtotal * 0.01;
+  double get _fee =>
+      FeePolicy.bidFeeActive ? (_subtotal * FeePolicy.bidFeeRate) : 0.0;
   double get _total => _subtotal + _fee;
 
   String get _lotQuantityText {
@@ -76,6 +79,13 @@ class _BidDialogState extends State<BidDialog> {
     super.dispose();
   }
 
+  Stream<DocumentSnapshot<Map<String, dynamic>>> _listingLiveStream() {
+    return FirebaseFirestore.instance
+        .collection('listings')
+        .doc(widget.listingId)
+        .snapshots();
+  }
+
   void _submitBid() async {
     if (_isSubmitting) return;
 
@@ -84,6 +94,28 @@ class _BidDialogState extends State<BidDialog> {
 
     double? bidPrice = double.tryParse(bidText);
     if (bidPrice == null || bidPrice <= 0) return;
+
+    final user = FirebaseAuth.instance.currentUser;
+    final writePath = 'listings/${widget.listingId}/bids/{bidId}';
+    debugPrint(
+      '[BidFlowUI] submit_attempt currentUser=${user == null ? 'null' : 'present'} uid=${user?.uid ?? 'null'} listingId=${widget.listingId} writePath=$writePath',
+    );
+    if (user == null) {
+      const mapped = 'Please sign in to place a bid.';
+      debugPrint(
+        '[BidFlowUI] submit_blocked listingId=${widget.listingId} writePath=$writePath finalMappedError=$mapped',
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            duration: Duration(seconds: 5),
+            content: Text(mapped),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return;
+    }
 
     if (!mounted) return;
     setState(() {
@@ -96,16 +128,29 @@ class _BidDialogState extends State<BidDialog> {
     try {
       latest = await _marketplaceService.getListingBidContext(widget.listingId);
 
-    final double startingPrice =
-        _toDouble(
-          latest.containsKey('startingPrice') ? latest['startingPrice'] : null,
-        ) ??
-        0.0;
-    final double basePrice =
-        _toDouble(
-          latest.containsKey('basePrice') ? latest['basePrice'] : null,
-        ) ??
-        0.0;
+      final eligibility = BidEligibilityService.evaluate(
+        buyerId: user.uid,
+        listingData: latest,
+        bidAmount: bidPrice,
+      );
+      if (!eligibility.allowed) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              duration: const Duration(seconds: 5),
+              content: Text(eligibility.message),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return;
+      }
+
+      final double basePrice =
+          _toDouble(
+            latest.containsKey('basePrice') ? latest['basePrice'] : null,
+          ) ??
+          0.0;
       final double currentHighest =
           _toDouble(
             latest.containsKey('highestBid') ? latest['highestBid'] : null,
@@ -113,12 +158,14 @@ class _BidDialogState extends State<BidDialog> {
           basePrice;
       final DateTime nowUtc = DateTime.now().toUtc();
       final DateTime? biddingEnd = latest['biddingEnd'] is DateTime
-        ? (latest['biddingEnd'] as DateTime).toUtc()
-        : null;
+          ? (latest['biddingEnd'] as DateTime).toUtc()
+          : null;
 
       if (biddingEnd == null) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(duration: Duration(seconds: 5), 
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              duration: Duration(seconds: 5),
               content: Text('Awaiting Admin Approval'),
               backgroundColor: Colors.orange,
             ),
@@ -129,7 +176,9 @@ class _BidDialogState extends State<BidDialog> {
 
       if (nowUtc.isAfter(biddingEnd)) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(duration: Duration(seconds: 5), 
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              duration: Duration(seconds: 5),
               content: Text('Boli ka waqt khatam ho chuka hai.'),
               backgroundColor: Colors.red,
             ),
@@ -138,14 +187,17 @@ class _BidDialogState extends State<BidDialog> {
         return;
       }
 
-      final double minimumRequired = [startingPrice, basePrice, currentHighest]
-          .reduce((a, b) => a > b ? a : b);
+      final double minimumRequired =
+          eligibility.minimumAllowedBid ??
+          BidEligibilityService.calculateMinimumAllowedBid(latest);
 
-      if (bidPrice <= minimumRequired) {
+      if (bidPrice < minimumRequired) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(duration: const Duration(seconds: 5), 
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              duration: const Duration(seconds: 5),
               content: Text(
-                "Boli Rs. ${_moneyFormat.format(minimumRequired)} se zyada honi chahiye!",
+                "Boli kam az kam Rs. ${_moneyFormat.format(minimumRequired)} honi chahiye!",
               ),
               backgroundColor: Colors.orange,
             ),
@@ -153,14 +205,6 @@ class _BidDialogState extends State<BidDialog> {
         }
         return;
       }
-
-      if (bidPrice < (minimumRequired * 0.7)) {
-        bool? confirm = await _showLowBidWarning();
-        if (confirm != true) return;
-      }
-
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) throw Exception("Boli ke liye login lazmi hai");
 
       final newBid = BidModel(
         listingId: widget.listingId,
@@ -189,17 +233,37 @@ class _BidDialogState extends State<BidDialog> {
         Navigator.pop(context, true);
       }
     } on FirebaseException catch (e) {
+      final mapped = _mapBidError(
+        e.code,
+        e.message,
+        currentUser: FirebaseAuth.instance.currentUser,
+      );
+      debugPrint(
+        '[BidFlowUI] submit_error currentUser=${FirebaseAuth.instance.currentUser == null ? 'null' : 'present'} uid=${FirebaseAuth.instance.currentUser?.uid ?? 'null'} listingId=${widget.listingId} writePath=$writePath finalMappedError=$mapped raw=${e.toString()}',
+      );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(duration: const Duration(seconds: 5), 
-            content: Text(_mapBidError(e.code, e.message)),
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            duration: const Duration(seconds: 5),
+            content: Text(mapped),
             backgroundColor: Colors.red,
           ),
         );
       }
     } catch (e) {
+      final mapped = _mapBidError(
+        '',
+        e.toString(),
+        currentUser: FirebaseAuth.instance.currentUser,
+      );
+      debugPrint(
+        '[BidFlowUI] submit_error currentUser=${FirebaseAuth.instance.currentUser == null ? 'null' : 'present'} uid=${FirebaseAuth.instance.currentUser?.uid ?? 'null'} listingId=${widget.listingId} writePath=$writePath finalMappedError=$mapped raw=${e.toString()}',
+      );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(duration: const Duration(seconds: 5), 
-            content: Text(_mapBidError('', e.toString())),
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            duration: const Duration(seconds: 5),
+            content: Text(mapped),
             backgroundColor: Colors.red,
           ),
         );
@@ -235,51 +299,51 @@ class _BidDialogState extends State<BidDialog> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-              _buildBarkatHeader(),
-              const SizedBox(height: 15),
-              Text(
-                _categoryMarketLabel(),
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 1,
-                ),
-              ),
-              const SizedBox(height: 10),
-              _buildVerifiedBadge(),
-              const SizedBox(height: 20),
-              TextField(
-                controller: _bidController,
-                keyboardType: TextInputType.number,
-                autofocus: true,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.primaryGreen,
-                ),
-                decoration: InputDecoration(
-                  hintText: "0.00",
-                  prefixText: "Rs. ",
-                  labelText: "Apni Boli Likhen (Enter Bid Amount)",
-                  floatingLabelBehavior: FloatingLabelBehavior.always,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(15),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(15),
-                    borderSide: const BorderSide(
-                      color: AppColors.primaryGreen,
-                      width: 2,
+                    _buildBarkatHeader(),
+                    const SizedBox(height: 15),
+                    Text(
+                      _categoryMarketLabel(),
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1,
+                      ),
                     ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              _buildBidReferenceInfo(),
-              _buildCalculator(),
-              const SizedBox(height: 25),
-              Column(
+                    const SizedBox(height: 10),
+                    _buildVerifiedBadge(),
+                    const SizedBox(height: 20),
+                    TextField(
+                      controller: _bidController,
+                      keyboardType: TextInputType.number,
+                      autofocus: true,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.primaryGreen,
+                      ),
+                      decoration: InputDecoration(
+                        hintText: "0.00",
+                        prefixText: "Rs. ",
+                        labelText: "Apni Boli Likhen (Enter Bid Amount)",
+                        floatingLabelBehavior: FloatingLabelBehavior.always,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(15),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(15),
+                          borderSide: const BorderSide(
+                            color: AppColors.primaryGreen,
+                            width: 2,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    _buildBidReferenceInfo(),
+                    _buildCalculator(),
+                    const SizedBox(height: 25),
+                    Column(
                       children: [
                         TextButton(
                           onPressed: () => Navigator.pop(context),
@@ -292,30 +356,68 @@ class _BidDialogState extends State<BidDialog> {
                           ),
                         ),
                         const SizedBox(height: 8),
-                        SizedBox(
-                          width: double.infinity,
-                          child: GlassButton(
-                            label: 'Boli Lagaen (Place Bid)',
-                            onPressed: (_currentBidInput <= 0 || _loading || _isSubmitting)
+                        StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                          stream: _listingLiveStream(),
+                          builder: (context, snapshot) {
+                            final live =
+                                snapshot.data?.data() ?? widget.productData;
+                            final eligibility = BidEligibilityService.evaluate(
+                              buyerId:
+                                  FirebaseAuth.instance.currentUser?.uid ?? '',
+                              listingData: live,
+                              bidAmount: _currentBidInput,
+                            );
+                            final disabledReason = eligibility.allowed
                                 ? null
-                                : _submitBid,
-                            loading: _loading || _isSubmitting,
-                            height: 54,
-                            radius: 12,
-                            textStyle: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 15,
-                              color: Colors.white,
-                            ),
-                          ),
+                                : eligibility.message;
+
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (disabledReason != null)
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 6),
+                                    child: Text(
+                                      disabledReason,
+                                      style: const TextStyle(
+                                        color: Colors.orange,
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ),
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: GlassButton(
+                                    label: 'Boli Lagaen (Place Bid)',
+                                    onPressed:
+                                        (_currentBidInput <= 0 ||
+                                            _loading ||
+                                            _isSubmitting ||
+                                            !eligibility.allowed)
+                                        ? null
+                                        : _submitBid,
+                                    loading: _loading || _isSubmitting,
+                                    height: 54,
+                                    radius: 12,
+                                    textStyle: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 15,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
                         ),
                       ],
                     ),
-              ],
+                  ],
+                ),
+              ),
             ),
           ),
-        ),
-      ),
           Positioned(
             right: 12,
             bottom: 12,
@@ -348,17 +450,22 @@ class _BidDialogState extends State<BidDialog> {
     );
   }
 
-  String _mapBidError(String code, String? rawMessage) {
+  String _mapBidError(String code, String? rawMessage, {User? currentUser}) {
     final message = (rawMessage ?? '').replaceAll('Exception: ', '').trim();
     if (code == 'permission-denied' ||
         message.toLowerCase().contains('permission-denied')) {
-      return 'Permission Denied: You are not allowed to place this bid.';
+      if (currentUser == null) {
+        return 'Please sign in to place a bid.';
+      }
+      return 'Bid could not be placed due to permission rules. Please retry.';
     }
     if (message.toLowerCase().contains('validation failed') ||
         message.toLowerCase().contains('required')) {
-      return 'Validation Failed: Please enter a valid bid and try again.';
+      return 'Please enter a valid bid and try again. / درست بولی درج کریں اور دوبارہ کوشش کریں۔';
     }
-    return message.isEmpty ? 'Bid failed. Please try again.' : message;
+    return message.isEmpty
+        ? 'Bid failed. Please try again. / بولی ناکام رہی، دوبارہ کوشش کریں۔'
+        : message;
   }
 
   // UI Components
@@ -366,7 +473,7 @@ class _BidDialogState extends State<BidDialog> {
     return const Column(
       children: [
         Text(
-          "بِس��&ِ ا���!ِ ا�ر�}�ح��&ٰ� ِ ا�ر�}�حِ�`��&ِ",
+          'بِسْمِ اللّٰهِ الرَّحْمٰنِ الرَّحِيمِ',
           style: TextStyle(
             fontSize: 20,
             fontWeight: FontWeight.bold,
@@ -402,7 +509,7 @@ class _BidDialogState extends State<BidDialog> {
           Icon(Icons.verified_user, size: 14, color: AppColors.primaryGreen),
           SizedBox(width: 6),
           Text(
-            "BA-AITIMAD SELLER",
+            'Trusted Seller / قابلِ اعتماد فروخت کنندہ',
             style: TextStyle(
               fontSize: 10,
               fontWeight: FontWeight.bold,
@@ -435,24 +542,35 @@ class _BidDialogState extends State<BidDialog> {
             "$_lotQuantityText $_displayUnit",
           ),
           const SizedBox(height: 8),
-          _breakdownRow(
-            "Subtotal:",
-            "Rs. ${_moneyFormat.format(_subtotal)}",
-          ),
+          _breakdownRow("Subtotal:", "Rs. ${_moneyFormat.format(_subtotal)}"),
+          if (FeePolicy.bidFeeActive) ...[
+            const SizedBox(height: 8),
+            const Divider(height: 1, thickness: 0.8, color: Color(0x22000000)),
+            const SizedBox(height: 8),
+            _breakdownRow(
+              "Arhat Fee (${(FeePolicy.bidFeeRate * 100).toStringAsFixed(0)}%):",
+              "Rs. ${_moneyFormat.format(_fee)}",
+              isRed: true,
+            ),
+          ],
           const SizedBox(height: 8),
-          const Divider(height: 1, thickness: 0.8, color: Color(0x22000000)),
-          const SizedBox(height: 8),
           _breakdownRow(
-            "Arhat Fee (1%):",
-            "Rs. ${_moneyFormat.format(_fee)}",
-            isRed: true,
-          ),
-          const SizedBox(height: 8),
-          _breakdownRow(
-            "Total Adaigi (Net Payable):",
+            FeePolicy.bidFeeActive
+                ? "Total Adaigi (Net Payable):"
+                : "Total Bid:",
             "Rs. ${_moneyFormat.format(_total)}",
             isBold: true,
           ),
+          if (!FeePolicy.bidFeeActive) ...[
+            const SizedBox(height: 6),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'No platform fee is currently applied. / اس وقت پلیٹ فارم فیس لاگو نہیں۔',
+                style: TextStyle(fontSize: 11, color: Colors.black54),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -497,65 +615,78 @@ class _BidDialogState extends State<BidDialog> {
   }
 
   Widget _buildBidReferenceInfo() {
-    final double startingPrice =
-        _toDouble(widget.productData['startingPrice']) ??
-        _toDouble(widget.productData['basePrice']) ??
-        _toDouble(widget.productData['price']) ??
-        0.0;
-    final double currentHighest =
-        _toDouble(widget.productData['highestBid']) ?? startingPrice;
-    final double reference = currentHighest > startingPrice
-        ? currentHighest
-        : startingPrice;
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: _listingLiveStream(),
+      builder: (context, snapshot) {
+        final live = snapshot.data?.data() ?? widget.productData;
+        final double startingPrice =
+            _toDouble(live['startingPrice']) ??
+            _toDouble(live['basePrice']) ??
+            _toDouble(live['price']) ??
+            0.0;
+        final double persistedHighest =
+            _toDouble(live['highestBid']) ?? startingPrice;
+        final double minimumNext =
+            BidEligibilityService.calculateMinimumAllowedBid(live);
+        final bool belowMinimum =
+            _currentBidInput > 0 && _currentBidInput < minimumNext;
 
-    final bool isLowSuspicious = _currentBidInput > 0 && _currentBidInput <= reference;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: isLowSuspicious
-            ? const Color(0xFFFFEBEE)
-            : const Color(0xFFF4F6F8),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isLowSuspicious
-              ? const Color(0xFFE53935)
-              : Colors.black12,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Current Highest Bid: Rs. ${_moneyFormat.format(currentHighest)}',
-            style: const TextStyle(
-              color: Colors.black87,
-              fontWeight: FontWeight.w700,
-              fontSize: 12,
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: belowMinimum
+                ? const Color(0xFFFFEBEE)
+                : const Color(0xFFF4F6F8),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: belowMinimum ? const Color(0xFFE53935) : Colors.black12,
             ),
           ),
-          const SizedBox(height: 4),
-          Text(
-            'Starting Price: Rs. ${_moneyFormat.format(startingPrice)}',
-            style: const TextStyle(
-              color: Colors.black54,
-              fontWeight: FontWeight.w600,
-              fontSize: 11,
-            ),
-          ),
-          if (isLowSuspicious) ...[
-            const SizedBox(height: 6),
-            const Text(
-              'Aap ki boli current highest se zyada honi chahiye.',
-              style: TextStyle(
-                color: Color(0xFFC62828),
-                fontWeight: FontWeight.w800,
-                fontSize: 11,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Current Highest Bid: Rs. ${_moneyFormat.format(persistedHighest)}',
+                style: const TextStyle(
+                  color: Colors.black87,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12,
+                ),
               ),
-            ),
-          ],
-        ],
-      ),
+              const SizedBox(height: 4),
+              Text(
+                'Minimum Next Bid: Rs. ${_moneyFormat.format(minimumNext)}',
+                style: const TextStyle(
+                  color: Colors.black87,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 11,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Starting Price: Rs. ${_moneyFormat.format(startingPrice)}',
+                style: const TextStyle(
+                  color: Colors.black54,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 11,
+                ),
+              ),
+              if (belowMinimum) ...[
+                const SizedBox(height: 6),
+                Text(
+                  'Aap ki boli kam az kam Rs. ${_moneyFormat.format(minimumNext)} honi chahiye.',
+                  style: const TextStyle(
+                    color: Color(0xFFC62828),
+                    fontWeight: FontWeight.w800,
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -609,26 +740,4 @@ class _BidDialogState extends State<BidDialog> {
     );
   }
 
-  Future<bool?> _showLowBidWarning() {
-    return showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Kam Boli ka Alert!"),
-        content: const Text(
-          "Aapki boli market rate se kaafi kam hai. Kya aap confirm karna chahte hain?",
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text("Theek Karen"),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text("Haan"),
-          ),
-        ],
-      ),
-    );
-  }
 }
-

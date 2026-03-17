@@ -1,18 +1,26 @@
 ﻿import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 
 // Aapke projects ke relative imports
 import '../ai/price_deviation_flagger.dart';
 import '../bidding/bid_model.dart';
 import '../core/constants.dart';
+import '../firebase_options.dart';
 import 'ai_generative_service.dart';
+import 'auction_lifecycle_service.dart';
+import 'bid_eligibility_service.dart';
 import 'bidding_logic_engine.dart';
-import 'gemini_rate_service.dart';
 import 'market_rate_service.dart';
+import 'phase1_notification_engine.dart';
+import 'trust_safety_service.dart';
 
 class MarketplaceService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -20,9 +28,19 @@ class MarketplaceService {
   final FirebaseStorage _storage = FirebaseStorage.instance;
   final PriceDeviationFlagger _flagger = PriceDeviationFlagger();
   final MarketRateService _marketRateService = MarketRateService();
-  final GeminiRateService _geminiRateService = GeminiRateService();
   final MandiIntelligenceService _intelligenceService =
       MandiIntelligenceService();
+  final Phase1NotificationEngine _phase1Notifications =
+      Phase1NotificationEngine();
+  final AuctionLifecycleService _auctionLifecycleService =
+      AuctionLifecycleService();
+  static const String _bidProbeListingId = 'XqRWvNzhZiE9nS6txc4N';
+  static const bool _bidProbeEnabled = false;
+
+    static const String _canonicalMandiRatesCollection =
+      AppConstants.mandiRatesCollection;
+    static const String _legacyMandiRatesCollection =
+      AppConstants.pakistanMandiRatesCollection;
 
   static const List<_MandiSyncItem> _defaultMandiSyncItems = <_MandiSyncItem>[
     _MandiSyncItem(itemName: 'Wheat', mandiType: MandiType.crops),
@@ -86,16 +104,30 @@ class MarketplaceService {
 
   double _fallbackAverageByType(MandiType type) {
     switch (type) {
-      case MandiType.milk:
-        return 2500;
-      case MandiType.livestock:
-        return 120000;
+      case MandiType.crops:
+        return 4200;
       case MandiType.fruit:
         return 5200;
       case MandiType.vegetables:
         return 3600;
-      case MandiType.crops:
-        return 4200;
+      case MandiType.flowers:
+        return 4800;
+      case MandiType.livestock:
+        return 120000;
+      case MandiType.milk:
+        return 2500;
+      case MandiType.seeds:
+        return 6200;
+      case MandiType.fertilizer:
+        return 6800;
+      case MandiType.machinery:
+        return 150000;
+      case MandiType.tools:
+        return 18000;
+      case MandiType.dryFruits:
+        return 3200;
+      case MandiType.spices:
+        return 1400;
     }
   }
 
@@ -136,42 +168,25 @@ class MarketplaceService {
             average <= 0 ||
             min <= 0 ||
             max <= 0) {
-          final geminiAverage = await _geminiRateService
-              .getAverageRateFromGeminiFallback(
-                item: item.itemName,
-                location: 'Pakistan',
-                fallbackListingPrice: 0,
-              );
+          final existingDoc = await _readMandiRateDoc(docId);
+          final existing = existingDoc.data() ?? <String, dynamic>{};
+          final existingAverage = _toDouble(existing['average']);
 
-          if (geminiAverage != null && geminiAverage > 0) {
-            average = geminiAverage;
-            min = geminiAverage;
-            max = geminiAverage;
-            source = 'AI_MASHWARA_FALLBACK';
+          if (existingAverage != null && existingAverage > 0) {
+            average = existingAverage;
+            min = existingAverage;
+            max = existingAverage;
+            source = 'CACHED_FALLBACK';
           } else {
-            final existingDoc = await _db
-                .collection('pakistan_mandi_rates')
-                .doc(docId)
-                .get();
-            final existing = existingDoc.data() ?? <String, dynamic>{};
-            final existingAverage = _toDouble(existing['average']);
-
-            if (existingAverage != null && existingAverage > 0) {
-              average = existingAverage;
-              min = existingAverage;
-              max = existingAverage;
-              source = 'CACHED_FALLBACK';
-            } else {
-              final fallback = _fallbackAverageByType(item.mandiType);
-              average = fallback;
-              min = fallback;
-              max = fallback;
-              source = 'AI_MASHWARA_SAFE_DEFAULT';
-            }
+            final fallback = _fallbackAverageByType(item.mandiType);
+            average = fallback;
+            min = fallback;
+            max = fallback;
+            source = 'SAFE_DEFAULT_NO_SOURCE';
           }
         }
 
-        await _db.collection('pakistan_mandi_rates').doc(docId).set({
+        final payload = {
           'cropName': item.itemName,
           'itemName': item.itemName,
           'itemNameLower': _normalizeCropDocId(item.itemName),
@@ -185,7 +200,18 @@ class MarketplaceService {
           'source': source,
           'syncedAt': FieldValue.serverTimestamp(),
           'updatedAt': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
+        };
+
+        await _db
+            .collection(_canonicalMandiRatesCollection)
+            .doc(docId)
+            .set(payload, SetOptions(merge: true));
+
+        // Keep legacy collection in sync for older app builds.
+        await _db
+            .collection(_legacyMandiRatesCollection)
+            .doc(docId)
+            .set(payload, SetOptions(merge: true));
       } catch (_) {
         continue;
       }
@@ -197,27 +223,33 @@ class MarketplaceService {
     MandiType type = MandiType.crops,
   }) {
     final docId = _buildMandiRateDocId(type, cropName);
-    return _db.collection('pakistan_mandi_rates').doc(docId).snapshots().map((
-      doc,
-    ) {
-      final data = doc.data();
-      if (data == null) return null;
+    return _db
+        .collection(_canonicalMandiRatesCollection)
+        .doc(docId)
+        .snapshots()
+        .asyncMap((doc) async {
+          final primary = doc.data();
+          if (_isValidMandiRateMap(primary)) {
+            return <String, double>{
+              'average': _toDouble(primary!['average'])!,
+              'min': _toDouble(primary['min'])!,
+              'max': _toDouble(primary['max'])!,
+            };
+          }
 
-      final average = _toDouble(data['average']);
-      final min = _toDouble(data['min']);
-      final max = _toDouble(data['max']);
+          final legacyDoc = await _db
+              .collection(_legacyMandiRatesCollection)
+              .doc(docId)
+              .get();
+          final legacy = legacyDoc.data();
+          if (!_isValidMandiRateMap(legacy)) return null;
 
-      if (average == null ||
-          min == null ||
-          max == null ||
-          average <= 0 ||
-          min <= 0 ||
-          max <= 0) {
-        return null;
-      }
-
-      return <String, double>{'average': average, 'min': min, 'max': max};
-    });
+          return <String, double>{
+            'average': _toDouble(legacy!['average'])!,
+            'min': _toDouble(legacy['min'])!,
+            'max': _toDouble(legacy['max'])!,
+          };
+        });
   }
 
   Future<Map<String, double>?> getPakistanMandiRate(
@@ -225,7 +257,7 @@ class MarketplaceService {
     MandiType type = MandiType.crops,
   }) async {
     final docId = _buildMandiRateDocId(type, cropName);
-    final doc = await _db.collection('pakistan_mandi_rates').doc(docId).get();
+    final doc = await _readMandiRateDoc(docId);
     final data = doc.data();
     if (data == null) return null;
 
@@ -250,13 +282,55 @@ class MarketplaceService {
   }) {
     final docId = _buildMandiRateDocId(type, cropName);
     return _db
-        .collection('pakistan_mandi_rates')
+        .collection(_canonicalMandiRatesCollection)
         .doc(docId)
         .snapshots()
         .map((doc) => doc.data());
   }
 
+  Future<DocumentSnapshot<Map<String, dynamic>>> _readMandiRateDoc(
+    String docId,
+  ) async {
+    final primary =
+        await _db.collection(_canonicalMandiRatesCollection).doc(docId).get();
+    if (primary.exists) return primary;
+    return _db.collection(_legacyMandiRatesCollection).doc(docId).get();
+  }
+
+  bool _isValidMandiRateMap(Map<String, dynamic>? data) {
+    if (data == null) return false;
+    final average = _toDouble(data['average']);
+    final min = _toDouble(data['min']);
+    final max = _toDouble(data['max']);
+    return average != null &&
+        min != null &&
+        max != null &&
+        average > 0 &&
+        min > 0 &&
+        max > 0;
+  }
+
   /// �S& Generic File Upload (Handles Images, Videos, and Audios)
+  bool _looksLikeAppCheckOrAuthIssue(String raw) {
+    final text = raw.toLowerCase();
+    return text.contains('app check') ||
+        text.contains('appcheck') ||
+        text.contains('placeholder token') ||
+        text.contains('too many attempts') ||
+        text.contains('unauthenticated') ||
+        text.contains('unauthorized') ||
+        text.contains('permission-denied');
+  }
+
+  bool _looksLikeTransientNetworkIssue(String raw) {
+    final text = raw.toLowerCase();
+    return text.contains('network') ||
+        text.contains('socket') ||
+        text.contains('timeout') ||
+        text.contains('timed out') ||
+        text.contains('connection');
+  }
+
   Future<String> _uploadToStorage(
     File file,
     String storagePath, {
@@ -278,12 +352,16 @@ class MarketplaceService {
       }
 
       if (uploadTask == null) {
-        throw Exception("File upload nakam hui.");
+        throw Exception('upload_failed:no_upload_task');
       }
       TaskSnapshot snapshot = await uploadTask;
       return await snapshot.ref.getDownloadURL();
+    } on FirebaseException catch (e) {
+      throw Exception(
+        'upload_failed:firebase_storage/${e.code}:${e.message ?? ''}',
+      );
     } catch (e) {
-      throw Exception("File upload nakam hui.");
+      throw Exception('upload_failed:${e.toString()}');
     }
   }
 
@@ -302,12 +380,36 @@ class MarketplaceService {
           storagePath,
           onProgress: onProgress,
         );
-      } catch (_) {
-        if (attempt >= maxAttempts) rethrow;
+      } catch (e) {
+        final raw = e.toString();
+        final nonRetryable =
+            _looksLikeAppCheckOrAuthIssue(raw) ||
+            raw.toLowerCase().contains('cancelled');
+        final retryable = _looksLikeTransientNetworkIssue(raw);
+
+        if (nonRetryable || !retryable || attempt >= maxAttempts) {
+          rethrow;
+        }
         await Future.delayed(Duration(milliseconds: 700 * attempt));
       }
     }
     throw Exception('File upload nakam hui.');
+  }
+
+  Future<void> _ensureAppCheckReadyForUpload() async {
+    try {
+      final String? token = await FirebaseAppCheck.instance.getToken(false);
+      final bool hasToken = token != null && token.trim().isNotEmpty;
+      debugPrint(
+        '[UploadTrace] App Check preflight token status: ${hasToken ? 'present' : 'empty'}',
+      );
+      if (!hasToken) {
+        throw Exception('app_check_token_empty');
+      }
+    } catch (e) {
+      debugPrint('[UploadTrace] App Check preflight failed error=$e');
+      throw Exception('app_check_preflight_failed:${e.toString()}');
+    }
   }
 
   /// �S& Main Professional Method: Create Listing
@@ -334,11 +436,15 @@ class MarketplaceService {
 
       int completedUploads = 0;
       final int totalUploads =
-          imagePaths.length + (rawVideoPath.isNotEmpty ? 1 : 0) + (rawAudioPath.isNotEmpty ? 1 : 0);
+          imagePaths.length +
+          (rawVideoPath.isNotEmpty ? 1 : 0) +
+          (rawAudioPath.isNotEmpty ? 1 : 0);
 
       void reportProgress() {
         if (onMediaUploadProgress == null || totalUploads <= 0) return;
-        onMediaUploadProgress((completedUploads / totalUploads).clamp(0.0, 1.0));
+        onMediaUploadProgress(
+          (completedUploads / totalUploads).clamp(0.0, 1.0),
+        );
       }
 
       void markUploadDone() {
@@ -363,8 +469,7 @@ class MarketplaceService {
           final uploadFutures = <Future<String>>[];
           for (int index = 0; index < imagePaths.length; index++) {
             final path = imagePaths[index];
-            final storagePath =
-                'listings/$listingId/media/${now + index}.jpg';
+            final storagePath = 'listings/$listingId/media/${now + index}.jpg';
             uploadFutures.add(
               _uploadToStorage(File(path), storagePath).then((url) {
                 markUploadDone();
@@ -407,7 +512,10 @@ class MarketplaceService {
         if (rawAudioPath.isNotEmpty) {
           final audioStoragePath =
               'audio_notes/${user.uid}/${DateTime.now().millisecondsSinceEpoch}.m4a';
-          audioUrl = await _uploadToStorage(File(rawAudioPath), audioStoragePath);
+          audioUrl = await _uploadToStorage(
+            File(rawAudioPath),
+            audioStoragePath,
+          );
           markUploadDone();
         }
       } catch (e) {
@@ -443,6 +551,10 @@ class MarketplaceService {
         'sellerId': user.uid,
         'sellerName': data['sellerName'] ?? "Kisan Bhai",
         'mandiType': data['mandiType'] ?? MandiType.crops.wireValue,
+        'category': data['category'] ?? '',
+        'categoryLabel': data['categoryLabel'] ?? '',
+        'subcategory': data['subcategory'] ?? '',
+        'subcategoryLabel': data['subcategoryLabel'] ?? '',
         'product': data['product'],
         'quantity': data['quantity'],
         'unit': data['unit'],
@@ -453,10 +565,40 @@ class MarketplaceService {
         'price': price,
         'estimatedValue': estimatedValue,
         'grade': data['grade'],
+        'country': data['country'] ?? 'Pakistan',
         'province': data['province'],
         'district': data['district'],
+        'tehsil': data['tehsil'] ?? '',
+        'city': data['city'] ?? '',
+        'village': data['village'] ?? '',
         'location': data['location'],
         'locationData': data['locationData'],
+        'saleType': data['saleType'] ?? 'auction',
+        'featured':
+            data['promotionStatus'] == 'active' && data['featured'] == true,
+        'featuredAuction':
+            data['promotionStatus'] == 'active' &&
+            data['featuredAuction'] == true,
+        'featuredCost': _toDouble(data['featuredCost']) ?? 0,
+        'promotionType': (data['promotionType'] ?? 'none').toString(),
+        'promotionStatus': (data['promotionStatus'] ?? 'none').toString(),
+        'promotionRequestedAt': data['promotionRequestedAt'],
+        'promotionPaymentRequired': data['promotionPaymentRequired'] == true,
+        'promotionRequestedFeaturedListing':
+            data['promotionRequestedFeaturedListing'] == true,
+        'promotionRequestedFeaturedAuction':
+            data['promotionRequestedFeaturedAuction'] == true,
+        'priorityScore':
+            (data['promotionStatus'] ?? '').toString().toLowerCase() == 'active'
+            ? (data['priorityScore'] ?? 'high').toString()
+            : 'normal',
+        'isSeasonalQurbani': data['isSeasonalQurbani'] == true,
+        'seasonalTags': data['seasonalTags'] ?? const <String>[],
+        'directContactEnabled': data['directContactEnabled'] == true,
+        'sellerPhone': (data['sellerPhone'] ?? '').toString(),
+        'sellerWhatsapp': (data['sellerWhatsapp'] ?? '').toString(),
+        'bakraExpiresAt': data['bakraExpiresAt'],
+        'archiveAfter': data['archiveAfter'],
         'imageUrl': imageUrl ?? '',
         'imageUrls': imageUrls,
         'videoUrl': videoUrl ?? '',
@@ -480,6 +622,7 @@ class MarketplaceService {
         'bidClosedAt': null,
         'approvedAt': null,
         'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
       };
 
       // 4. Save to Firestore (explicit doc id to reduce double-submission duplicates)
@@ -495,6 +638,409 @@ class MarketplaceService {
     } catch (e) {
       throw Exception(e.toString());
     }
+  }
+
+  String get _projectId {
+    try {
+      return DefaultFirebaseOptions.currentPlatform.projectId;
+    } catch (_) {
+      return DefaultFirebaseOptions.android.projectId;
+    }
+  }
+
+  String get _functionsBaseUrl =>
+      'https://asia-south1-$_projectId.cloudfunctions.net';
+
+  String _responsePreview(String body, {int maxChars = 300}) {
+    final normalized = body.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (normalized.length <= maxChars) return normalized;
+    return normalized.substring(0, maxChars);
+  }
+
+  Future<Map<String, dynamic>> _postSecureFunction({
+    required String functionName,
+    required Map<String, dynamic> payload,
+  }) async {
+    debugPrint('[AddListing] _postSecureFunction_start functionName=$functionName');
+    final user = _auth.currentUser;
+    if (user == null) {
+      throw Exception('User authorize nahi hai.');
+    }
+
+    final token = await user.getIdToken();
+    final uri = Uri.parse('$_functionsBaseUrl/$functionName');
+    debugPrint('[AddListing] http_post_start uri=$uri');
+    final response = await http.post(
+      uri,
+      headers: <String, String>{
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token',
+      },
+      body: jsonEncode(payload),
+    );
+
+    final rawBody = response.body;
+    final contentType = (response.headers['content-type'] ?? '').toLowerCase();
+    final bodyPreview = _responsePreview(rawBody);
+    debugPrint(
+      '[AddListing] http_response_received status=${response.statusCode} contentType=$contentType',
+    );
+    debugPrint('[AddListing] http_response_body=$bodyPreview');
+
+    final looksLikeJson =
+        contentType.contains('application/json') ||
+        rawBody.trimLeft().startsWith('{') ||
+        rawBody.trimLeft().startsWith('[');
+
+    if (!looksLikeJson && rawBody.trim().isNotEmpty) {
+      debugPrint('[AddListing] http_response_not_json contentType=$contentType rawBody=$rawBody');
+      throw Exception(
+        'non_json_response:'
+        'status=${response.statusCode};'
+        'contentType=$contentType;'
+        'uri=$uri;'
+        'body=$bodyPreview',
+      );
+    }
+
+    Map<String, dynamic> decoded;
+    try {
+      decoded = rawBody.trim().isEmpty
+          ? <String, dynamic>{}
+          : (jsonDecode(rawBody) as Map<String, dynamic>);
+      debugPrint('[AddListing] http_json_decoded ok');
+    } on FormatException {
+      debugPrint('[AddListing] http_json_decode_failed status=${response.statusCode}');
+      throw Exception(
+        'invalid_json_response:'
+        'status=${response.statusCode};'
+        'contentType=$contentType;'
+        'uri=$uri;'
+        'body=$bodyPreview',
+      );
+    }
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final errorFromResponse = (decoded['error'] ?? 'LISTING_CREATE_FAILED(status=${response.statusCode})').toString();
+      debugPrint('[AddListing] http_request_failed status=${response.statusCode} error=$errorFromResponse decoded=$decoded');
+      throw Exception(errorFromResponse);
+    }
+
+    debugPrint('[AddListing] http_success status=${response.statusCode}');
+    return decoded;
+  }
+
+  Future<String> createListingSecure(
+    Map<String, dynamic> listingData,
+    Map<String, dynamic> mediaFiles, {
+    void Function(double progress)? onProgress,
+    void Function(String stage)? onStage,
+    void Function(String issueCode)? onNonBlockingIssue,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) throw Exception('User authorize nahi hai.');
+
+    final String listingId =
+        '${user.uid}_${DateTime.now().toUtc().millisecondsSinceEpoch}';
+    debugPrint('[AddListing] createListingSecure_start listingId=$listingId uid=${user.uid}');
+
+    final imageFiles = (mediaFiles['images'] as List?) ?? const [];
+    final videoFile = mediaFiles['video'];
+    final audioPath = (mediaFiles['audioPath'] ?? '').toString().trim();
+
+    final imagePaths = imageFiles
+        .map((file) {
+          if (file is File) return file.path;
+          final dynamic anyFile = file;
+          if (anyFile != null && anyFile.path is String) {
+            return (anyFile.path as String).trim();
+          }
+          return file.toString().trim();
+        })
+        .where((path) => path.isNotEmpty)
+        .toList(growable: false);
+
+    String videoPath = '';
+    if (videoFile is File) {
+      videoPath = videoFile.path;
+    } else {
+      final dynamic anyVideo = videoFile;
+      if (anyVideo != null && anyVideo.path is String) {
+        videoPath = (anyVideo.path as String).trim();
+      }
+    }
+
+    onStage?.call('preparing');
+    debugPrint('[AddListing] appcheck_preflight_start');
+    await _ensureAppCheckReadyForUpload();
+    debugPrint('[AddListing] appcheck_preflight_passed');
+
+    int completedUploads = 0;
+    final int totalUploads =
+        imagePaths.length +
+        (videoPath.isNotEmpty ? 1 : 0) +
+        (audioPath.isNotEmpty ? 1 : 0);
+
+    void reportProgress() {
+      if (onProgress == null || totalUploads <= 0) return;
+      onProgress((completedUploads / totalUploads).clamp(0.0, 1.0));
+    }
+
+    void markUploadDone() {
+      completedUploads += 1;
+      reportProgress();
+    }
+
+    if (totalUploads > 0) {
+      onProgress?.call(0.0);
+    }
+
+    final List<String> imageUrls = <String>[];
+    String videoUrl = '';
+    String uploadedAudioUrl = '';
+
+    if (imagePaths.isNotEmpty) {
+      onStage?.call('uploading_trust_photo');
+      debugPrint(
+        '[AddListing] image_upload_start totalImages=${imagePaths.length}',
+      );
+    }
+
+    for (int index = 0; index < imagePaths.length; index++) {
+      final path = imagePaths[index];
+      final storagePath =
+          'listings/$listingId/images/${DateTime.now().millisecondsSinceEpoch}_$index.jpg';
+      try {
+        if (index > 0) {
+          debugPrint('[UploadTrace] extra image upload start index=$index');
+        }
+        final url = await _uploadToStorage(File(path), storagePath);
+        imageUrls.add(url);
+      } catch (e) {
+        debugPrint('[UploadTrace] image upload failed index=$index error=$e');
+        if (index == 0) {
+          throw Exception('trust_photo_upload_failed:${e.toString()}');
+        }
+        if (_looksLikeAppCheckOrAuthIssue(e.toString())) {
+          onNonBlockingIssue?.call('extra_image_upload_app_check_failed');
+        } else {
+          onNonBlockingIssue?.call('extra_image_upload_failed');
+        }
+      } finally {
+        markUploadDone();
+      }
+    }
+
+    if (videoPath.isNotEmpty) {
+      onStage?.call('uploading_media');
+      debugPrint('[UploadTrace] optional video upload start');
+      final storagePath =
+          'listings/$listingId/video/${DateTime.now().millisecondsSinceEpoch}.mp4';
+      try {
+        videoUrl = await _uploadToStorageWithRetry(
+          File(videoPath),
+          storagePath,
+          maxAttempts: 2,
+        );
+      } catch (e) {
+        debugPrint('[UploadTrace] optional video upload failed error=$e');
+        if (_looksLikeAppCheckOrAuthIssue(e.toString())) {
+          onNonBlockingIssue?.call('video_upload_app_check_failed');
+        } else {
+          onNonBlockingIssue?.call('video_upload_failed');
+        }
+        videoUrl = '';
+      } finally {
+        markUploadDone();
+      }
+    }
+
+    if (audioPath.isNotEmpty) {
+      onStage?.call('uploading_media');
+      debugPrint('[UploadTrace] audio upload start');
+      final storagePath =
+          'audio_notes/${user.uid}/${DateTime.now().millisecondsSinceEpoch}.m4a';
+      try {
+        uploadedAudioUrl = await _uploadToStorage(File(audioPath), storagePath);
+      } catch (e) {
+        debugPrint('[UploadTrace] audio upload failed error=$e');
+        if (_looksLikeAppCheckOrAuthIssue(e.toString())) {
+          onNonBlockingIssue?.call('audio_upload_app_check_failed');
+        } else {
+          onNonBlockingIssue?.call('audio_upload_failed');
+        }
+        uploadedAudioUrl = '';
+      } finally {
+        markUploadDone();
+      }
+    }
+
+    if (totalUploads > 0) {
+      onProgress?.call(1.0);
+    }
+
+    final verificationVideoMeta =
+        (listingData['verificationVideoMeta'] as Map<String, dynamic>?) ??
+        const <String, dynamic>{};
+    final verificationTrustPhotoMeta =
+        (listingData['verificationTrustPhotoMeta'] as Map<String, dynamic>?) ??
+        const <String, dynamic>{};
+    final verificationGeo =
+        (listingData['verificationGeo'] as Map<String, dynamic>?) ??
+        const <String, dynamic>{};
+
+    final quantityValue = double.tryParse(
+      (listingData['quantity'] ?? listingData['weight'] ?? '0').toString(),
+    );
+
+    final payload = <String, dynamic>{
+      'listingData': <String, dynamic>{
+        'sellerId': user.uid,
+        'product': (listingData['product'] ?? '').toString(),
+        'price': double.tryParse((listingData['price'] ?? '0').toString()) ?? 0,
+        'quantity': quantityValue ?? 0,
+        'country': (listingData['country'] ?? 'Pakistan').toString(),
+        'province': (listingData['province'] ?? '').toString(),
+        'district': (listingData['district'] ?? '').toString(),
+        'tehsil': (listingData['tehsil'] ?? '').toString(),
+        'city': (listingData['city'] ?? '').toString(),
+        'village': (listingData['village'] ?? '').toString(),
+        'location': (listingData['location'] ?? '').toString(),
+        'description': (listingData['description'] ?? '').toString(),
+        'mandiType': (listingData['mandiType'] ?? '').toString(),
+        'category': (listingData['category'] ?? '').toString(),
+        'categoryLabel': (listingData['categoryLabel'] ?? '').toString(),
+        'subcategory': (listingData['subcategory'] ?? '').toString(),
+        'subcategoryLabel': (listingData['subcategoryLabel'] ?? '').toString(),
+        'saleType': (listingData['saleType'] ?? 'auction').toString(),
+        'featured': listingData['featured'] == true,
+        'featuredAuction': listingData['featuredAuction'] == true,
+        'featuredCost': _toDouble(listingData['featuredCost']) ?? 0,
+        'promotionType': (listingData['promotionType'] ?? 'none').toString(),
+        'promotionStatus': (listingData['promotionStatus'] ?? 'none')
+            .toString(),
+        'promotionRequestedAt': (listingData['promotionRequestedAt'] ?? '')
+            .toString(),
+        'promotionPaymentRequired':
+            listingData['promotionPaymentRequired'] == true ||
+            listingData['promotionRequestedFeaturedListing'] == true ||
+            listingData['promotionRequestedFeaturedAuction'] == true ||
+            listingData['featured'] == true ||
+            listingData['featuredAuction'] == true,
+        'promotionRequestedFeaturedListing':
+            listingData['promotionRequestedFeaturedListing'] == true ||
+            listingData['featured'] == true,
+        'promotionRequestedFeaturedAuction':
+            listingData['promotionRequestedFeaturedAuction'] == true ||
+            listingData['featuredAuction'] == true,
+        'promotionPaymentReference':
+            (listingData['promotionPaymentReference'] ?? '').toString(),
+        'promotionProofUrl': (listingData['promotionProofUrl'] ?? '')
+            .toString(),
+        'priorityScore':
+            (listingData['promotionStatus'] ?? '').toString().toLowerCase() ==
+                'active'
+            ? (listingData['priorityScore'] ?? 'high').toString()
+            : 'normal',
+        'isSeasonalQurbani': listingData['isSeasonalQurbani'] == true,
+        'seasonalTags':
+            (listingData['seasonalTags'] as List?) ?? const <dynamic>[],
+        'directContactEnabled': listingData['directContactEnabled'] == true,
+        'sellerPhone': (listingData['sellerPhone'] ?? '').toString(),
+        'sellerWhatsapp': (listingData['sellerWhatsapp'] ?? '').toString(),
+        'bakraExpiresAt': listingData['bakraExpiresAt'],
+        'archiveAfter': listingData['archiveAfter'],
+        'locationData':
+            (listingData['locationData'] as Map<String, dynamic>?) ??
+            const <String, dynamic>{},
+        'unitType': (listingData['unitType'] ?? listingData['unit'] ?? '')
+            .toString(),
+      },
+      'mediaMetadata': <String, dynamic>{
+        'verificationVideo': <String, dynamic>{
+          'url': videoUrl,
+          'lat':
+              _toDouble(
+                verificationGeo['lat'] ?? verificationVideoMeta['lat'],
+              ) ??
+              _toDouble(verificationTrustPhotoMeta['lat']) ??
+              _toDouble(listingData['videoLat']) ??
+              0,
+          'lng':
+              _toDouble(
+                verificationGeo['lng'] ?? verificationVideoMeta['lng'],
+              ) ??
+              _toDouble(verificationTrustPhotoMeta['lng']) ??
+              _toDouble(listingData['videoLng']) ??
+              0,
+          'durationSeconds':
+              _toDouble(verificationVideoMeta['durationSeconds'])?.round() ?? 0,
+          'capturedAt':
+              (verificationVideoMeta['capturedAt'] ??
+                      verificationTrustPhotoMeta['capturedAt'] ??
+                      listingData['verificationCapturedAt'])
+                  .toString(),
+          'tag':
+              (verificationVideoMeta['tag'] ??
+                      listingData['verificationVideoTag'] ??
+                      '')
+                  .toString(),
+          'fileSizeBytes':
+              _toDouble(verificationVideoMeta['fileSize'])?.round() ?? 0,
+        },
+        'verificationTrustPhoto': <String, dynamic>{
+          'lat':
+              _toDouble(verificationTrustPhotoMeta['lat']) ??
+              _toDouble(verificationGeo['lat']) ??
+              0,
+          'lng':
+              _toDouble(verificationTrustPhotoMeta['lng']) ??
+              _toDouble(verificationGeo['lng']) ??
+              0,
+          'capturedAt':
+              (verificationTrustPhotoMeta['capturedAt'] ??
+                      listingData['verificationCapturedAt'] ??
+                      '')
+                  .toString(),
+          'tag': (verificationTrustPhotoMeta['tag'] ?? '').toString(),
+          'fileSizeBytes':
+              _toDouble(verificationTrustPhotoMeta['fileSize'])?.round() ?? 0,
+        },
+        'imageUrls': imageUrls,
+        'audioUrl': uploadedAudioUrl,
+      },
+    };
+
+    onStage?.call('saving_listing');
+    debugPrint(
+      '[UploadTrace] Firestore save start (via createListingSecureHttp)',
+    );
+
+    Map<String, dynamic> response;
+    try {
+      response = await _postSecureFunction(
+        functionName: 'createListingSecureHttp',
+        payload: payload,
+      );
+    } catch (e) {
+      debugPrint('[UploadTrace] save failed error=$e');
+      throw Exception('save_failed:${e.toString()}');
+    }
+    debugPrint('[UploadTrace] save succeeded status=${response['status']}');
+
+    final createdListingId = (response['listingId'] ?? '').toString().trim();
+    if (createdListingId.isNotEmpty) {
+      // Fire-and-forget suggestion refresh; listing flow must not fail on AI issues.
+      unawaited(
+        _postSecureFunction(
+          functionName: 'evaluateListingRiskHttp',
+          payload: <String, dynamic>{'listingId': createdListingId},
+        ).catchError((_) => <String, dynamic>{}),
+      );
+    }
+
+    // Server enforces pending review by default, so listing remains admin-gated.
+    return (response['status'] ?? 'pending_review').toString();
   }
 
   /// �S& Buyer Bid Context (Null-safe highestBid/basePrice + 24h cycle)
@@ -587,6 +1133,7 @@ class MarketplaceService {
   Future<void> placeBid({
     required BidModel bid,
     double marketPrice = 0.0,
+    Map<String, dynamic>? aiMeta,
   }) async {
     final user = _auth.currentUser;
     if (user == null) {
@@ -599,8 +1146,35 @@ class MarketplaceService {
       throw Exception('Fasal ka record nahi mila');
     }
 
+    debugPrint(
+      '[BidFlow] attempt listing=${bid.listingId} buyer=${user.uid} amount=${bid.bidAmount.toStringAsFixed(2)}',
+    );
+
     final Map<String, dynamic> listingData =
         listingSnap.data() ?? <String, dynamic>{};
+
+    final eligibility = BidEligibilityService.evaluate(
+      buyerId: user.uid,
+      listingData: listingData,
+      bidAmount: bid.bidAmount,
+    );
+    if (!eligibility.allowed) {
+      debugPrint(
+        '[BidFlow] blocked listing=${bid.listingId} buyer=${user.uid} reason=${eligibility.message}',
+      );
+      throw Exception(eligibility.message);
+    }
+
+    final userSnap = await _db.collection('users').doc(user.uid).get();
+    final userData = userSnap.data() ?? <String, dynamic>{};
+    final blockStatus = TrustSafetyService.evaluateBidBlock(userData: userData);
+    if (blockStatus.isBlocked) {
+      throw Exception(
+        blockStatus.reasonUr.isEmpty
+            ? blockStatus.reason
+            : '${blockStatus.reason} ${blockStatus.reasonUr}',
+      );
+    }
 
     final double basePrice =
         _safeNumber(listingData, 'startingPrice') ??
@@ -609,19 +1183,6 @@ class MarketplaceService {
         0.0;
     final double currentMax =
         _safeNumber(listingData, 'highestBid') ?? basePrice;
-
-    final bool isForceClosed = _safeBool(listingData, 'isBidForceClosed');
-    if (isForceClosed) {
-      throw Exception('Auction admin ne force close kar di hai.');
-    }
-
-    final bool isApproved = _safeBool(listingData, 'isApproved');
-    final String status = (listingData['status'] ?? '')
-        .toString()
-        .toLowerCase();
-    if (!isApproved || (status != 'live' && status != 'active')) {
-      throw Exception('Bidding admin verification ke baad hi start hoti hai.');
-    }
 
     final DateTime nowUtc = DateTime.now().toUtc();
     final DateTime? approvedAt = _safeDate(listingData, 'approvedAt')?.toUtc();
@@ -632,6 +1193,10 @@ class MarketplaceService {
         biddingStart.add(const Duration(hours: 24));
 
     if (nowUtc.isAfter(biddingEnd)) {
+      await _auctionLifecycleService.finalizeAuctionIfEnded(
+        listingId: bid.listingId,
+        source: 'place_bid_guard',
+      );
       throw Exception('Boli ka waqt khatam ho chuka hai.');
     }
 
@@ -675,21 +1240,58 @@ class MarketplaceService {
 
     final bool isSpamLock = velocityCheck['code'] == 'SPAM_LOCK';
     if (isSpamLock) {
-      throw Exception('SPAM_LOCK|Too many bids in 5 minutes. Account locked.');
+      await TrustSafetyService.registerStrike(
+        userId: user.uid,
+        reason: 'SPAM_LOCK',
+        source: 'bid_velocity_guard',
+        db: _db,
+      );
+    }
+
+    final int aiBidRiskScore = (_toDouble(aiMeta?['aiBidRiskScore']) ?? 0)
+        .round();
+    final String aiBidRiskLevel = (aiMeta?['aiBidRiskLevel'] ?? '')
+        .toString()
+        .trim();
+    final String aiBidAdviceUrdu = (aiMeta?['aiBidAdviceUrdu'] ?? '')
+        .toString()
+        .trim();
+    final String aiBidAdvice =
+        (aiMeta?['aiBidAdvice'] ?? aiMeta?['aiBidAdviceEn'] ?? '')
+            .toString()
+            .trim();
+    final String aiBidAdviceEn = (aiMeta?['aiBidAdviceEn'] ?? '')
+        .toString()
+        .trim();
+    final List<String> aiBidFlags =
+        ((aiMeta?['aiBidFlags'] as List?) ?? const <dynamic>[])
+            .map((e) => e.toString().trim())
+            .where((e) => e.isNotEmpty)
+            .toList(growable: false);
+
+    String bidReviewStatus = (aiMeta?['bidReviewStatus'] ?? 'ok')
+        .toString()
+        .trim();
+    if (bidReviewStatus.isEmpty) bidReviewStatus = 'ok';
+    bool adminReviewRequired = aiMeta?['adminReviewRequired'] == true;
+
+    if (isSpamLock) {
+      bidReviewStatus = 'pendingReview';
+      adminReviewRequired = true;
     }
 
     final bool isSuspicious = anomalyCheck['isSuspicious'] == true;
     final String suspiciousReason =
         anomalyCheck['reason']?.toString() ?? 'Price Anomaly Detected';
 
-    final String? oldBidderToken = listingData['lastBidderToken']?.toString();
     final String? oldBidderId = listingData['lastBidderId']?.toString();
     final String? currentToken = await FirebaseMessaging.instance.getToken();
 
     final bidRef = listingRef.collection('bids').doc();
     final batch = _db.batch();
-
-    batch.set(bidRef, {
+    final String bidWritePath = 'listings/${bid.listingId}/bids/${bidRef.id}';
+    final String listingWritePath = 'listings/${bid.listingId}';
+    final Map<String, dynamic> bidPayload = <String, dynamic>{
       ...bid.toMap(),
       'buyerId': user.uid,
       'listingId': resolvedListingId,
@@ -711,25 +1313,57 @@ class MarketplaceService {
       'fraudCode': anomalyCheck['code'],
       'velocityCode': velocityCheck['code'],
       'route': isSuspicious ? 'alert' : 'normal',
+      'aiBidRiskScore': aiBidRiskScore,
+      'aiBidRiskLevel': aiBidRiskLevel,
+      'aiBidAdvice': aiBidAdvice,
+      'aiBidAdviceUrdu': aiBidAdviceUrdu,
+      'aiBidAdviceEn': aiBidAdviceEn,
+      'aiBidFlags': aiBidFlags,
+      'aiBidUpdatedAt': FieldValue.serverTimestamp(),
+      'bidReviewStatus': bidReviewStatus,
+      'adminReviewRequired': adminReviewRequired,
       'timestamp': FieldValue.serverTimestamp(),
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
-    });
-
-    batch.update(listingRef, {
+    };
+    final int currentBidCount = (_toDouble(listingData['bid_count']) ?? 0)
+        .round();
+    final int currentTotalBids = (_toDouble(listingData['totalBids']) ?? 0)
+        .round();
+    final DateTime nowWrite = DateTime.now().toUtc();
+    debugPrint('[BidFlowDebug] listing_snapshot=$listingData');
+    final Map<String, dynamic> listingUpdatePayload = <String, dynamic>{
       'highestBid': bid.bidAmount,
-      'highestBidAt': FieldValue.serverTimestamp(),
+      'highestBidAt': nowWrite,
       'highestBidStatus': isSuspicious ? 'pending_verification' : 'verified',
       'lastBidderName': bid.buyerName,
       'lastBidderId': user.uid,
       'lastBidderToken': currentToken,
-      'bid_count': FieldValue.increment(1),
-      'totalBids': FieldValue.increment(1),
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+      'bid_count': currentBidCount + 1,
+      'totalBids': currentTotalBids + 1,
+      'updatedAt': nowWrite,
+    };
+    final Map<String, dynamic> listingUpdateLiteralPayload =
+        Map<String, dynamic>.from(listingUpdatePayload);
+    debugPrint(
+      '[BidFlow] write_prepare bidPath=$bidWritePath listingPath=$listingWritePath buyer=${user.uid} amount=${bid.bidAmount.toStringAsFixed(2)}',
+    );
+    debugPrint(
+      '[BidFlowDebug] auth_uid=${user.uid} resource_highestBid_before=${listingData['highestBid']} resource_lastBidderId_before=${listingData['lastBidderId']} request_highestBid_intended=${listingUpdatePayload['highestBid']}',
+    );
+    debugPrint('[BidFlowDebug] bid_payload=$bidPayload');
+    debugPrint('[BidFlowDebug] listing_update_payload=$listingUpdatePayload');
+    debugPrint('[BidProbe] submit_handler=MarketplaceService.placeBid');
+    debugPrint('[BidProbe] bid_payload=$bidPayload');
+    debugPrint('[BidProbe] listing_update_payload=$listingUpdatePayload');
 
-    if (isSuspicious) {
-      batch.set(_db.collection('admin_alerts').doc(), {
+    batch.set(bidRef, bidPayload);
+
+    batch.update(listingRef, listingUpdatePayload);
+
+    Map<String, dynamic>? adminAlertPayload;
+    if (isSuspicious || adminReviewRequired) {
+      adminAlertPayload = <String, dynamic>{
         'type': 'FRAUD_ALERT',
         'reason': suspiciousReason.isNotEmpty
             ? suspiciousReason
@@ -740,19 +1374,326 @@ class MarketplaceService {
         'amount': bid.bidAmount,
         'listingId': bid.listingId,
         'bidId': bidRef.id,
+        'bidReviewStatus': bidReviewStatus,
+        'adminReviewRequired': adminReviewRequired,
+        'aiBidRiskScore': aiBidRiskScore,
+        'aiBidRiskLevel': aiBidRiskLevel,
+        'aiBidFlags': aiBidFlags,
         'status': 'pending_verification',
         'timestamp': FieldValue.serverTimestamp(),
-      });
+      };
+      batch.set(_db.collection('admin_alerts').doc(), adminAlertPayload);
     }
 
-    await batch.commit();
+    if (adminAlertPayload != null) {
+      debugPrint('[BidProbe] admin_alert_payload=$adminAlertPayload');
+    } else {
+      debugPrint('[BidProbe] admin_alert_payload=NOT_USED');
+    }
 
-    if (oldBidderToken != null && oldBidderId != user.uid) {
-      _sendOutbidNotification(oldBidderToken, bid.productName, bid.bidAmount);
+    if (_shouldRunBidProbe(bid.listingId)) {
+      final probe = await _runStandaloneBidProbes(
+        listingRef: listingRef,
+        bidRef: bidRef,
+        listingId: bid.listingId,
+        bidId: bidRef.id,
+        bidPayload: bidPayload,
+        listingUpdatePayload: listingUpdatePayload,
+        listingUpdateLiteralPayload: listingUpdateLiteralPayload,
+        adminAlertPayload: adminAlertPayload,
+        userId: user.uid,
+        bidAmount: bid.bidAmount,
+      );
+      if (!probe.allPass) {
+        throw probe.error ??
+            FirebaseException(
+              plugin: 'cloud_firestore',
+              code: 'permission-denied',
+              message: 'Bid probe failed at ${probe.failedPath ?? 'unknown'}',
+            );
+      }
+    }
+
+    try {
+      await batch.commit();
+    } on FirebaseException catch (e) {
+      debugPrint(
+        '[BidFlowDebug] firebase_exception_during_batch code=${e.code} message=${e.message ?? ''} plugin=${e.plugin} details=${e.toString()}',
+      );
+      debugPrint(
+        '[BidProbe] exception code=${e.code} message=${e.message ?? ''}',
+      );
+      debugPrint('[BidProbe] failed_path=$listingWritePath');
+      debugPrint(
+        '[BidFlow] write_failed bidPath=$bidWritePath listingPath=$listingWritePath buyer=${user.uid} listing=${bid.listingId} error=${e.toString()}',
+      );
+      rethrow;
+    } catch (e) {
+      debugPrint(
+        '[BidFlowDebug] non_firebase_exception_during_batch details=${e.toString()}',
+      );
+      debugPrint(
+        '[BidProbe] exception code=non-firebase message=${e.toString()}',
+      );
+      debugPrint('[BidProbe] failed_path=$listingWritePath');
+      debugPrint(
+        '[BidFlow] write_failed bidPath=$bidWritePath listingPath=$listingWritePath buyer=${user.uid} listing=${bid.listingId} error=${e.toString()}',
+      );
+      rethrow;
+    }
+
+    debugPrint(
+      '[BidFlow] success listing=${bid.listingId} buyer=${user.uid} bidId=${bidRef.id} highest=${bid.bidAmount.toStringAsFixed(2)}',
+    );
+
+    await _notifyBidLifecycleEvents(
+      listingRef: listingRef,
+      listingData: listingData,
+      listingId: resolvedListingId,
+      sellerId: resolvedSellerId,
+      currentBuyerId: user.uid,
+      oldBidderId: oldBidderId,
+      bidId: bidRef.id,
+      bidAmount: bid.bidAmount,
+    );
+  }
+
+  bool _shouldRunBidProbe(String listingId) {
+    return _bidProbeEnabled && listingId == _bidProbeListingId;
+  }
+
+  Future<_BidProbeResult> _runStandaloneBidProbes({
+    required DocumentReference<Map<String, dynamic>> listingRef,
+    required DocumentReference<Map<String, dynamic>> bidRef,
+    required String listingId,
+    required String bidId,
+    required Map<String, dynamic> bidPayload,
+    required Map<String, dynamic> listingUpdatePayload,
+    required Map<String, dynamic> listingUpdateLiteralPayload,
+    required Map<String, dynamic>? adminAlertPayload,
+    required String userId,
+    required double bidAmount,
+  }) async {
+    final String bidPath = 'listings/$listingId/bids/$bidId';
+    final String listingPath = 'listings/$listingId';
+
+    try {
+      await bidRef.set(bidPayload);
+      debugPrint('[BidProbe] bid_create PASS path=$bidPath');
+    } catch (e) {
+      _logBidProbeFailure(path: bidPath, error: e, label: 'bid_create');
+      return _BidProbeResult(allPass: false, failedPath: bidPath, error: e);
+    }
+
+    try {
+      await listingRef.update(listingUpdateLiteralPayload);
+      debugPrint('[BidProbe] listing_update_literal PASS path=$listingPath');
+    } catch (e) {
+      _logBidProbeFailure(
+        path: listingPath,
+        error: e,
+        label: 'listing_update_literal',
+      );
+      return _BidProbeResult(allPass: false, failedPath: listingPath, error: e);
+    }
+
+    try {
+      await listingRef.update(listingUpdatePayload);
+      debugPrint('[BidProbe] listing_update PASS path=$listingPath');
+    } catch (e) {
+      _logBidProbeFailure(
+        path: listingPath,
+        error: e,
+        label: 'listing_update',
+      );
+      return _BidProbeResult(allPass: false, failedPath: listingPath, error: e);
+    }
+
+    if (adminAlertPayload != null) {
+      final adminAlertRef = _db.collection('admin_alerts').doc();
+      final adminAlertPath = 'admin_alerts/${adminAlertRef.id}';
+      try {
+        await adminAlertRef.set(adminAlertPayload);
+        debugPrint('[BidProbe] admin_alert_create PASS path=$adminAlertPath');
+      } catch (e) {
+        _logBidProbeFailure(
+          path: adminAlertPath,
+          error: e,
+          label: 'admin_alert_create',
+        );
+        return _BidProbeResult(
+          allPass: false,
+          failedPath: adminAlertPath,
+          error: e,
+        );
+      }
+    } else {
+      debugPrint('[BidProbe] admin_alert_create PASS path=NOT_USED');
+    }
+
+    final notificationId = 'probe_${listingId}_$bidId'.replaceAll('/', '_');
+    final notificationPath = 'notifications/$notificationId';
+    final notificationPayload = <String, dynamic>{
+      'toUid': userId,
+      'userId': userId,
+      'type': Phase1NotificationType.bidPlacedConfirmation,
+      'entityId': listingId,
+      'listingId': listingId,
+      'bidId': bidId,
+      'targetRole': 'buyer',
+      'amount': bidAmount,
+      'title': 'Bid Placed | بولی لگ گئی',
+      'body':
+          'Your bid has been submitted successfully. | آپ کی بولی کامیابی سے لگ گئی ہے',
+      'titleEn': 'Bid Placed',
+      'bodyEn': 'Your bid has been submitted successfully.',
+      'titleUr': 'بولی لگ گئی',
+      'bodyUr': 'آپ کی بولی کامیابی سے لگ گئی ہے',
+      'isRead': false,
+      'timestamp': FieldValue.serverTimestamp(),
+      'createdAt': FieldValue.serverTimestamp(),
+      'phase': 'PHASE_1',
+      'eventKey': notificationId,
+      'tapAction': 'OPEN_LISTING_DETAILS',
+      'routeName': '/listing-details',
+      'routeArgs': <String, dynamic>{'listingId': listingId},
+    };
+    debugPrint('[BidProbe] notification_payload=$notificationPayload');
+    try {
+      await _db.collection('notifications').doc(notificationId).set(
+        notificationPayload,
+      );
+      debugPrint('[BidProbe] notification_create PASS path=$notificationPath');
+    } catch (e) {
+      _logBidProbeFailure(
+        path: notificationPath,
+        error: e,
+        label: 'notification_create',
+      );
+      return _BidProbeResult(
+        allPass: false,
+        failedPath: notificationPath,
+        error: e,
+      );
+    }
+
+    return const _BidProbeResult(allPass: true);
+  }
+
+  void _logBidProbeFailure({
+    required String path,
+    required Object error,
+    required String label,
+  }) {
+    debugPrint('[BidProbe] $label FAIL path=$path');
+    if (error is FirebaseException) {
+      debugPrint(
+        '[BidProbe] exception code=${error.code} message=${error.message ?? ''}',
+      );
+    } else {
+      debugPrint(
+        '[BidProbe] exception code=non-firebase message=${error.toString()}',
+      );
+    }
+    debugPrint('[BidProbe] failed_path=$path');
+  }
+
+  Future<void> _notifyBidLifecycleEvents({
+    required DocumentReference<Map<String, dynamic>> listingRef,
+    required Map<String, dynamic> listingData,
+    required String listingId,
+    required String sellerId,
+    required String currentBuyerId,
+    required String? oldBidderId,
+    required String bidId,
+    required double bidAmount,
+  }) async {
+    if (sellerId.isNotEmpty && sellerId != currentBuyerId) {
+      await _phase1Notifications.createOnce(
+        userId: sellerId,
+        type: Phase1NotificationType.newBidReceived,
+        listingId: listingId,
+        bidId: bidId,
+        actorUserId: currentBuyerId,
+        targetRole: 'seller',
+        amount: bidAmount,
+      );
+    }
+
+    await _phase1Notifications.createOnce(
+      userId: currentBuyerId,
+      type: Phase1NotificationType.bidPlacedConfirmation,
+      listingId: listingId,
+      bidId: bidId,
+      targetRole: 'buyer',
+      amount: bidAmount,
+    );
+
+    final previousBidder = (oldBidderId ?? '').trim();
+    if (previousBidder.isNotEmpty && previousBidder != currentBuyerId) {
+      await _phase1Notifications.createOnce(
+        userId: previousBidder,
+        type: Phase1NotificationType.outbid,
+        listingId: listingId,
+        bidId: bidId,
+        actorUserId: currentBuyerId,
+        targetRole: 'buyer',
+        amount: bidAmount,
+      );
+    }
+
+    final endingSuffix = _endingSoonSuffix(listingData);
+    if (endingSuffix == null) return;
+
+    final bidsSnap = await listingRef
+        .collection('bids')
+        .orderBy('timestamp', descending: true)
+        .limit(40)
+        .get();
+    final Set<String> recipientIds = <String>{};
+    for (final doc in bidsSnap.docs) {
+      final buyerId = (doc.data()['buyerId'] ?? '').toString().trim();
+      if (buyerId.isEmpty) continue;
+      recipientIds.add(buyerId);
+    }
+
+    if (sellerId.isNotEmpty) {
+      await _phase1Notifications.createOnce(
+        userId: sellerId,
+        type: Phase1NotificationType.auctionEndingSoon,
+        listingId: listingId,
+        eventSuffix: 'seller_$endingSuffix',
+        titleEn: 'Auction Ending Soon',
+        bodyEn: 'Your auction is closing soon.',
+        titleUr: 'بولی جلد ختم ہو رہی ہے',
+        bodyUr: 'آپ کی بولی جلد بند ہونے والی ہے',
+        targetRole: 'seller',
+      );
+    }
+
+    for (final buyerId in recipientIds) {
+      await _phase1Notifications.createOnce(
+        userId: buyerId,
+        type: Phase1NotificationType.auctionEndingSoon,
+        listingId: listingId,
+        eventSuffix: 'buyer_$endingSuffix',
+        targetRole: 'buyer',
+      );
     }
   }
 
-  void _sendOutbidNotification(String token, String product, double amount) {}
+  String? _endingSoonSuffix(Map<String, dynamic> listingData) {
+    final DateTime? endTime =
+        _safeDate(listingData, 'endTime')?.toUtc() ??
+        _safeDate(listingData, 'bidExpiryTime')?.toUtc();
+    if (endTime == null) return null;
+
+    final Duration remaining = endTime.difference(DateTime.now().toUtc());
+    if (remaining <= Duration.zero) return null;
+    if (remaining > const Duration(minutes: 10)) return null;
+
+    return '${endTime.year}${endTime.month}${endTime.day}${endTime.hour}${endTime.minute}';
+  }
 
   // --- Read Operations ---
 
@@ -987,3 +1928,14 @@ class _MandiSyncItem {
   final MandiType mandiType;
 }
 
+class _BidProbeResult {
+  const _BidProbeResult({
+    required this.allPass,
+    this.failedPath,
+    this.error,
+  });
+
+  final bool allPass;
+  final String? failedPath;
+  final Object? error;
+}

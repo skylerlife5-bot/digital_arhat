@@ -1,5 +1,6 @@
 ﻿import 'package:flutter/material.dart';
 import '../../ai/trust_score_engine.dart';
+import '../theme/app_colors.dart';
 
 class TrustBadgeWidget extends StatelessWidget {
   final String userId;
@@ -21,7 +22,7 @@ class TrustBadgeWidget extends StatelessWidget {
           return const SizedBox(
             height: 20, 
             width: 20, 
-            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white24)
+            child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.divider)
           );
         }
 
@@ -35,13 +36,13 @@ class TrustBadgeWidget extends StatelessWidget {
         IconData badgeIcon;
 
         if (score >= 85) {
-          badgeColor = Colors.amber; // Gold Badge
+          badgeColor = AppColors.accentGold;
           badgeIcon = Icons.verified_rounded;
         } else if (score >= 65) {
-          badgeColor = Colors.blueGrey; // Silver Badge
+          badgeColor = AppColors.divider;
           badgeIcon = Icons.shield_rounded;
         } else {
-          badgeColor = Colors.blueAccent; // Bronze/Regular
+          badgeColor = AppColors.secondaryText;
           badgeIcon = Icons.stars_rounded;
         }
 

@@ -308,7 +308,7 @@ class _PaymentDialogState extends State<PaymentDialog> {
                   border: Border.all(color: Colors.amber.shade300),
                 ),
                 child: const Text(
-                  '�x" Verification in Progress (Admin is checking your receipt)',
+                  'ðŸ•’ Verification in Progress (Admin is checking your receipt)',
                   style: TextStyle(
                     color: Colors.black87,
                     fontWeight: FontWeight.w700,

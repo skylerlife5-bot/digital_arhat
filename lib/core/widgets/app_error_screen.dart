@@ -1,6 +1,8 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../assets.dart';
+
 class AppErrorScreen extends StatelessWidget {
   const AppErrorScreen({super.key});
 
@@ -33,7 +35,11 @@ class AppErrorScreen extends StatelessWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Image.asset('assets/logo.png', height: 100, fit: BoxFit.contain),
+                  Image.asset(
+                    AppAssets.logoPath,
+                    height: 100,
+                    fit: BoxFit.contain,
+                  ),
                   const SizedBox(height: 14),
                   Text(
                     'Something went wrong',
@@ -56,7 +62,10 @@ class AppErrorScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 16),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
                     decoration: BoxDecoration(
                       color: _gold.withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(999),
@@ -78,4 +87,3 @@ class AppErrorScreen extends StatelessWidget {
     );
   }
 }
-

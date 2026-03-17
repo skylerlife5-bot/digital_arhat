@@ -1,4 +1,4 @@
-﻿class SecurityFilter {
+class SecurityFilter {
   static final RegExp _digitRun = RegExp(r'\d(?:[\s\-()]*\d){6,}');
 
   static final RegExp _socialWords = RegExp(
@@ -29,4 +29,3 @@
     return output;
   }
 }
-

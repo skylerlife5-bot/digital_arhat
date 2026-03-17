@@ -2,16 +2,21 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../config/fee_policy.dart';
 import '../core/widgets/glass_button.dart';
 import '../services/bidding_service.dart';
-import '../bidding/bid_model.dart'; 
+import '../bidding/bid_model.dart';
 import '../dashboard/components/bid_timer.dart'; // Ensure correct path
 
 class PlaceBidScreen extends StatefulWidget {
   final Map<String, dynamic> productData;
   final String docId;
 
-  const PlaceBidScreen({super.key, required this.productData, required this.docId});
+  const PlaceBidScreen({
+    super.key,
+    required this.productData,
+    required this.docId,
+  });
 
   @override
   State<PlaceBidScreen> createState() => _PlaceBidScreenState();
@@ -21,7 +26,7 @@ class _PlaceBidScreenState extends State<PlaceBidScreen> {
   final _bidController = TextEditingController();
   final BiddingService _biddingService = BiddingService();
   final AudioPlayer _audioPlayer = AudioPlayer();
-  
+
   bool _isLoading = false;
   double _calculatedCommission = 0.0;
   double _netToSeller = 0.0;
@@ -32,50 +37,72 @@ class _PlaceBidScreenState extends State<PlaceBidScreen> {
   void initState() {
     super.initState();
     // Base price ya highest bid se shuruat karein
-    _currentHighestBid = (widget.productData['highestBid'] ?? widget.productData['basePrice'] ?? 0.0).toDouble();
-    _bidController.text = (_currentHighestBid + 20).toString(); 
-    
+    _currentHighestBid =
+        (widget.productData['highestBid'] ??
+                widget.productData['basePrice'] ??
+                0.0)
+            .toDouble();
+    _bidController.text = (_currentHighestBid + 20).toString();
+
     _bidController.addListener(_onBidChanged);
     _onBidChanged(); // Initial calculation
   }
 
   void _onBidChanged() {
-    _calculateBreakdown();
-    _updateAiNudge();
-  }
+    final double amount = double.tryParse(_bidController.text) ?? 0.0;
+    final double basePrice = (widget.productData['basePrice'] ?? 0.0)
+        .toDouble();
+    final double commission = FeePolicy.bidFeeActive
+        ? (amount * FeePolicy.bidFeeRate)
+        : 0.0;
+    final String nudge;
+    if (amount <= _currentHighestBid) {
+      nudge =
+          'Jeetne ke liye Rs. ${(_currentHighestBid + 10).toStringAsFixed(0)} se zyada bid dein.';
+    } else if (amount < basePrice * 1.1) {
+      nudge =
+          'Mashwara: Thori si zyada boli se jeetne ka chance behtar hota hai.';
+    } else {
+      nudge = 'Achi bid hai. Listing details verify karke confirm karein.';
+    }
 
-  void _calculateBreakdown() {
-    double amount = double.tryParse(_bidController.text) ?? 0.0;
+    if (!mounted) return;
     setState(() {
-      _calculatedCommission = amount * 0.01; // 1% Fee
-      _netToSeller = amount - _calculatedCommission;
-    });
-  }
-
-  void _updateAiNudge() {
-    double enteredAmount = double.tryParse(_bidController.text) ?? 0.0;
-    double basePrice = (widget.productData['basePrice'] ?? 0.0).toDouble();
-    
-    setState(() {
-      if (enteredAmount <= _currentHighestBid) {
-        _aiNudgeMessage = "Jeetne ke liye Rs. ${_currentHighestBid + 10} se zyada likhein.";
-      } else if (enteredAmount < basePrice * 1.1) {
-        _aiNudgeMessage = "Mashwara: Ye boli achi hai, par thori aur barhayein.";
-      } else {
-        _aiNudgeMessage = "Zabardast! Is boli par aapke jeetne ke chances zyada hain.";
-      }
+      _calculatedCommission = commission;
+      _netToSeller = amount - commission;
+      _aiNudgeMessage = nudge;
     });
   }
 
   void _adjustBid(int delta) {
     double current = double.tryParse(_bidController.text) ?? _currentHighestBid;
-    setState(() {
-      _bidController.text = (current + delta).toString();
-    });
+    _bidController.text = (current + delta).toString();
   }
 
   Future<void> _handlePlaceBid() async {
     try {
+      final user = FirebaseAuth.instance.currentUser;
+      final writePath = 'listings/${widget.docId}/bids/{bidId}';
+      debugPrint(
+        '[BidFlowUI] submit_attempt currentUser=${user == null ? 'null' : 'present'} uid=${user?.uid ?? 'null'} listingId=${widget.docId} writePath=$writePath',
+      );
+      if (user == null) {
+        const mapped = 'Please sign in to place a bid.';
+        debugPrint(
+          '[BidFlowUI] submit_blocked listingId=${widget.docId} writePath=$writePath finalMappedError=$mapped',
+        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              duration: Duration(seconds: 5),
+              content: Text(mapped),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return;
+      }
+
       final listingSnap = await FirebaseFirestore.instance
           .collection('listings')
           .doc(widget.docId)
@@ -94,8 +121,12 @@ class _PlaceBidScreenState extends State<PlaceBidScreen> {
           .toLowerCase();
 
       if (_isDealLocked(status)) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(duration: Duration(seconds: 5), 
-            content: Text('Bidding is locked because this deal is already in progress.'),
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            duration: Duration(seconds: 5),
+            content: Text(
+              'Bidding locked: deal already in progress. / بولی بند ہے، سودا جاری ہے۔',
+            ),
             backgroundColor: Colors.orange,
           ),
         );
@@ -103,8 +134,10 @@ class _PlaceBidScreenState extends State<PlaceBidScreen> {
       }
 
       if (!isApproved || startTime == null) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(duration: Duration(seconds: 5), 
-            content: Text('Waiting for Admin Verification'),
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            duration: Duration(seconds: 5),
+            content: Text('Admin verification pending / ایڈمن منظوری باقی ہے۔'),
             backgroundColor: Colors.orange,
           ),
         );
@@ -114,8 +147,12 @@ class _PlaceBidScreenState extends State<PlaceBidScreen> {
       double enteredBid = double.tryParse(_bidController.text) ?? 0.0;
 
       if (enteredBid <= _currentHighestBid) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(duration: Duration(seconds: 5), 
-            content: Text("Boli current highest se zyada honi chahiye!"),
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            duration: Duration(seconds: 5),
+            content: Text(
+              'Bid must be higher than current highest. / نئی بولی زیادہ ہونی چاہیے۔',
+            ),
             backgroundColor: Colors.orange,
           ),
         );
@@ -123,9 +160,6 @@ class _PlaceBidScreenState extends State<PlaceBidScreen> {
       }
 
       setState(() => _isLoading = true);
-
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) throw Exception("Login zaroori hai.");
 
       final newBid = BidModel(
         listingId: widget.docId,
@@ -148,8 +182,18 @@ class _PlaceBidScreenState extends State<PlaceBidScreen> {
 
       if (mounted) _showSuccessDialog();
     } catch (e) {
+      final mapped = _humanizeError(e);
+      final currentUser = FirebaseAuth.instance.currentUser;
+      debugPrint(
+        '[BidFlowUI] submit_error currentUser=${currentUser == null ? 'null' : 'present'} uid=${currentUser?.uid ?? 'null'} listingId=${widget.docId} writePath=listings/${widget.docId}/bids/{bidId} finalMappedError=$mapped raw=${e.toString()}',
+      );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(duration: const Duration(seconds: 5), content: Text(e.toString().replaceAll("Exception: ", "")), backgroundColor: Colors.red),
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            duration: const Duration(seconds: 5),
+            content: Text(mapped),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     } finally {
@@ -172,7 +216,10 @@ class _PlaceBidScreenState extends State<PlaceBidScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFF011A0A),
       appBar: AppBar(
-        title: Text("${widget.productData['product'] ?? 'Fasal'} ki Boli", style: const TextStyle(color: Colors.white)),
+        title: Text(
+          "${widget.productData['product'] ?? 'Fasal'} ki Boli",
+          style: const TextStyle(color: Colors.white),
+        ),
         backgroundColor: Colors.transparent,
         elevation: 0,
         centerTitle: true,
@@ -182,27 +229,32 @@ class _PlaceBidScreenState extends State<PlaceBidScreen> {
         builder: (context, snapshot) {
           final Map<String, dynamic> liveData =
               (snapshot.hasData && snapshot.data!.exists)
-                  ? ((snapshot.data!.data() as Map<String, dynamic>?) ?? <String, dynamic>{})
-                  : widget.productData;
+              ? ((snapshot.data!.data() as Map<String, dynamic>?) ??
+                    <String, dynamic>{})
+              : widget.productData;
 
           final bool isApproved = liveData['isApproved'] == true;
-          final DateTime? startTime =
-              (liveData['startTime'] is Timestamp) ? (liveData['startTime'] as Timestamp).toDate() : null;
-          final DateTime? endTime =
-              (liveData['endTime'] is Timestamp) ? (liveData['endTime'] as Timestamp).toDate() : null;
-            final String listingStatus = (liveData['status'] ?? '')
+          final DateTime? startTime = (liveData['startTime'] is Timestamp)
+              ? (liveData['startTime'] as Timestamp).toDate()
+              : null;
+          final DateTime? endTime = (liveData['endTime'] is Timestamp)
+              ? (liveData['endTime'] as Timestamp).toDate()
+              : null;
+          final String listingStatus = (liveData['status'] ?? '')
               .toString()
               .trim()
               .toLowerCase();
-            final bool isDealLocked = _isDealLocked(listingStatus);
-            final double quantity =
-              (liveData['quantity'] is num)
+          final bool isDealLocked = _isDealLocked(listingStatus);
+          final double quantity = (liveData['quantity'] is num)
               ? (liveData['quantity'] as num).toDouble()
               : double.tryParse((liveData['quantity'] ?? '').toString()) ?? 0.0;
-            final double enteredBid = double.tryParse(_bidController.text) ?? 0.0;
-            final double totalPrice = quantity > 0 ? (enteredBid * quantity) : enteredBid;
+          final double enteredBid = double.tryParse(_bidController.text) ?? 0.0;
+          final double totalPrice = quantity > 0
+              ? (enteredBid * quantity)
+              : enteredBid;
 
-          final dynamic highestRaw = liveData['highestBid'] ?? liveData['basePrice'] ?? 0.0;
+          final dynamic highestRaw =
+              liveData['highestBid'] ?? liveData['basePrice'] ?? 0.0;
           if (highestRaw is num) {
             _currentHighestBid = highestRaw.toDouble();
           }
@@ -216,15 +268,29 @@ class _PlaceBidScreenState extends State<PlaceBidScreen> {
                   width: double.infinity,
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.03),
-                    borderRadius: const BorderRadius.vertical(bottom: Radius.circular(30)),
+                    borderRadius: const BorderRadius.vertical(
+                      bottom: Radius.circular(30),
+                    ),
                   ),
                   child: Column(
                     children: [
-                      if (isApproved && startTime != null && endTime != null) ...[
-                        const Text("BOLI KHATAM HONE MEIN WAQT", 
-                          style: TextStyle(color: Colors.white60, fontSize: 10, letterSpacing: 2, fontWeight: FontWeight.bold)),
+                      if (isApproved &&
+                          startTime != null &&
+                          endTime != null) ...[
+                        const Text(
+                          "BOLI KHATAM HONE MEIN WAQT",
+                          style: TextStyle(
+                            color: Colors.white60,
+                            fontSize: 10,
+                            letterSpacing: 2,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                         const SizedBox(height: 12),
-                        Transform.scale(scale: 1.4, child: BidTimer(endTime: endTime)),
+                        Transform.scale(
+                          scale: 1.4,
+                          child: BidTimer(endTime: endTime),
+                        ),
                       ] else ...[
                         const Text(
                           'Verification Pending',
@@ -234,7 +300,7 @@ class _PlaceBidScreenState extends State<PlaceBidScreen> {
                             fontWeight: FontWeight.bold,
                           ),
                         ),
-                      ]
+                      ],
                     ],
                   ),
                 ),
@@ -245,7 +311,10 @@ class _PlaceBidScreenState extends State<PlaceBidScreen> {
                     children: [
                       // �x` Kisan ka Audio Note
                       if (widget.productData['audioNoteUrl'] != null)
-                        _buildAudioSection(widget.productData['audioNoteUrl'], goldColor),
+                        _buildAudioSection(
+                          widget.productData['audioNoteUrl'],
+                          goldColor,
+                        ),
 
                       const SizedBox(height: 20),
                       _buildLiveBadge(_currentHighestBid),
@@ -256,40 +325,54 @@ class _PlaceBidScreenState extends State<PlaceBidScreen> {
                       ],
 
                       const SizedBox(height: 25),
-                      
+
                       // �S� AI NUDGE MESSAGE
-                      if (!isDealLocked && _aiNudgeMessage != null) _buildAiNudge(),
+                      if (!isDealLocked && _aiNudgeMessage != null)
+                        _buildAiNudge(),
 
                       TextField(
                         controller: _bidController,
                         readOnly: isDealLocked,
                         keyboardType: TextInputType.number,
                         textAlign: TextAlign.center,
-                        style: const TextStyle(color: goldColor, fontSize: 42, fontWeight: FontWeight.bold),
+                        style: const TextStyle(
+                          color: goldColor,
+                          fontSize: 42,
+                          fontWeight: FontWeight.bold,
+                        ),
                         decoration: InputDecoration(
                           prefixText: "Rs. ",
-                          prefixStyle: const TextStyle(color: goldColor, fontSize: 22),
-                          enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: goldColor.withValues(alpha: 0.3))),
-                          focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: goldColor, width: 2)),
+                          prefixStyle: const TextStyle(
+                            color: goldColor,
+                            fontSize: 22,
+                          ),
+                          enabledBorder: UnderlineInputBorder(
+                            borderSide: BorderSide(
+                              color: goldColor.withValues(alpha: 0.3),
+                            ),
+                          ),
+                          focusedBorder: const UnderlineInputBorder(
+                            borderSide: BorderSide(color: goldColor, width: 2),
+                          ),
                         ),
                       ),
-                      
+
                       const SizedBox(height: 20),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
+                      Wrap(
+                        alignment: WrapAlignment.center,
+                        spacing: 12,
+                        runSpacing: 10,
                         children: [
                           _buildQuickButton(
                             "+50",
                             isDealLocked ? null : () => _adjustBid(50),
                             goldColor,
                           ),
-                          const SizedBox(width: 15),
                           _buildQuickButton(
                             "+100",
                             isDealLocked ? null : () => _adjustBid(100),
                             goldColor,
                           ),
-                          const SizedBox(width: 15),
                           _buildQuickButton(
                             "+500",
                             isDealLocked ? null : () => _adjustBid(500),
@@ -297,10 +380,11 @@ class _PlaceBidScreenState extends State<PlaceBidScreen> {
                           ),
                         ],
                       ),
-                      
+
                       const SizedBox(height: 30),
-                      if (_calculatedCommission > 0) _buildPriceBreakdown(goldColor),
-                      
+                      if (_calculatedCommission > 0)
+                        _buildPriceBreakdown(goldColor),
+
                       const SizedBox(height: 40),
                       if (isDealLocked)
                         _buildDealLockedBadge()
@@ -335,8 +419,14 @@ class _PlaceBidScreenState extends State<PlaceBidScreen> {
           const Icon(Icons.lightbulb, color: Colors.blueAccent, size: 20),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(_aiNudgeMessage!, 
-              style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500)),
+            child: Text(
+              _aiNudgeMessage!,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
           ),
         ],
       ),
@@ -353,8 +443,22 @@ class _PlaceBidScreenState extends State<PlaceBidScreen> {
       ),
       child: Column(
         children: [
-          const Text("AB TAK KI SAB SE BARI BOLI", style: TextStyle(color: Colors.greenAccent, fontSize: 9, fontWeight: FontWeight.bold)),
-          Text("Rs. ${amount.toInt()}", style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold)),
+          const Text(
+            "AB TAK KI SAB SE BARI BOLI",
+            style: TextStyle(
+              color: Colors.greenAccent,
+              fontSize: 9,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          Text(
+            "Rs. ${amount.toInt()}",
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 32,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
         ],
       ),
     );
@@ -363,12 +467,20 @@ class _PlaceBidScreenState extends State<PlaceBidScreen> {
   Widget _buildAudioSection(String url, Color goldColor) {
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(15)),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(15),
+      ),
       child: Row(
         children: [
           Icon(Icons.record_voice_over, color: goldColor),
           const SizedBox(width: 15),
-          const Expanded(child: Text("Kisan ka message sunein", style: TextStyle(color: Colors.white70, fontSize: 13))),
+          const Expanded(
+            child: Text(
+              "Kisan ka message sunein",
+              style: TextStyle(color: Colors.white70, fontSize: 13),
+            ),
+          ),
           IconButton(
             onPressed: () => _audioPlayer.play(UrlSource(url)),
             icon: Icon(Icons.play_circle_fill, color: goldColor, size: 35),
@@ -379,24 +491,53 @@ class _PlaceBidScreenState extends State<PlaceBidScreen> {
   }
 
   Widget _buildPriceBreakdown(Color goldColor) {
+    if (!FeePolicy.bidFeeActive) {
+      return Container(
+        padding: const EdgeInsets.all(15),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(15),
+        ),
+        child: const Text(
+          'No platform fee is currently applied. / اس وقت کوئی پلیٹ فارم فیس لاگو نہیں۔',
+          style: TextStyle(color: Colors.white70),
+        ),
+      );
+    }
+
     return Container(
       padding: const EdgeInsets.all(15),
-      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(15)),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(15),
+      ),
       child: Column(
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text("Digital Arhat Fee (1%):", style: TextStyle(color: Colors.white70)),
-              Text("- Rs. ${_calculatedCommission.toStringAsFixed(0)}", style: const TextStyle(color: Colors.redAccent)),
+              Text(
+                'Digital Arhat Fee (${(FeePolicy.bidFeeRate * 100).toStringAsFixed(0)}%):',
+                style: const TextStyle(color: Colors.white70),
+              ),
+              Text(
+                "- Rs. ${_calculatedCommission.toStringAsFixed(0)}",
+                style: const TextStyle(color: Colors.redAccent),
+              ),
             ],
           ),
           const Divider(color: Colors.white10),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text("Kisan ko milenge:", style: TextStyle(color: Colors.white70)),
-              Text("Rs. ${_netToSeller.toStringAsFixed(0)}", style: TextStyle(color: goldColor, fontWeight: FontWeight.bold)),
+              const Text(
+                "Kisan ko milenge:",
+                style: TextStyle(color: Colors.white70),
+              ),
+              Text(
+                "Rs. ${_netToSeller.toStringAsFixed(0)}",
+                style: TextStyle(color: goldColor, fontWeight: FontWeight.bold),
+              ),
             ],
           ),
         ],
@@ -427,7 +568,13 @@ class _PlaceBidScreenState extends State<PlaceBidScreen> {
 
   Widget _buildQuickButton(String label, VoidCallback? onTap, Color goldColor) {
     return ActionChip(
-      label: Text(label, style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+      label: Text(
+        label,
+        style: const TextStyle(
+          color: Colors.black,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
       backgroundColor: goldColor,
       onPressed: onTap,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -464,8 +611,11 @@ class _PlaceBidScreenState extends State<PlaceBidScreen> {
           Icon(Icons.verified_user, color: Colors.orangeAccent),
           SizedBox(width: 8),
           Text(
-            'Waiting for Admin Verification',
-            style: TextStyle(color: Colors.orangeAccent, fontWeight: FontWeight.bold),
+            'Admin verification pending / ایڈمن منظوری باقی ہے',
+            style: TextStyle(
+              color: Colors.orangeAccent,
+              fontWeight: FontWeight.bold,
+            ),
           ),
         ],
       ),
@@ -490,7 +640,10 @@ class _PlaceBidScreenState extends State<PlaceBidScreen> {
             child: Text(
               'Bidding locked: deal is already in progress.',
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.orangeAccent, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                color: Colors.orangeAccent,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
         ],
@@ -505,19 +658,42 @@ class _PlaceBidScreenState extends State<PlaceBidScreen> {
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF012A10),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text("Mubarak!", style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
-        content: const Text("Aapki boli lag chuki hai. Allah barkat dalay.", style: TextStyle(color: Colors.white70)),
+        title: const Text(
+          "Mubarak!",
+          style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold),
+        ),
+        content: const Text(
+          "Aapki boli kamyabi se submit ho gayi hai. / آپ کی بولی کامیابی سے جمع ہو گئی ہے۔",
+          style: TextStyle(color: Colors.white70),
+        ),
         actions: [
           Center(
             child: ElevatedButton(
-              onPressed: () { Navigator.pop(ctx); Navigator.pop(context); },
+              onPressed: () {
+                Navigator.pop(ctx);
+                Navigator.pop(context);
+              },
               style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
               child: const Text("Ameen", style: TextStyle(color: Colors.white)),
             ),
-          )
+          ),
         ],
       ),
     );
+  }
+
+  String _humanizeError(Object error) {
+    final message = error.toString().replaceAll('Exception: ', '').trim();
+    if (message.toLowerCase().contains('permission-denied')) {
+      if (FirebaseAuth.instance.currentUser == null) {
+        return 'Please sign in to place a bid.';
+      }
+      return 'Bid could not be placed due to permission rules. Please retry.';
+    }
+    if (message.isEmpty) {
+      return 'Bid could not be placed. Please try again. / بولی نہیں لگ سکی، دوبارہ کوشش کریں۔';
+    }
+    return message;
   }
 
   @override

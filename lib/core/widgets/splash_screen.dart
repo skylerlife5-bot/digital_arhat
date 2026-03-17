@@ -1,10 +1,9 @@
 ﻿import 'package:flutter/material.dart';
 
+import '../assets.dart';
+
 class DigitalArhatSplashView extends StatelessWidget {
-  const DigitalArhatSplashView({
-    super.key,
-    this.onContinue,
-  });
+  const DigitalArhatSplashView({super.key, this.onContinue});
 
   final VoidCallback? onContinue;
 
@@ -21,10 +20,7 @@ class DigitalArhatSplashView extends StatelessWidget {
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
-                colors: [
-                  Color(0xFF002810),
-                  Color(0xFF0A4A22),
-                ],
+                colors: [Color(0xFF002810), Color(0xFF0A4A22)],
               ),
             ),
             padding: const EdgeInsets.fromLTRB(24, 16, 24, 28),
@@ -32,9 +28,14 @@ class DigitalArhatSplashView extends StatelessWidget {
               children: [
                 const Spacer(),
                 Image.asset(
-                  'assets/logo.png',
+                  AppAssets.splashLogoPath,
                   height: 120,
                   fit: BoxFit.contain,
+                  errorBuilder: (context, error, stackTrace) => const Icon(
+                    Icons.agriculture_rounded,
+                    size: 72,
+                    color: Colors.white,
+                  ),
                 ),
                 const SizedBox(height: 16),
                 const Text(
@@ -74,4 +75,3 @@ class DigitalArhatSplashView extends StatelessWidget {
     );
   }
 }
-

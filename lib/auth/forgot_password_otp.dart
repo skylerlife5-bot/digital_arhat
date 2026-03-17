@@ -3,9 +3,10 @@ import 'dart:ui';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+
+import '../theme/app_colors.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:intl_phone_field/intl_phone_field.dart';
 
 class ForgotPasswordOtpScreen extends StatefulWidget {
   const ForgotPasswordOtpScreen({super.key});
@@ -17,9 +18,10 @@ class ForgotPasswordOtpScreen extends StatefulWidget {
 enum _RecoverStep { recover, otp, reset, success }
 
 class _ForgotPasswordOtpScreenState extends State<ForgotPasswordOtpScreen> {
-  static const Color _forestTop = Color(0xFF004D40);
-  static const Color _emeraldBottom = Color(0xFF00695C);
-  static const Color _goldBright = Color(0xFFFFD700);
+  static const Color _forestTop = AppColors.background;
+  static const Color _forestMid = AppColors.cardSurface;
+  static const Color _emeraldBottom = AppColors.divider;
+  static const Color _goldBright = AppColors.accentGold;
 
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
@@ -28,6 +30,7 @@ class _ForgotPasswordOtpScreenState extends State<ForgotPasswordOtpScreen> {
 
   String _phoneNumber = '+92';
   String? _verificationId;
+  final TextEditingController _phoneController = TextEditingController();
 
   final TextEditingController _newPasswordController = TextEditingController();
   final TextEditingController _confirmPasswordController = TextEditingController();
@@ -38,6 +41,7 @@ class _ForgotPasswordOtpScreenState extends State<ForgotPasswordOtpScreen> {
 
   @override
   void dispose() {
+    _phoneController.dispose();
     _newPasswordController.dispose();
     _confirmPasswordController.dispose();
     for (final controller in _otpControllers) {
@@ -50,6 +54,18 @@ class _ForgotPasswordOtpScreenState extends State<ForgotPasswordOtpScreen> {
   }
 
   Future<void> _sendOtp() async {
+    final String digits = _phoneController.text.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.length != 10) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          duration: Duration(seconds: 5),
+          content: Text('براہ کرم درست 10 ہندسوں والا موبائل نمبر درج کریں'),
+        ),
+      );
+      return;
+    }
+    _phoneNumber = '+92$digits';
+
     HapticFeedback.mediumImpact();
     setState(() => _busy = true);
 
@@ -188,7 +204,7 @@ class _ForgotPasswordOtpScreenState extends State<ForgotPasswordOtpScreen> {
   InputDecoration _fieldDecoration({required String label, required IconData icon}) {
     return InputDecoration(
       labelText: label,
-      labelStyle: GoogleFonts.poppins(color: Colors.white70),
+      labelStyle: GoogleFonts.poppins(color: AppColors.secondaryText),
       prefixIcon: Icon(icon, color: _goldBright),
       filled: true,
       fillColor: Colors.white.withValues(alpha: 0.08),
@@ -210,42 +226,68 @@ class _ForgotPasswordOtpScreenState extends State<ForgotPasswordOtpScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          'Account Recover Karein',
+          'پاس ورڈ واپس کریں',
           textAlign: TextAlign.center,
-          style: GoogleFonts.poppins(
+          style: const TextStyle(
             color: Colors.white,
-            fontSize: 22,
-            fontWeight: FontWeight.w700,
+            fontSize: 30,
+            fontFamily: 'JameelNoori',
+            height: 1,
           ),
         ),
         const SizedBox(height: 8),
         Text(
-          'Apna registered number darj karein',
+          'اپنا رجسٹرڈ موبائل نمبر درج کریں، ہم OTP بھیج دیں گے',
           textAlign: TextAlign.center,
-          style: GoogleFonts.poppins(color: Colors.white70),
-        ),
-        const SizedBox(height: 16),
-        IntlPhoneField(
-          initialCountryCode: 'PK',
-          style: GoogleFonts.poppins(color: Colors.white),
-          dropdownTextStyle: GoogleFonts.poppins(color: Colors.white),
-          decoration: _fieldDecoration(
-            label: 'Mobile Number',
-            icon: Icons.phone_android_rounded,
+          style: const TextStyle(
+            color: AppColors.secondaryText,
+            fontSize: 17,
+            fontFamily: 'JameelNoori',
+            height: 1.1,
           ),
-          onChanged: (phone) {
-            _phoneNumber = phone.completeNumber;
-          },
-          validator: (value) {
-            final raw = value?.completeNumber.trim() ?? '';
-            if (raw.length < 10) return 'Enter valid number';
-            return null;
-          },
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 14),
+        TextField(
+          controller: _phoneController,
+          keyboardType: TextInputType.number,
+          inputFormatters: <TextInputFormatter>[
+            FilteringTextInputFormatter.digitsOnly,
+            LengthLimitingTextInputFormatter(10),
+          ],
+          style: GoogleFonts.poppins(color: Colors.white, fontSize: 16),
+          decoration: _fieldDecoration(
+            label: 'Mobile Number / موبائل نمبر',
+            icon: Icons.phone_android_rounded,
+          ).copyWith(
+            prefixText: '+92 ',
+            prefixStyle: GoogleFonts.poppins(
+              color: Colors.white,
+              fontWeight: FontWeight.w700,
+              fontSize: 16,
+            ),
+            hintText: '3XX XXXXXXX',
+          ),
+        ),
+        const SizedBox(height: 14),
         _GoldButton(
-          label: _busy ? 'OTP bhej rahe hain...' : 'OTP Bhejein',
+          label: _busy ? 'OTP بھیجا جا رہا ہے...' : 'OTP بھیجیں / Send OTP',
           onPressed: _busy ? null : _sendOtp,
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          height: 48,
+          child: TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            style: TextButton.styleFrom(
+              foregroundColor: _goldBright,
+              textStyle: GoogleFonts.poppins(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            child: const Text('واپس لاگ اِن کریں / Back to Login'),
+          ),
         ),
       ],
     );
@@ -269,7 +311,7 @@ class _ForgotPasswordOtpScreenState extends State<ForgotPasswordOtpScreen> {
         Text(
           '4-digit OTP darj karein',
           textAlign: TextAlign.center,
-          style: GoogleFonts.poppins(color: Colors.white70),
+          style: GoogleFonts.poppins(color: AppColors.secondaryText),
         ),
         const SizedBox(height: 16),
         Row(
@@ -402,7 +444,7 @@ class _ForgotPasswordOtpScreenState extends State<ForgotPasswordOtpScreen> {
         Text(
           'Ab aap naya password use karke sign in kar sakte hain.',
           textAlign: TextAlign.center,
-          style: GoogleFonts.poppins(color: Colors.white70),
+          style: GoogleFonts.poppins(color: AppColors.secondaryText),
         ),
         const SizedBox(height: 14),
         _GoldButton(
@@ -429,63 +471,78 @@ class _ForgotPasswordOtpScreenState extends State<ForgotPasswordOtpScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [_forestTop, _emeraldBottom],
-          ),
-        ),
-        child: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                minHeight: MediaQuery.of(context).size.height - 90,
+      body: Stack(
+        children: <Widget>[
+          const DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: <Color>[_forestTop, _forestMid, _emeraldBottom],
               ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(26),
-                    child: BackdropFilter(
-                      filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
-                      child: Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(18),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.14),
-                          borderRadius: BorderRadius.circular(26),
-                          border: Border.all(
-                            color: _goldBright.withValues(alpha: 0.68),
-                            width: 1,
+            ),
+            child: SizedBox.expand(),
+          ),
+          const DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: <Color>[AppColors.softOverlayWhite, Colors.transparent],
+              ),
+            ),
+            child: SizedBox.expand(),
+          ),
+          SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  minHeight: MediaQuery.of(context).size.height - 90,
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: <Widget>[
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(24),
+                      child: BackdropFilter(
+                        filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+                        child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.20),
+                            borderRadius: BorderRadius.circular(24),
+                            border: Border.all(
+                              color: _goldBright.withValues(alpha: 0.40),
+                              width: 1,
+                            ),
                           ),
-                        ),
-                        child: AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 360),
-                          switchInCurve: Curves.easeOutCubic,
-                          switchOutCurve: Curves.easeInCubic,
-                          transitionBuilder: (child, animation) {
-                            final offsetTween = Tween<Offset>(
-                              begin: const Offset(0.15, 0),
-                              end: Offset.zero,
-                            );
-                            return SlideTransition(
-                              position: animation.drive(offsetTween),
-                              child: FadeTransition(opacity: animation, child: child),
-                            );
-                          },
-                          child: _buildCurrentStep(),
+                          child: AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 360),
+                            switchInCurve: Curves.easeOutCubic,
+                            switchOutCurve: Curves.easeInCubic,
+                            transitionBuilder: (child, animation) {
+                              final offsetTween = Tween<Offset>(
+                                begin: const Offset(0.15, 0),
+                                end: Offset.zero,
+                              );
+                              return SlideTransition(
+                                position: animation.drive(offsetTween),
+                                child: FadeTransition(opacity: animation, child: child),
+                              );
+                            },
+                            child: _buildCurrentStep(),
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -526,7 +583,7 @@ class _GoldButtonState extends State<_GoldButton> {
           gradient: const LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: [Color(0xFFEACB73), Color(0xFFD4AF37), Color(0xFFBD972A)],
+            colors: [Color(0xFFEACB73), AppColors.accentGold, Color(0xFFBD972A)],
           ),
           boxShadow: enabled
               ? [

@@ -1,9 +1,6 @@
 ﻿import 'package:firebase_remote_config/firebase_remote_config.dart';
 
 class ConfigService {
-  static const String _geminiKeyParam = 'sys_gateway_v4';
-  static const String _openAiKeyParam = 'sys_gateway_alt_v4';
-
   ConfigService._internal();
   static final ConfigService _instance = ConfigService._internal();
   factory ConfigService() => _instance;
@@ -21,10 +18,7 @@ class ConfigService {
       ),
     );
 
-    await _remoteConfig.setDefaults(const <String, dynamic>{
-      _geminiKeyParam: '',
-      _openAiKeyParam: '',
-    });
+    await _remoteConfig.setDefaults(const <String, dynamic>{});
 
     _initialized = true;
   }
@@ -35,13 +29,13 @@ class ConfigService {
   }
 
   Future<String> fetchGeminiApiKey() async {
-    await _ensureInitialized();
-    return _remoteConfig.getString(_geminiKeyParam).trim();
+    // Security hardening: AI provider keys are server-side only.
+    return '';
   }
 
   Future<String> fetchOpenAiApiKey() async {
-    await _ensureInitialized();
-    return _remoteConfig.getString(_openAiKeyParam).trim();
+    // Security hardening: AI provider keys are server-side only.
+    return '';
   }
 }
 

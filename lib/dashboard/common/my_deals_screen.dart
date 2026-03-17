@@ -1,5 +1,5 @@
-﻿import 'package:flutter/material.dart';
-import '../../core/app_colors.dart';
+import 'package:flutter/material.dart';
+import '../../theme/app_colors.dart';
 import '../../services/deal_service.dart';
 import '../../deals/deal_model.dart';
 import '../../chat/chat_screen.dart';
@@ -14,14 +14,17 @@ class MyDealsScreen extends StatelessWidget {
     final DealService dealService = DealService();
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAF7), // Light herbal background
+      backgroundColor: AppColors.background,
       appBar: AppBar(
         title: Text(
           isSeller ? "Meri Farokht (Sales)" : "Meri Khareedari (Purchases)",
-          style: const TextStyle(fontWeight: FontWeight.bold),
+          style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            color: AppColors.ctaTextDark,
+          ),
         ),
-        backgroundColor: AppColors.primaryGreen,
-        foregroundColor: Colors.white,
+        backgroundColor: AppColors.accentGold,
+        foregroundColor: AppColors.ctaTextDark,
         centerTitle: true,
         elevation: 0,
       ),
@@ -37,7 +40,7 @@ class MyDealsScreen extends StatelessWidget {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(
                     child: CircularProgressIndicator(
-                      color: AppColors.primaryGreen,
+                      color: AppColors.accentGold,
                     ),
                   );
                 }
@@ -71,11 +74,11 @@ class MyDealsScreen extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.cardSurface,
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
+            color: AppColors.shadowDark,
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -106,13 +109,14 @@ class MyDealsScreen extends StatelessWidget {
                             style: const TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
+                              color: AppColors.primaryText,
                             ),
                           ),
                           Text(
                             "ID: #${deal.dealId.substring(0, 8).toUpperCase()}",
                             style: const TextStyle(
                               fontSize: 10,
-                              color: Colors.grey,
+                              color: AppColors.secondaryText,
                               letterSpacing: 1,
                             ),
                           ),
@@ -174,8 +178,9 @@ class MyDealsScreen extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(15),
       decoration: BoxDecoration(
-        color: const Color(0xFFF1F8E9),
+        color: AppColors.background.withValues(alpha: 0.35),
         borderRadius: BorderRadius.circular(15),
+        border: Border.all(color: AppColors.divider),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -187,14 +192,14 @@ class MyDealsScreen extends StatelessWidget {
                 isSeller
                     ? "Net Payout (1% Fee Cut)"
                     : "Total Bill (Inc. 1% Fee)",
-                style: const TextStyle(fontSize: 11, color: Colors.blueGrey),
+                style: const TextStyle(fontSize: 11, color: AppColors.dividerGrey),
               ),
               Text(
                 "Rs. ${isSeller ? deal.sellerReceivable : deal.buyerTotal}",
                 style: const TextStyle(
                   fontSize: 22,
                   fontWeight: FontWeight.w900,
-                  color: AppColors.primaryGreen,
+                  color: AppColors.accentGold,
                 ),
               ),
             ],
@@ -204,14 +209,14 @@ class MyDealsScreen extends StatelessWidget {
             children: [
               const Text(
                 "Arhat Commission",
-                style: TextStyle(fontSize: 10, color: Colors.grey),
+                style: TextStyle(fontSize: 10, color: AppColors.secondaryText),
               ),
               Text(
                 "Rs. ${commission.toStringAsFixed(0)}",
                 style: const TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.bold,
-                  color: Colors.redAccent,
+                  color: AppColors.urgencyRedAccent,
                 ),
               ),
             ],
@@ -231,7 +236,7 @@ class MyDealsScreen extends StatelessWidget {
     if (!isSeller && _isAwaitingPaymentStatus(deal.status)) {
       return _actionButton(
         "Paisa Escrow Mein Jama Karein",
-        AppColors.primaryGreen,
+        AppColors.accentGold,
         () => _handlePayment(context, deal, service),
       );
     }
@@ -240,7 +245,7 @@ class MyDealsScreen extends StatelessWidget {
     if (isSeller && deal.status == 'escrow_locked') {
       return _actionButton(
         "Maal Bhaij Diya (Mark Shipped)",
-        Colors.blue,
+        AppColors.divider,
         () => service.updateDealStatus(deal.dealId, 'shipped'),
       );
     }
@@ -249,7 +254,7 @@ class MyDealsScreen extends StatelessWidget {
     if (!isSeller && deal.status == 'shipped') {
       return _actionButton(
         "Maal Mil Gaya (Release Payment)",
-        Colors.orange[800]!,
+        AppColors.accentGold,
         () => service.updateDealStatus(deal.dealId, 'completed'),
       );
     }
@@ -258,12 +263,12 @@ class MyDealsScreen extends StatelessWidget {
       return const Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.check_circle, color: Colors.green, size: 16),
+          Icon(Icons.check_circle, color: AppColors.divider, size: 16),
           SizedBox(width: 5),
           Text(
             "Deal Mukammal Ho Chuki Hai",
             style: TextStyle(
-              color: Colors.green,
+              color: AppColors.divider,
               fontWeight: FontWeight.bold,
               fontSize: 12,
             ),
@@ -282,7 +287,7 @@ class MyDealsScreen extends StatelessWidget {
         onPressed: onPressed,
         style: ElevatedButton.styleFrom(
           backgroundColor: color,
-          foregroundColor: Colors.white,
+          foregroundColor: AppColors.ctaTextDark,
           padding: const EdgeInsets.symmetric(vertical: 15),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
@@ -299,7 +304,7 @@ class MyDealsScreen extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
-      color: Colors.amber[50],
+      color: AppColors.cardSurface,
       child: const Column(
         children: [
           Text(
@@ -308,12 +313,12 @@ class MyDealsScreen extends StatelessWidget {
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.bold,
-              color: Colors.brown,
+              color: AppColors.primaryText,
             ),
           ),
           Text(
             "(Surah Al-Ma'idah: 1)",
-            style: TextStyle(fontSize: 9, color: Colors.brown),
+            style: TextStyle(fontSize: 9, color: AppColors.secondaryText),
           ),
         ],
       ),
@@ -345,7 +350,7 @@ class MyDealsScreen extends StatelessWidget {
       ),
       icon: const Icon(
         Icons.chat_bubble_outline_rounded,
-        color: AppColors.primaryGreen,
+        color: AppColors.accentGold,
       ),
     );
   }
@@ -363,7 +368,7 @@ class MyDealsScreen extends StatelessWidget {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.lock_person_rounded, size: 50, color: Colors.blue),
+            const Icon(Icons.lock_person_rounded, size: 50, color: AppColors.divider),
             const SizedBox(height: 15),
             Text(
               "Total: Rs. ${deal.buyerTotal}",
@@ -373,7 +378,7 @@ class MyDealsScreen extends StatelessWidget {
             const Text(
               "Aapka paisa Digital Arhat ke pass mehfooz rahay ga jab tak aap maal ki wasooli confirm nahi karte.",
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 13, color: Colors.grey),
+              style: TextStyle(fontSize: 13, color: AppColors.secondaryText),
             ),
           ],
         ),
@@ -388,11 +393,11 @@ class MyDealsScreen extends StatelessWidget {
               Navigator.pop(ctx);
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primaryGreen,
+              backgroundColor: AppColors.accentGold,
             ),
             child: const Text(
               "Confirm & Pay",
-              style: TextStyle(color: Colors.white),
+              style: TextStyle(color: AppColors.primaryText),
             ),
           ),
         ],
@@ -411,7 +416,7 @@ class MyDealsScreen extends StatelessWidget {
       child: Text(
         status.replaceAll('_', ' ').toUpperCase(),
         style: const TextStyle(
-          color: Colors.white,
+          color: AppColors.primaryText,
           fontSize: 9,
           fontWeight: FontWeight.bold,
         ),
@@ -421,22 +426,22 @@ class MyDealsScreen extends StatelessWidget {
 
   Color _getStatusColor(String status) {
     if (_isAwaitingPaymentStatus(status)) {
-      return Colors.orange[700]!;
+      return AppColors.accentGold;
     }
 
     switch (status) {
       case 'awaiting_payment':
-        return Colors.orange[700]!;
+        return AppColors.accentGold;
       case 'escrow_locked':
-        return Colors.blue[700]!;
+        return AppColors.divider;
       case 'shipped':
-        return Colors.purple[700]!;
+        return AppColors.accentGold;
       case 'completed':
-        return Colors.green[700]!;
+        return AppColors.divider;
       case 'disputed':
-        return Colors.red[700]!;
+        return AppColors.urgencyRed;
       default:
-        return Colors.grey;
+        return AppColors.secondaryText;
     }
   }
 
@@ -451,10 +456,14 @@ class MyDealsScreen extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.handshake_outlined, size: 80, color: Colors.grey[300]),
+          const Icon(
+            Icons.handshake_outlined,
+            size: 80,
+            color: AppColors.secondaryText,
+          ),
           const Text(
             "Abhi tak koi deal record nahi hui.",
-            style: TextStyle(color: Colors.grey),
+            style: TextStyle(color: AppColors.secondaryText),
           ),
         ],
       ),

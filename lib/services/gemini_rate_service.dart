@@ -29,13 +29,13 @@ class GeminiRateService {
       );
 
       final baseline = _average(bids);
-      final prompt =
-          'Based on the last 7 days of successful bids for $normalizedItem in $normalizedLocation from our Firestore database, calculate a fair average market rate. Return only the number. '
-          'Bid samples (PKR): ${bids.join(', ')}. '
-          '${baseline != null ? 'Current moving average: ${baseline.toStringAsFixed(0)}.' : ''}';
-
-      final response = await _aiService.getAIResponse(prompt);
-      final parsed = _extractNumber(response);
+      // Server-side AI call keeps provider keys out of the Flutter client.
+      final parsed = await _aiService.suggestBidRate(
+        item: normalizedItem,
+        location: normalizedLocation,
+        bidSamples: bids,
+        baseline: baseline ?? 0,
+      );
       if (parsed != null && parsed > 0) {
         return parsed;
       }
@@ -111,13 +111,6 @@ class GeminiRateService {
     if (valid.isEmpty) return null;
     final sum = valid.fold<double>(0, (acc, value) => acc + value);
     return sum / valid.length;
-  }
-
-  double? _extractNumber(String text) {
-    final normalized = text.replaceAll(',', '');
-    final match = RegExp(r'([0-9]+(?:\.[0-9]+)?)').firstMatch(normalized);
-    if (match == null) return null;
-    return double.tryParse(match.group(1) ?? '');
   }
 
   double? _toDouble(dynamic value) {

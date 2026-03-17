@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../deals/payment_status.dart'; // Enum import
 import 'admin_deal_details_screen.dart';
@@ -252,4 +252,3 @@ class DisputeCenter extends StatelessWidget {
     );
   }
 }
-

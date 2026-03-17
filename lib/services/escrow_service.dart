@@ -1,4 +1,4 @@
-﻿import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../deals/transaction_model.dart';
 
@@ -501,4 +501,3 @@ class EscrowService {
 
   void debugLog(String message) {}
 }
-

@@ -1,65 +1,130 @@
-﻿import 'package:flutter/material.dart';
-// Screens Imports
-import 'auth/login_screen.dart';
-import 'auth/phone_sign_in_screen.dart';
-import 'auth/forgot_password_otp.dart';
-import 'auth/signup_screen.dart';
-import 'auth/otp_screen.dart';
+import 'package:flutter/material.dart';
+
+import 'auth/auth_wrapper.dart';
+import 'auth/create_account_screen.dart';
 import 'auth/face_verification_screen.dart';
-import 'auth/verification_pending_screen.dart';
-import 'auth/verification/liveness_detection_screen.dart';
+import 'auth/forgot_password_otp.dart';
+import 'auth/login_screen.dart';
+import 'auth/master_sign_up_screen.dart';
+import 'auth/otp_screen.dart';
 import 'auth/set_password_screen.dart';
-import 'dashboard/role_router.dart';
-import 'dashboard/buyer/buyer_dashboard.dart';
-import 'dashboard/seller/seller_dashboard.dart';
+import 'auth/verification/liveness_detection_screen.dart';
+import 'auth/verification_pending_screen.dart';
+import 'bidding/place_bid_screen.dart';
 import 'dashboard/admin/admin_dashboard.dart';
-import 'dashboard/admin/admin_payment_verification_screen.dart';
 import 'dashboard/admin/listing_moderation.dart';
-import 'bidding/place_bid_screen.dart'; // Bidding screen import
+import 'dashboard/buyer/buyer_dashboard.dart';
+import 'dashboard/buyer/buyer_listing_detail_screen.dart';
+import 'dashboard/seasonal/bakra_mandi_entry_screen.dart';
+import 'dashboard/seasonal/bakra_mandi_list_screen.dart';
+import 'dashboard/seasonal/bakra_mandi_post_screen.dart';
+import 'dashboard/seasonal/post_listing_option_screen.dart';
+import 'dashboard/role_router.dart';
+import 'dashboard/seller/seller_dashboard.dart';
+import 'dashboard/seller/add_listing_screen.dart';
 import 'deals/order_success_screen.dart';
-import 'deals/escrow_status_screen.dart';
-import 'marketplace/listing_detail_screen.dart';
+import 'splash/splash_screen.dart';
 
 class Routes {
-  static const String splash = '/';
-  static const String login = '/login';
-  static const String signIn = '/sign-in';
-  static const String forgotPasswordOtp = '/forgot-password-otp';
-  static const String signup = '/signup';
-  static const String userType = '/user-type';
-  static const String otp = '/otp';
-  static const String roleRouter = '/role-router';
-  static const String selection = '/selection';
+  static const String splash = '/splash';
+  static const String welcome = '/welcome';
+  static const String authWrapper = '/authWrapper';
+  static const String createAccount = '/createAccount';
+  static const String masterSignUp = '/masterSignUp';
+  static const String buyerAuth = '/buyerAuth';
+  static const String sellerAuth = '/sellerAuth';
+  static const String buyerDashboard = '/buyerDashboard';
+  static const String sellerDashboard = '/sellerDashboard';
+  static const String sellerAddListing = '/seller-add-listing';
+  static const String postListingOption = '/post-listing-option';
+  static const String bakraMandiEntry = '/bakra-mandi-entry';
+  static const String bakraMandiList = '/bakra-mandi-list';
+  static const String bakraMandiPost = '/bakra-mandi-post';
 
-  static const String buyerDashboard = '/buyer';
-  static const String sellerDashboard = '/seller';
+  static const String roleRouter = '/role-router';
   static const String adminDashboard = '/admin';
   static const String adminModeration = '/admin-moderation';
   static const String adminPayments = '/admin-payments';
 
+  static const String forgotPasswordOtp = '/forgot-password-otp';
+  static const String otp = '/otp';
   static const String faceVerification = '/face';
   static const String liveness = '/liveness';
   static const String setPassword = '/set-password';
   static const String verificationPending = '/verification';
   static const String orderSuccess = '/order-success';
 
-  // Bidding Route
   static const String placeBid = '/place_bid';
   static const String listingDetails = '/listing-details';
   static const String escrowStatus = '/escrow-status';
 
+  static const String signup = '/signup';
+  static const String userType = '/userType';
+  static const String login = '/login';
+  static const String home = '/home';
+  static const String selection = '/selection';
+
   static Map<String, WidgetBuilder> getRoutes() {
     return {
+      splash: (context) =>
+        const SplashScreen(autoNavigate: true, nextRoute: welcome),
+      welcome: (context) => const WelcomeScreen(),
+      createAccount: (context) => const CreateAccountScreen(),
+      masterSignUp: (context) => const MasterSignUpScreen(),
       login: (context) => const LoginScreen(),
-      signIn: (context) => const PhoneSignInScreen(),
+
+      buyerDashboard: (context) {
+        final args = ModalRoute.of(context)?.settings.arguments;
+        final data = (args is Map<String, dynamic>) ? args : <String, dynamic>{};
+        return BuyerDashboard(userData: data);
+      },
+      sellerDashboard: (context) {
+        final args = ModalRoute.of(context)?.settings.arguments;
+        final data = (args is Map<String, dynamic>) ? args : <String, dynamic>{};
+        return SellerDashboard(userData: data);
+      },
+      sellerAddListing: (context) {
+        final args = ModalRoute.of(context)?.settings.arguments;
+        final data = (args is Map<String, dynamic>) ? (args['userData'] as Map<String, dynamic>? ?? args) : <String, dynamic>{};
+        return AddListingScreen(userData: data);
+      },
+      postListingOption: (context) {
+        final args = ModalRoute.of(context)?.settings.arguments;
+        final data = (args is Map<String, dynamic>) ? (args['userData'] as Map<String, dynamic>? ?? args) : <String, dynamic>{};
+        return PostListingOptionScreen(userData: data);
+      },
+      bakraMandiEntry: (context) {
+        final args = ModalRoute.of(context)?.settings.arguments;
+        final data = (args is Map<String, dynamic>) ? args : <String, dynamic>{};
+        return BakraMandiEntryScreen(initialAnimalType: data['animalType']?.toString());
+      },
+      bakraMandiList: (context) {
+        final args = ModalRoute.of(context)?.settings.arguments;
+        final data = (args is Map<String, dynamic>) ? args : <String, dynamic>{};
+        return BakraMandiListScreen(
+          initialAnimalType: data['animalType']?.toString(),
+          initialQuery: data['query']?.toString(),
+        );
+      },
+      bakraMandiPost: (context) {
+        final args = ModalRoute.of(context)?.settings.arguments;
+        final data = (args is Map<String, dynamic>) ? (args['userData'] as Map<String, dynamic>? ?? args) : <String, dynamic>{};
+        return BakraMandiPostScreen(userData: data);
+      },
+
+      authWrapper: (context) => const AuthWrapper(),
+      roleRouter: (context) => const RoleRouter(),
+      home: (context) => const WelcomeScreen(),
+
+      adminDashboard: (context) => const AdminDashboard(),
+      adminModeration: (context) => const ListingModeration(),
+      adminPayments: (context) => const Scaffold(
+        body: Center(
+          child: Text('Phase-2 payment verification is disabled in Phase-1.'),
+        ),
+      ),
+
       forgotPasswordOtp: (context) => const ForgotPasswordOtpScreen(),
-
-      userType: (context) => const SignUpScreen(),
-
-      // Step 2: Detailed Profile Form
-      signup: (context) => const SignUpScreen(),
-
-      // Step 3: OTP Verification
       otp: (context) {
         final args = ModalRoute.of(context)?.settings.arguments;
         String? verificationId;
@@ -68,83 +133,44 @@ class Routes {
         } else if (args is String) {
           verificationId = args;
         }
-        return OtpScreen(verificationId: verificationId ?? "");
+        return OtpScreen(verificationId: verificationId ?? '');
       },
-
-      // Step 4: AI Face Liveness
       liveness: (context) => const LivenessDetectionScreen(),
-
-      // Step 5: Password / PIN Setup
       setPassword: (context) => const SetPasswordScreen(),
-
-      // Post-Auth Routing
-      roleRouter: (context) => const RoleRouter(),
-      selection: (context) => const RoleRouter(),
-
-      // BuyerDashboard Fix
-      buyerDashboard: (context) {
-        final args = ModalRoute.of(context)?.settings.arguments;
-        Map<String, dynamic> data = (args is Map<String, dynamic>) ? args : {};
-        return BuyerDashboard(userData: data);
-      },
-
-      // SellerDashboard Fix
-      sellerDashboard: (context) {
-        final args = ModalRoute.of(context)?.settings.arguments;
-        Map<String, dynamic> data = (args is Map<String, dynamic>) ? args : {};
-        return SellerDashboard(userData: data);
-      },
-
-      adminDashboard: (context) => const AdminDashboard(),
-      adminModeration: (context) => const ListingModeration(),
-      adminPayments: (context) => const AdminPaymentVerificationScreen(),
-
       faceVerification: (context) => const FaceVerificationScreen(),
       verificationPending: (context) => const VerificationPendingScreen(),
       orderSuccess: (context) => const OrderSuccessScreen(),
 
-      // NEW: Bidding Screen Route with Argument Safety
       placeBid: (context) {
         final args = ModalRoute.of(context)?.settings.arguments;
-
-        // Agar notification se aa raha hai toh productData empty map hoga
         if (args is Map<String, dynamic>) {
           return PlaceBidScreen(
             docId: args['docId'] ?? '',
             productData: args['productData'] ?? {},
           );
         }
-
-        // Fallback agar arguments miss ho jayein
-        return const Scaffold(
-          body: Center(child: Text("Data loading error...")),
-        );
+        return const Scaffold(body: Center(child: Text('Data loading error...')));
       },
       listingDetails: (context) {
         final args = ModalRoute.of(context)?.settings.arguments;
         if (args is Map<String, dynamic>) {
-          return ListingDetailScreen(
+          return BuyerListingDetailScreen(
             listingId: (args['listingId'] ?? '').toString(),
             initialData: (args['data'] is Map<String, dynamic>)
                 ? (args['data'] as Map<String, dynamic>)
-                : const <String, dynamic>{},
+                : null,
           );
         }
         return const Scaffold(body: Center(child: Text('Listing not found')));
       },
       escrowStatus: (context) {
-        final args = ModalRoute.of(context)?.settings.arguments;
-        if (args is Map<String, dynamic>) {
-          return EscrowStatusScreen(
-            dealId: (args['dealId'] ?? args['listingId'] ?? '').toString(),
-            listingTitle: (args['title'] ?? args['listingTitle'])?.toString(),
-          );
-        }
         return const Scaffold(
-          body: Center(child: Text('Escrow record dastiyab nahi hai')),
+          body: Center(
+            child: Text('Escrow flow is disabled in Phase-1.'),
+          ),
         );
       },
+
     };
   }
 }
-

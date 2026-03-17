@@ -10,11 +10,14 @@ import 'dart:developer' as developer;
 import '../../core/constants.dart';
 import '../../core/widgets/media_preview_widget.dart';
 import '../../core/widgets/primary_gradient_button.dart';
-import 'payment_dialog.dart';
-import '../../marketplace/listing_detail_screen.dart';
+import '../../routes.dart';
+import 'buyer_listing_detail_screen.dart';
+import '../../services/buyer_engagement_service.dart';
 import '../../services/market_rate_service.dart';
 import '../../services/marketplace_service.dart';
 import '../../services/gemini_rate_service.dart';
+import '../../services/trust_safety_service.dart';
+import '../../theme/app_colors.dart';
 
 import '../components/bid_timer.dart';
 
@@ -40,9 +43,26 @@ class MarketListingCard extends StatelessWidget {
   final void Function(String url) onPlayAudio;
   final void Function(Map<String, dynamic> data, String listingId) onBid;
 
+  bool _isPromotionActive(Map<String, dynamic> map) {
+    final status = (map['promotionStatus'] ?? '').toString().toLowerCase();
+    if (status == 'active') {
+      final expires = map['promotionExpiresAt'];
+      if (expires is Timestamp && expires.toDate().isBefore(DateTime.now())) {
+        return false;
+      }
+      return true;
+    }
+    if (status.isNotEmpty && status != 'none') return false;
+    return map['featured'] == true ||
+      map['featuredAuction'] == true ||
+        (map['priorityScore'] ?? '').toString().toLowerCase() == 'high';
+  }
+
   static final NumberFormat _moneyFormat = NumberFormat('#,##0', 'en_US');
   static final MarketRateService _rateService = MarketRateService();
   static final MarketplaceService _marketplaceService = MarketplaceService();
+  static final BuyerEngagementService _engagementService =
+      BuyerEngagementService();
   static final GeminiRateService _geminiRateService = GeminiRateService();
   static final ValueNotifier<Set<String>> _liveFetchingCrops =
       ValueNotifier<Set<String>>(<String>{});
@@ -89,6 +109,30 @@ class MarketListingCard extends StatelessWidget {
     _aiRateCache.value = next;
   }
 
+  String _firstText(Map<String, dynamic> rawData, List<String> keys) {
+    for (final key in keys) {
+      final value = (rawData[key] ?? '').toString().trim();
+      if (value.isNotEmpty && value.toLowerCase() != 'null') {
+        return value;
+      }
+    }
+    final media = rawData['mediaMetadata'];
+    if (media is Map) {
+      for (final key in keys) {
+        final value = (media[key] ?? '').toString().trim();
+        if (value.isNotEmpty && value.toLowerCase() != 'null') {
+          return value;
+        }
+      }
+      final verification = media['verificationVideo'];
+      if (verification is Map) {
+        final url = (verification['url'] ?? '').toString().trim();
+        if (url.isNotEmpty && url.toLowerCase() != 'null') return url;
+      }
+    }
+    return '';
+  }
+
   @override
   Widget build(BuildContext context) {
     final DateTime nowUtc = DateTime.now().toUtc();
@@ -105,32 +149,39 @@ class MarketListingCard extends StatelessWidget {
             .toString();
     final String currentUserId = FirebaseAuth.instance.currentUser?.uid ?? '';
     final bool isWinner =
-      (currentUserId == (data['winnerId'] ?? '') ||
-        data['status'] == 'awaiting_payment');
+        (currentUserId == (data['winnerId'] ?? '') ||
+      data['status'] == 'bid_accepted' ||
+      data['status'] == 'approved_winner');
     final bool isCompletedWinner =
         isCompletedAuction &&
         highestBidderId.trim().isNotEmpty &&
         highestBidderId.trim() == currentUserId.trim();
+    final String sellerId = (data['sellerId'] ?? '').toString().trim();
     final double price = _parseDouble(data['price']) ?? 0;
-    final double? listingMarketAverage = _parseDouble(
-      data['market_average'] ?? data['marketAverage'],
-    );
     final String quality = (data['quality'] ?? '').toString();
-    final String? audioUrl = data['audioUrl']?.toString();
-    final String videoUrl = (data['videoUrl'] ?? '').toString();
+    final String? audioUrl = _firstText(data, const ['audioUrl', 'voiceUrl', 'audioURL']).trim().isEmpty
+        ? null
+        : _firstText(data, const ['audioUrl', 'voiceUrl', 'audioURL']);
+    final String videoUrl = _firstText(data, const [
+      'videoUrl',
+      'verificationVideoUrl',
+      'videoURL',
+      'mediaVideoUrl',
+    ]);
     final List<String> imageUrls = _extractImageUrls(data);
     final bool hasAnyMedia =
-      imageUrls.isNotEmpty ||
-      videoUrl.trim().isNotEmpty ||
-      (audioUrl?.trim().isNotEmpty ?? false);
+        imageUrls.isNotEmpty ||
+        videoUrl.trim().isNotEmpty ||
+        (audioUrl?.trim().isNotEmpty ?? false);
 
     final DateTime? endTime = _parseDate(data['endTime'])?.toUtc();
     final String listingStatus = (data['listingStatus'] ?? data['status'] ?? '')
-      .toString()
-      .toLowerCase();
-    final bool isAwaitingPayment = listingStatus == 'awaiting_payment';
+        .toString()
+        .toLowerCase();
+    final bool isAcceptedState =
+      listingStatus == 'bid_accepted' || listingStatus == 'approved_winner';
     final bool isAwaitingApproval =
-      !isLive && !isCompletedAuction && !isAwaitingPayment;
+      !isLive && !isCompletedAuction && !isAcceptedState;
     final bool isForceClosed = data['isBidForceClosed'] == true;
     final bool isBidOver = isLive && endTime != null
         ? (nowUtc.isAfter(endTime) || isForceClosed)
@@ -138,6 +189,7 @@ class MarketListingCard extends StatelessWidget {
     final bool showBidOverOverlay = isBidOver && !isCompletedWinner;
 
     final String location = _resolveLocation(data);
+    final String locationTrail = _resolveLocationTrail(data);
     final String distanceLabel = _resolveDistance(
       data,
       buyerDistrict: buyerDistrict,
@@ -147,9 +199,22 @@ class MarketListingCard extends StatelessWidget {
     final String product = cropName.isEmpty ? 'Category' : cropName;
     final String unit = (data['unit'] ?? 'Munn (40kg)').toString();
     final String quantity = (data['quantity'] ?? '--').toString();
-    final bool isAiVerifiedSource =
-        data['isVerifiedSource'] == true &&
-        (data['videoUrl'] ?? '').toString().trim().isNotEmpty;
+    final String saleType = (data['saleType'] ?? 'auction').toString().trim().toLowerCase();
+    final bool isFixedSale = saleType == 'fixed';
+    final bool isFeatured = _isPromotionActive(data);
+    final int bidCount = _resolveBidCount(data);
+    final int watchersCount = _watchersCountValue(data);
+    final String? engagementLabel = _auctionEngagementLabel(
+      bidCount: bidCount,
+      watchersCount: watchersCount,
+    );
+    final trustBadges = TrustSafetyService.resolveBuyerTrustBadges(
+      listingData: data,
+    );
+    final primaryTrustBadge = _primaryTrustBadgeLabel(
+      data: data,
+      trustBadges: trustBadges,
+    );
     final MandiType resolvedType = _resolveMandiType(
       data,
       preferred: selectedMandiType,
@@ -162,12 +227,16 @@ class MarketListingCard extends StatelessWidget {
     return Stack(
       children: [
         Card(
-          color: Colors.white.withValues(alpha: 0.08),
+          color: AppColors.cardSurface,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-            side: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
+            borderRadius: BorderRadius.circular(14),
+            side: BorderSide(
+              color: AppColors.secondarySurface,
+            ),
           ),
           margin: const EdgeInsets.only(bottom: 12),
+          shadowColor: AppColors.shadowDark,
+          elevation: 2,
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -180,51 +249,55 @@ class MarketListingCard extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: GestureDetector(
-                                  onTap: cropName.trim().isEmpty
-                                      ? null
-                                      : () => _triggerLivePakistanRateFetch(
-                                          cropName,
-                                          type: resolvedType,
-                                        ),
-                                  child: Text(
-                                    product.toUpperCase(),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.white,
-                                      decoration: TextDecoration.underline,
-                                      decorationColor: Colors.white54,
-                                    ),
+                          GestureDetector(
+                            onTap: cropName.trim().isEmpty
+                                ? null
+                                : () => _triggerLivePakistanRateFetch(
+                                    cropName,
+                                    type: resolvedType,
                                   ),
+                            child: Text(
+                              product,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                height: 1.22,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                                decoration: TextDecoration.underline,
+                                decorationColor: Colors.white54,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              _categoryChip(resolvedType, accentColor),
+                              _badge(
+                                isFixedSale
+                                    ? 'Fixed Price / فکسڈ قیمت'
+                                    : 'Auction / بولی',
+                                isFixedSale
+                                    ? const Color(0xFF34D399)
+                                    : const Color(0xFFF59E0B),
+                              ),
+                              if (audioUrl != null && audioUrl.isNotEmpty)
+                                IconButton(
+                                  padding: const EdgeInsets.only(left: 4),
+                                  constraints: const BoxConstraints(),
+                                  icon: Icon(
+                                    currentlyPlayingUrl == audioUrl
+                                        ? Icons.stop_circle
+                                        : Icons.play_circle_fill,
+                                    color: goldColor,
+                                    size: 24,
+                                  ),
+                                  onPressed: () => onPlayAudio(audioUrl),
                                 ),
-                              ),
-                              const SizedBox(width: 8),
-                              Wrap(
-                                spacing: 6,
-                                crossAxisAlignment: WrapCrossAlignment.center,
-                                children: [
-                                  _categoryChip(resolvedType, accentColor),
-                                  if (audioUrl != null && audioUrl.isNotEmpty)
-                                    IconButton(
-                                      padding: const EdgeInsets.only(left: 4),
-                                      constraints: const BoxConstraints(),
-                                      icon: Icon(
-                                        currentlyPlayingUrl == audioUrl
-                                            ? Icons.stop_circle
-                                            : Icons.play_circle_fill,
-                                        color: goldColor,
-                                        size: 24,
-                                      ),
-                                      onPressed: () => onPlayAudio(audioUrl),
-                                    ),
-                                ],
-                              ),
                             ],
                           ),
                           const SizedBox(height: 6),
@@ -232,16 +305,10 @@ class MarketListingCard extends StatelessWidget {
                             spacing: 6,
                             runSpacing: 6,
                             children: [
-                              ..._buildAiBadges(
-                                price: price,
-                                marketAverage: listingMarketAverage,
-                                quality: quality,
-                                product: product,
-                                cropName: cropName,
-                                location: location,
-                                resolvedType: resolvedType,
-                                accentColor: accentColor,
-                              ),
+                              if (isFeatured)
+                                _badge('FEATURED', AppColors.badgeFeatured),
+                              if (primaryTrustBadge != null)
+                                _badge(primaryTrustBadge, AppColors.badgeVerified),
                             ],
                           ),
                         ],
@@ -251,6 +318,12 @@ class MarketListingCard extends StatelessWidget {
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
+                        if (!isFixedSale)
+                          _buildWatchlistButton(
+                            context,
+                            sellerId: sellerId,
+                          ),
+                        const SizedBox(height: 6),
                         if (isDiscounted && originalPrice != null)
                           Text(
                             'Rs. ${_moneyFormat.format(originalPrice)}',
@@ -264,46 +337,36 @@ class MarketListingCard extends StatelessWidget {
                           'Rs. ${_moneyFormat.format(price)}',
                           style: const TextStyle(
                             fontWeight: FontWeight.bold,
-                            color: Colors.greenAccent,
+                            color: AppColors.badgeVerified,
                             fontSize: 20,
                           ),
                         ),
-                        if (isAiVerifiedSource)
-                          const Padding(
-                            padding: EdgeInsets.only(top: 4),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.verified,
-                                  size: 14,
-                                  color: Color(0xFFFFD700),
-                                ),
-                                SizedBox(width: 4),
-                                Text(
-                                  'AI Verified',
-                                  style: TextStyle(
-                                    color: Color(0xFFFFD700),
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 11,
-                                  ),
-                                ),
-                              ],
+                        if (!isFixedSale && engagementLabel != null) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            engagementLabel,
+                            style: const TextStyle(
+                              color: Color(0xFFEFD88A),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
                             ),
                           ),
-                        const SizedBox(height: 8),
-                        const Text(
-                          'Time Left',
-                          style: TextStyle(
-                            color: Colors.white60,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
+                        ],
+                        if (!isFixedSale) ...[
+                          const SizedBox(height: 8),
+                          const Text(
+                            'Time Left',
+                            style: TextStyle(
+                              color: Colors.white60,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 4),
-                        CountdownWidget(
-                          endTime: isAwaitingApproval ? null : endTime,
-                        ),
+                          const SizedBox(height: 4),
+                          CountdownWidget(
+                            endTime: isAwaitingApproval ? null : endTime,
+                          ),
+                        ],
                       ],
                     ),
                   ],
@@ -315,7 +378,7 @@ class MarketListingCard extends StatelessWidget {
                     child: Text(
                       'Quality: $quality',
                       style: const TextStyle(
-                        color: Colors.white54,
+                          color: AppColors.secondaryText,
                         fontSize: 12,
                       ),
                     ),
@@ -367,7 +430,7 @@ class MarketListingCard extends StatelessWidget {
                           const SizedBox(width: 4),
                           Expanded(
                             child: Text(
-                              '$location ⬢ $distanceLabel',
+                              '${locationTrail.isEmpty ? location : locationTrail} ⬢ $distanceLabel',
                               style: const TextStyle(
                                 color: Colors.white70,
                                 fontSize: 12,
@@ -406,82 +469,49 @@ class MarketListingCard extends StatelessWidget {
                   ],
                 ),
                 const Divider(height: 25, color: Colors.white10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: isCompletedWinner
-                          ? SizedBox(
-                              height: 48,
-                              child: ElevatedButton(
-                                onPressed: () {
-                                  showDialog<void>(
-                                    context: context,
-                                    builder: (_) => PaymentDialog(
-                                      listingId: listingId,
-                                      listingData: data,
-                                    ),
-                                  );
-                                },
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF00C853),
-                                  foregroundColor: Colors.white,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  textStyle: const TextStyle(
-                                    fontWeight: FontWeight.w800,
-                                    fontSize: 14,
-                                  ),
-                                ),
-                                child: const Text('Payment Karein'),
-                              ),
-                            )
-                          : SizedBox(
-                              height: 48,
-                              child: PrimaryGradientButton(
-                                height: 48,
-                                fontSize: 13,
-                                onPressed: (isBidOver || isAwaitingApproval)
-                                    ? null
-                                    : () => onBid(data, listingId),
-                                label: isBidOver ? 'Boli Khatam' : 'Boli Lagaen',
-                              ),
-                            ),
-                    ),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: SizedBox(
-                      height: 48,
-                      child: OutlinedButton(
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => ListingDetailScreen(
-                                  listingId: listingId,
-                                  initialData: data,
-                                ),
-                              ),
-                            );
-                          },
-                          style: OutlinedButton.styleFrom(
-                            side: const BorderSide(color: Color(0xFFFFD700)),
+                SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: isCompletedWinner
+                      ? ElevatedButton(
+                          onPressed: null,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF5E8D6E),
+                            foregroundColor: Colors.white70,
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(12),
                             ),
-                          ),
-                          child: const Text(
-                            'Details',
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: Color(0xFFFFD700),
-                              fontWeight: FontWeight.w700,
+                            textStyle: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 14,
                             ),
                           ),
+                          child: const Text('Accepted / قبول شدہ'),
+                        )
+                      : PrimaryGradientButton(
+                          height: 48,
+                          fontSize: 13,
+                          onPressed: (isBidOver || isAwaitingApproval)
+                              ? null
+                              : () {
+                                  if (isFixedSale) {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => BuyerListingDetailScreen(
+                                          listingId: listingId,
+                                          initialData: data,
+                                        ),
+                                      ),
+                                    );
+                                    return;
+                                  }
+                                  onBid(data, listingId);
+                                },
+                          label: isFixedSale
+                              ? 'تفصیل دیکھیں'
+                              : (isBidOver ? 'Boli Khatam' : 'Boli Lagaen'),
                         ),
-                      ),
-                    ),
-                  ],
                 ),
               ],
             ),
@@ -529,6 +559,48 @@ class MarketListingCard extends StatelessWidget {
     );
   }
 
+  int _resolveBidCount(Map<String, dynamic> map) {
+    int parseInt(dynamic value) {
+      if (value is int) return value;
+      if (value is num) return value.toInt();
+      return int.tryParse((value ?? '').toString()) ?? 0;
+    }
+
+    final values = <int>[
+      parseInt(map['totalBids']),
+      parseInt(map['bidsCount']),
+      parseInt(map['bidCount']),
+      parseInt(map['bid_count']),
+    ];
+    return values.reduce((a, b) => a > b ? a : b);
+  }
+
+  int _watchersCountValue(Map<String, dynamic> map) {
+    int parseInt(dynamic value) {
+      if (value is int) return value;
+      if (value is num) return value.toInt();
+      return int.tryParse((value ?? '').toString()) ?? 0;
+    }
+
+    final resolved = parseInt(map['watchersCount']);
+    return resolved < 0 ? 0 : resolved;
+  }
+
+  String? _auctionEngagementLabel({
+    required int bidCount,
+    required int watchersCount,
+  }) {
+    final parts = <String>[];
+    if (bidCount > 0) {
+      parts.add('🔥 $bidCount bids');
+    }
+    if (watchersCount > 0) {
+      parts.add('👁️ $watchersCount watching');
+    }
+    if (parts.isEmpty) return null;
+    return parts.join('   ');
+  }
+
   Future<void> _triggerLivePakistanRateFetch(
     String cropName, {
     required MandiType type,
@@ -554,6 +626,66 @@ class MarketListingCard extends StatelessWidget {
     } finally {
       _setLiveFetching(cropKey, false);
     }
+  }
+
+  Widget _buildWatchlistButton(
+    BuildContext context, {
+    required String sellerId,
+  }) {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null && sellerId.isNotEmpty && sellerId == user.uid) {
+      return const SizedBox.shrink();
+    }
+
+    if (user == null) {
+      return IconButton(
+        tooltip: 'Watch auction',
+        onPressed: () {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              duration: Duration(seconds: 3),
+              content: Text('Login required to watch auctions'),
+            ),
+          );
+          Navigator.of(context).pushNamed(Routes.login);
+        },
+        icon: const Icon(
+          Icons.star_border_rounded,
+          color: Color(0xFFD4AF37),
+          size: 22,
+        ),
+      );
+    }
+
+    return StreamBuilder<bool>(
+      stream: _engagementService.isListingSavedStream(listingId),
+      builder: (context, snapshot) {
+        final isSaved = snapshot.data ?? false;
+        return IconButton(
+          tooltip: isSaved ? 'Watching' : 'Watch',
+          onPressed: () async {
+            final saved = await _engagementService.toggleWatchlist(
+              listingId: listingId,
+              listingData: data,
+            );
+            if (!context.mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                duration: const Duration(seconds: 2),
+                content: Text(
+                  saved ? 'Watching this auction' : 'Removed from watchlist',
+                ),
+              ),
+            );
+          },
+          icon: Icon(
+            isSaved ? Icons.star_rounded : Icons.star_border_rounded,
+            color: isSaved ? const Color(0xFFEFD88A) : const Color(0xFFD4AF37),
+            size: 22,
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _triggerAiFallbackRateFetch({
@@ -583,6 +715,7 @@ class MarketListingCard extends StatelessWidget {
     }
   }
 
+  // ignore: unused_element
   List<Widget> _buildAiBadges({
     required double price,
     required double? marketAverage,
@@ -593,6 +726,9 @@ class MarketListingCard extends StatelessWidget {
     required MandiType resolvedType,
     required Color accentColor,
   }) {
+    final showAiSignals = (data['showAiSignalsForBuyer'] == true);
+    if (!showAiSignals) return const <Widget>[];
+
     final cropForRate = cropName.trim().isEmpty ? product : cropName;
     final bool hasCrop = cropForRate.trim().isNotEmpty;
     final cropKey = cropForRate.trim().toLowerCase();
@@ -784,6 +920,18 @@ class MarketListingCard extends StatelessWidget {
     ];
   }
 
+  String? _primaryTrustBadgeLabel({
+    required Map<String, dynamic> data,
+    required List<TrustBadge> trustBadges,
+  }) {
+    final hasVerified = trustBadges.any(
+      (badge) => badge.key == 'verified' || badge.key == 'trusted',
+    );
+    if (hasVerified) return 'Verified Seller';
+    if (data['isApproved'] == true) return 'Admin Approved';
+    return null;
+  }
+
   MandiType _resolveMandiType(
     Map<String, dynamic> rawData, {
     MandiType? preferred,
@@ -895,14 +1043,28 @@ class MarketListingCard extends StatelessWidget {
     switch (type) {
       case MandiType.crops:
         return const Color(0xFF2E7D32);
-      case MandiType.livestock:
-        return const Color(0xFF6D4C41);
-      case MandiType.milk:
-        return const Color(0xFF1565C0);
       case MandiType.fruit:
         return const Color(0xFFEF6C00);
       case MandiType.vegetables:
         return const Color(0xFF00897B);
+      case MandiType.flowers:
+        return const Color(0xFFEC4899);
+      case MandiType.livestock:
+        return const Color(0xFF6D4C41);
+      case MandiType.milk:
+        return const Color(0xFF1565C0);
+      case MandiType.seeds:
+        return const Color(0xFFB45309);
+      case MandiType.fertilizer:
+        return const Color(0xFF0EA5A4);
+      case MandiType.machinery:
+        return const Color(0xFF4B5563);
+      case MandiType.tools:
+        return const Color(0xFF475569);
+      case MandiType.dryFruits:
+        return const Color(0xFFA16207);
+      case MandiType.spices:
+        return const Color(0xFFDC2626);
     }
   }
 
@@ -930,9 +1092,30 @@ class MarketListingCard extends StatelessWidget {
   }
 
   String _resolveLocation(Map<String, dynamic> data) {
-    final String city = (data['city'] ?? '').toString().trim();
+    final locationDataRaw = data['locationData'];
+    final locationData = locationDataRaw is Map
+        ? Map<String, dynamic>.from(locationDataRaw)
+        : const <String, dynamic>{};
+
+    final String city = (data['city'] ?? locationData['city'] ?? '')
+        .toString()
+        .trim();
     if (city.isNotEmpty && city.toLowerCase() != 'null') {
       return city;
+    }
+
+    final String tehsil = (data['tehsil'] ?? locationData['tehsil'] ?? '')
+        .toString()
+        .trim();
+    if (tehsil.isNotEmpty && tehsil.toLowerCase() != 'null') {
+      return tehsil;
+    }
+
+    final String district = (data['district'] ?? locationData['district'] ?? '')
+        .toString()
+        .trim();
+    if (district.isNotEmpty && district.toLowerCase() != 'null') {
+      return district;
     }
 
     final String location = (data['location'] ?? '').toString().trim();
@@ -940,7 +1123,30 @@ class MarketListingCard extends StatelessWidget {
       return location;
     }
 
-    return 'Mandi Location';
+    final String province = (data['province'] ?? locationData['province'] ?? '')
+        .toString()
+        .trim();
+    if (province.isNotEmpty && province.toLowerCase() != 'null') {
+      return province;
+    }
+
+    return 'Pakistan';
+  }
+
+  String _resolveLocationTrail(Map<String, dynamic> data) {
+    final locationDataRaw = data['locationData'];
+    final locationData = locationDataRaw is Map
+        ? Map<String, dynamic>.from(locationDataRaw)
+        : const <String, dynamic>{};
+
+    final city = (data['city'] ?? locationData['city'] ?? '').toString().trim();
+    final district = (data['district'] ?? locationData['district'] ?? '').toString().trim();
+    final province = (data['province'] ?? locationData['province'] ?? '').toString().trim();
+
+    final parts = <String>[city, district, province]
+        .where((e) => e.isNotEmpty && e.toLowerCase() != 'null')
+        .toList(growable: false);
+    return parts.join(', ');
   }
 
   String _resolveCropName(Map<String, dynamic> data) {
@@ -986,7 +1192,14 @@ class MarketListingCard extends StatelessWidget {
   }
 
   String _resolveDistrict(Map<String, dynamic> data) {
-    final String district = (data['district'] ?? '').toString().trim();
+    final locationDataRaw = data['locationData'];
+    final locationData = locationDataRaw is Map
+        ? Map<String, dynamic>.from(locationDataRaw)
+        : const <String, dynamic>{};
+
+    final String district = (data['district'] ?? locationData['district'] ?? '')
+        .toString()
+        .trim();
     if (district.isNotEmpty && district.toLowerCase() != 'null') {
       return district;
     }
@@ -1034,15 +1247,39 @@ class MarketListingCard extends StatelessWidget {
     }
 
     addIfValid(rawData['imageUrl']);
+    addIfValid(rawData['photoUrl']);
+    addIfValid(rawData['trustPhotoUrl']);
+    addIfValid(rawData['verificationTrustPhotoUrl']);
     addIfValid(rawData['image1']);
     addIfValid(rawData['image2']);
     addIfValid(rawData['image3']);
     addIfValid(rawData['image4']);
 
+    final dynamic imageUrlsRaw = rawData['imageUrls'];
+    if (imageUrlsRaw is List) {
+      for (final item in imageUrlsRaw) {
+        addIfValid(item);
+      }
+    }
+
     final dynamic imagesRaw = rawData['images'];
     if (imagesRaw is List) {
       for (final item in imagesRaw) {
         addIfValid(item);
+      }
+    }
+
+    final media = rawData['mediaMetadata'];
+    if (media is Map) {
+      final mediaImageUrls = media['imageUrls'];
+      if (mediaImageUrls is List) {
+        for (final item in mediaImageUrls) {
+          addIfValid(item);
+        }
+      }
+      final trust = media['verificationTrustPhoto'];
+      if (trust is Map) {
+        addIfValid(trust['url']);
       }
     }
 
@@ -1060,4 +1297,3 @@ class CountdownWidget extends StatelessWidget {
     return BidTimer(endTime: endTime);
   }
 }
-

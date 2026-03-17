@@ -1,11 +1,11 @@
 ﻿import 'dart:convert';
-import 'dart:typed_data';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../core/constants.dart';
-import 'config_service.dart';
+import '../firebase_options.dart';
 import 'market_rate_service.dart';
 
 class MandiIntelligenceService {
@@ -15,21 +15,17 @@ class MandiIntelligenceService {
   factory MandiIntelligenceService() => _instance;
 
   final MarketRateService _marketRateService = MarketRateService();
-  final ConfigService _configService = ConfigService();
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
-  bool _keysInitialized = false;
-  String _geminiApiKey = '';
-  String _openAiApiKey = '';
+  bool _initialized = false;
 
   List<String> getItemsForType(MandiType mandiType) {
     return CategoryConstants.itemsForMandiType(mandiType);
   }
 
   Future<void> initialize() async {
-    if (_keysInitialized) return;
+    if (_initialized) return;
 
-    await _configService.warmup();
     try {
       await warmupMandiRatesIfEmpty();
     } catch (e) {
@@ -38,9 +34,7 @@ class MandiIntelligenceService {
       }
       rethrow;
     }
-    _geminiApiKey = await _configService.fetchGeminiApiKey();
-    _openAiApiKey = await _configService.fetchOpenAiApiKey();
-    _keysInitialized = true;
+    _initialized = true;
   }
 
   Future<double?> fetchMandiAverageRate(
@@ -213,12 +207,137 @@ class MandiIntelligenceService {
   }
 
   Future<void> _ensureInitialized() async {
-    if (_keysInitialized) return;
+    if (_initialized) return;
     await initialize();
   }
 
+  String get _projectId {
+    try {
+      return DefaultFirebaseOptions.currentPlatform.projectId;
+    } catch (_) {
+      return DefaultFirebaseOptions.android.projectId;
+    }
+  }
+
+  String get _functionsBaseUrl =>
+      'https://asia-south1-$_projectId.cloudfunctions.net';
+
+  Future<Map<String, dynamic>> _postFunctionJson({
+    required String functionName,
+    required Map<String, dynamic> payload,
+    bool requireAuth = false,
+  }) async {
+    final token = await FirebaseAuth.instance.currentUser?.getIdToken();
+    if (requireAuth && (token == null || token.trim().isEmpty)) {
+      throw Exception('AUTH_REQUIRED');
+    }
+
+    final response = await http.post(
+      Uri.parse('$_functionsBaseUrl/$functionName'),
+      headers: <String, String>{
+        'Content-Type': 'application/json',
+        if (token != null && token.trim().isNotEmpty)
+          'Authorization': 'Bearer $token',
+      },
+      body: jsonEncode(payload),
+    );
+
+    Map<String, dynamic> body = <String, dynamic>{};
+    if (response.body.trim().isNotEmpty) {
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map<String, dynamic>) {
+        body = decoded;
+      }
+    }
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final error = (body['error'] ?? body['errorMessage'] ?? 'FUNCTION_HTTP_${response.statusCode}')
+          .toString();
+      throw Exception(error);
+    }
+
+    return body;
+  }
+
+  Future<double?> suggestBidRate({
+    required String item,
+    required String location,
+    required List<double> bidSamples,
+    double baseline = 0,
+  }) async {
+    final response = await _postFunctionJson(
+      functionName: 'aiSuggestBidRate',
+      payload: <String, dynamic>{
+        'item': item,
+        'location': location,
+        'baseline': baseline,
+        'bidSamples': bidSamples,
+      },
+    );
+
+    final rate = _toDouble(response['suggestedRate']);
+    if (rate == null || rate <= 0) return null;
+    return rate;
+  }
+
+  Future<Map<String, dynamic>?> suggestMarketRate({
+    String? listingId,
+    String? itemName,
+    String? district,
+    String? province,
+    double? quantity,
+    String? unit,
+  }) async {
+    try {
+      final payload = <String, dynamic>{
+        if ((listingId ?? '').trim().isNotEmpty) 'listingId': listingId,
+        if ((itemName ?? '').trim().isNotEmpty) 'itemName': itemName,
+        if ((district ?? '').trim().isNotEmpty) 'district': district,
+        if ((province ?? '').trim().isNotEmpty) 'province': province,
+        if ((quantity ?? 0) > 0) 'quantity': quantity,
+        if ((unit ?? '').trim().isNotEmpty) 'unit': unit,
+      };
+
+      final response = await _postFunctionJson(
+        functionName: 'suggestMarketRateHttp',
+        payload: payload,
+        requireAuth: true,
+      );
+      return response;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>?> evaluateBidRisk({
+    required String listingId,
+    required String buyerUid,
+    required double bidRate,
+    required double quantity,
+    required String unit,
+  }) async {
+    try {
+      final response = await _postFunctionJson(
+        functionName: 'evaluateBidRiskHttp',
+        payload: <String, dynamic>{
+          'listingId': listingId,
+          'buyerUid': buyerUid,
+          'bidRate': bidRate,
+          'quantity': quantity,
+          'unit': unit,
+        },
+        requireAuth: true,
+      );
+      return response;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<String> getAIResponse(String prompt) async {
-    final locationAwarePrice = await _tryResolveLocationAwarePricePrompt(prompt);
+    final locationAwarePrice = await _tryResolveLocationAwarePricePrompt(
+      prompt,
+    );
     if (locationAwarePrice != null) {
       return locationAwarePrice;
     }
@@ -373,15 +492,19 @@ class MandiIntelligenceService {
     }
 
     if (matchedDistrict != null && matchedProvince != null) {
-      final allowedDistricts = AppConstants.districtsForProvince(matchedProvince);
+      final allowedDistricts = AppConstants.districtsForProvince(
+        matchedProvince,
+      );
       if (!allowedDistricts.contains(matchedDistrict)) {
         matchedDistrict = null;
       }
     }
 
     return _NationalLocationContext(
-      province: matchedProvince ?? (provinceRaw.isNotEmpty ? provinceRaw : null),
-      district: matchedDistrict ?? (districtRaw.isNotEmpty ? districtRaw : null),
+      province:
+          matchedProvince ?? (provinceRaw.isNotEmpty ? provinceRaw : null),
+      district:
+          matchedDistrict ?? (districtRaw.isNotEmpty ? districtRaw : null),
       normalizedProvince: _normalizeLocationToken(
         matchedProvince ?? (provinceRaw.isNotEmpty ? provinceRaw : null),
       ),
@@ -435,14 +558,28 @@ class MandiIntelligenceService {
     switch (type) {
       case MandiType.crops:
         return 4200.0;
-      case MandiType.vegetables:
-        return 110.0;
       case MandiType.fruit:
         return 240.0;
+      case MandiType.vegetables:
+        return 110.0;
+      case MandiType.flowers:
+        return 180.0;
       case MandiType.livestock:
         return 125000.0;
       case MandiType.milk:
         return 210.0;
+      case MandiType.seeds:
+        return 5800.0;
+      case MandiType.fertilizer:
+        return 7200.0;
+      case MandiType.machinery:
+        return 150000.0;
+      case MandiType.tools:
+        return 18500.0;
+      case MandiType.dryFruits:
+        return 2900.0;
+      case MandiType.spices:
+        return 1300.0;
     }
   }
 
@@ -552,107 +689,112 @@ class MandiIntelligenceService {
     required Uint8List imageBytes,
     String mimeType = 'image/jpeg',
   }) async {
+    debugPrint('[CNIC_AI] extract_start | payload={mimeType: $mimeType, imageBytesLength: ${imageBytes.length}}');
     if (imageBytes.isEmpty) {
+      debugPrint('[CNIC_AI] extract_short_circuit_empty_image');
       return const CnicExtractionResult(
         success: false,
-        errorMessage: 'CNIC image read nahi ho saki. Dobara clear photo upload karein.',
+        errorMessage:
+            'Could not read CNIC clearly. Please retake the image.\nشناختی کارڈ واضح نہیں پڑھا جا سکا۔ براہ کرم دوبارہ تصویر لیں۔',
       );
     }
 
     await _ensureInitialized();
-
-    if (_geminiApiKey.trim().isEmpty) {
-      return const CnicExtractionResult(
-        success: false,
-        errorMessage: 'AI service temporarily unavailable. Baad mein dobara koshish karein.',
-      );
-    }
-
-    const prompt =
-        'You are a strict Pakistani CNIC OCR parser.\n'
-        'Carefully distinguish between Name, Father Name, and CNIC Number fields.\n'
-        'Extract text from both Urdu and English labels on Pakistani CNIC.\n'
-        'If image is blurry, low-resolution, cropped, reflective, or uncertain, DO NOT GUESS.\n'
-        'Return status=error and ask for a clearer photo.\n'
-        'Return ONLY valid JSON with this exact schema:\n'
-        '{"status":"ok|error","error":"string","name":"string","fatherName":"string","cnicNumber":"xxxxx-xxxxxxx-x","confidence":"high|medium|low"}';
-
     try {
-      final model = GenerativeModel(
-        model: 'gemini-2.5-flash',
-        apiKey: _geminiApiKey,
+      final response = await _postFunctionJson(
+        functionName: 'aiExtractCnic',
+        payload: <String, dynamic>{
+          'imageBase64': base64Encode(imageBytes),
+          'mimeType': mimeType,
+        },
       );
 
-      final response = await model.generateContent([
-        Content.multi([
-          TextPart(prompt),
-          DataPart(mimeType, imageBytes),
-        ]),
-      ]);
+      debugPrint('[CNIC_AI] extract_raw_response | ${response.toString()}');
 
-      final raw = (response.text ?? '').trim();
-      if (raw.isEmpty) {
-        return const CnicExtractionResult(
-          success: false,
-          errorMessage: 'AI se response nahi mila. Clear photo ke sath dobara try karein.',
-        );
-      }
-
-      final jsonText = _extractJsonBlock(raw);
-      final Map<String, dynamic> parsed =
-          jsonDecode(jsonText) as Map<String, dynamic>;
-
-      final status = (parsed['status'] ?? '').toString().toLowerCase().trim();
-      final confidence =
-          (parsed['confidence'] ?? '').toString().toLowerCase().trim();
-      final aiError = (parsed['error'] ?? '').toString().trim();
-
-      if (status == 'error' || confidence == 'low') {
+      final success = response['success'] == true;
+      if (!success) {
+        final aiError = (response['errorMessage'] ?? '').toString().trim();
+        debugPrint('[CNIC_AI] extract_failed_success_false | error=$aiError');
         return CnicExtractionResult(
           success: false,
-          errorMessage: aiError.isEmpty
-              ? 'تص���Rر دھ� د��R ہ�� براہ کر�& ز�Rادہ ��اضح CNIC تص���Rر اپ����� کر�Rں�'
-              : aiError,
-          rawResponse: raw,
+          errorMessage: _mapCnicErrorToSafeMessage(aiError),
+          rawResponse: (response['rawResponse'] ?? '').toString(),
         );
       }
 
-      final name = (parsed['name'] ?? '').toString().trim();
-      final fatherName = (parsed['fatherName'] ?? '').toString().trim();
-      final normalizedCnic = _normalizeCnic((parsed['cnicNumber'] ?? '').toString());
+      final name = (response['name'] ?? '').toString().trim();
+      final fatherName = (response['fatherName'] ?? '').toString().trim();
+      final normalizedCnic = _normalizeCnic(
+        (response['cnicNumber'] ?? '').toString(),
+      );
+      final detectedSide = _normalizeDetectedSide(
+        (response['detectedSide'] ?? '').toString(),
+      );
+      final isCnicDocument = response['isCnicDocument'] == true;
+      final dateOfBirth = (response['dateOfBirth'] ?? '').toString().trim();
+      final expiryDate = (response['expiryDate'] ?? '').toString().trim();
+      final confidence = (response['confidence'] ?? 'medium')
+          .toString()
+          .toLowerCase()
+          .trim();
 
-      if (name.isEmpty || normalizedCnic.isEmpty) {
+      debugPrint('[CNIC_AI] extract_parsed_fields | name=$name | fatherName=$fatherName | cnicNumber=$normalizedCnic | detectedSide=$detectedSide | isCnicDocument=$isCnicDocument | dob=$dateOfBirth | expiry=$expiryDate | confidence=$confidence');
+
+      if (!isCnicDocument || detectedSide == 'unknown') {
+        debugPrint('[CNIC_AI] extract_rejected_document_or_side | isCnicDocument=$isCnicDocument | detectedSide=$detectedSide');
         return CnicExtractionResult(
           success: false,
-          errorMessage: 'CNIC fields clearly detect nahi hue. Clear, seedhi photo upload karein.',
-          rawResponse: raw,
+          errorMessage:
+              'Could not read CNIC clearly. Please retake the image.\nشناختی کارڈ واضح نہیں پڑھا جا سکا۔ براہ کرم دوبارہ تصویر لیں۔',
+          rawResponse: (response['rawResponse'] ?? '').toString(),
         );
       }
+
+      final bool needsReview =
+          confidence == 'low' || name.isEmpty || normalizedCnic.isEmpty;
 
       return CnicExtractionResult(
         success: true,
         name: name,
         fatherName: fatherName,
         cnicNumber: normalizedCnic,
+        detectedSide: detectedSide,
+        isCnicDocument: isCnicDocument,
+        dateOfBirth: dateOfBirth,
+        expiryDate: expiryDate,
         confidence: confidence.isEmpty ? 'medium' : confidence,
-        needsReview: true,
-        rawResponse: raw,
+        needsReview: needsReview,
+        rawResponse: (response['rawResponse'] ?? '').toString(),
       );
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[CNIC_AI] extract_exception | ${e.toString()}');
       return const CnicExtractionResult(
         success: false,
-        errorMessage: 'CNIC scan process mein masla aya. Clear image ke sath dobara scan karein.',
+        errorMessage:
+            'AI service is temporarily unavailable. Please try again.\nAI سروس عارضی طور پر دستیاب نہیں۔ براہ کرم دوبارہ کوشش کریں۔',
       );
     }
   }
 
-  String _extractJsonBlock(String rawText) {
-    final cleaned = rawText
-        .replaceAll('```json', '')
-        .replaceAll('```', '')
-        .trim();
-    final match = RegExp(r'\{[\s\S]*\}').firstMatch(cleaned);
-    return (match?.group(0) ?? cleaned).trim();
+  String _normalizeDetectedSide(String rawSide) {
+    final side = rawSide.toLowerCase().trim();
+    if (side == 'front') return 'front';
+    if (side == 'back') return 'back';
+    if (side.contains('front') || side.contains('frnt')) return 'front';
+    if (side.contains('back') || side.contains('rear')) return 'back';
+    return 'unknown';
+  }
+
+  String _mapCnicErrorToSafeMessage(String rawMessage) {
+    final lower = rawMessage.toLowerCase();
+    if (lower.contains('ai-unavailable') ||
+        lower.contains('unavailable') ||
+        lower.contains('network') ||
+        lower.contains('quota') ||
+        lower.contains('timeout')) {
+      return 'AI service is temporarily unavailable. Please try again.\nAI سروس عارضی طور پر دستیاب نہیں۔ براہ کرم دوبارہ کوشش کریں۔';
+    }
+    return 'Could not read CNIC clearly. Please retake the image.\nشناختی کارڈ واضح نہیں پڑھا جا سکا۔ براہ کرم دوبارہ تصویر لیں۔';
   }
 
   String _normalizeCnic(String input) {
@@ -667,18 +809,30 @@ class MandiIntelligenceService {
   }) async {
     await _ensureInitialized();
 
-    final prompt = _buildPrompt(action: action, payload: payload);
     try {
-      final geminiText = await _generateWithGemini(prompt);
-      if (geminiText.isNotEmpty) {
-        return _mapResponseByAction(action: action, text: geminiText);
+      if (action == 'weather_advisory') {
+        final response = await _postFunctionJson(
+          functionName: 'aiWeatherAdvisory',
+          payload: <String, dynamic>{
+            'condition': payload['condition'],
+            'temperature': payload['temperature'],
+            'crop': payload['crop'],
+          },
+        );
+        return <String, dynamic>{
+          'advisory': (response['advisory'] ?? '').toString().trim(),
+          'ok': response['ok'] == true,
+        };
       }
-    } catch (_) {}
 
-    try {
-      final openAiText = await _generateWithOpenAi(prompt);
-      if (openAiText.isNotEmpty) {
-        return _mapResponseByAction(action: action, text: openAiText);
+      final prompt = _buildPrompt(action: action, payload: payload);
+      final response = await _postFunctionJson(
+        functionName: 'aiGenerateText',
+        payload: <String, dynamic>{'prompt': prompt},
+      );
+      final text = (response['text'] ?? '').toString().trim();
+      if (text.isNotEmpty) {
+        return _mapResponseByAction(action: action, text: text);
       }
     } catch (_) {
       throw Exception('MANDI_SERVER_BUSY_OFFLINE');
@@ -726,72 +880,6 @@ class MandiIntelligenceService {
         return <String, dynamic>{'text': text, 'ok': true};
     }
   }
-
-  Future<String> _generateWithGemini(String prompt) async {
-    if (_geminiApiKey.trim().isEmpty) {
-      throw Exception('GEMINI_KEY_MISSING');
-    }
-
-    final model = GenerativeModel(
-      model: 'gemini-2.5-flash',
-      apiKey: _geminiApiKey,
-    );
-    final response = await model.generateContent([Content.text(prompt)]);
-    final text = response.text?.trim() ?? '';
-    if (text.isEmpty) {
-      throw Exception('GEMINI_EMPTY_RESPONSE');
-    }
-    return text;
-  }
-
-  Future<String> _generateWithOpenAi(String prompt) async {
-    if (_openAiApiKey.trim().isEmpty) {
-      throw Exception('OPENAI_KEY_MISSING');
-    }
-
-    final uri = Uri.parse('https://api.openai.com/v1/chat/completions');
-    final response = await http.post(
-      uri,
-      headers: <String, String>{
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $_openAiApiKey',
-      },
-      body: jsonEncode(<String, dynamic>{
-        'model': 'gpt-4o-mini',
-        'messages': <Map<String, String>>[
-          <String, String>{'role': 'user', 'content': prompt},
-        ],
-        'temperature': 0.2,
-      }),
-    );
-
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw Exception('OPENAI_HTTP_${response.statusCode}');
-    }
-
-    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
-    final choices = decoded['choices'];
-    if (choices is! List || choices.isEmpty) {
-      throw Exception('OPENAI_INVALID_RESPONSE');
-    }
-
-    final first = choices.first;
-    if (first is! Map) {
-      throw Exception('OPENAI_INVALID_CHOICE');
-    }
-
-    final message = first['message'];
-    if (message is! Map) {
-      throw Exception('OPENAI_INVALID_MESSAGE');
-    }
-
-    final content = (message['content'] ?? '').toString().trim();
-    if (content.isEmpty) {
-      throw Exception('OPENAI_EMPTY_RESPONSE');
-    }
-
-    return content;
-  }
 }
 
 typedef AIGenerativeService = MandiIntelligenceService;
@@ -818,11 +906,7 @@ class _NationalLocationContext {
 }
 
 class _PricePromptContext {
-  const _PricePromptContext({
-    required this.item,
-    this.province,
-    this.district,
-  });
+  const _PricePromptContext({required this.item, this.province, this.district});
 
   final String item;
   final String? province;
@@ -835,6 +919,10 @@ class CnicExtractionResult {
     this.name = '',
     this.fatherName = '',
     this.cnicNumber = '',
+    this.detectedSide = '',
+    this.isCnicDocument = false,
+    this.dateOfBirth = '',
+    this.expiryDate = '',
     this.confidence = 'low',
     this.errorMessage = '',
     this.needsReview = false,
@@ -845,9 +933,12 @@ class CnicExtractionResult {
   final String name;
   final String fatherName;
   final String cnicNumber;
+  final String detectedSide;
+  final bool isCnicDocument;
+  final String dateOfBirth;
+  final String expiryDate;
   final String confidence;
   final String errorMessage;
   final bool needsReview;
   final String rawResponse;
 }
-

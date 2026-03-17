@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 
 import '../../services/realtime_agri_rates_service.dart';
 
@@ -119,4 +119,3 @@ class _RateItemRow extends StatelessWidget {
     );
   }
 }
-

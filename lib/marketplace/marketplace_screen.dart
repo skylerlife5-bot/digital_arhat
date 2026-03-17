@@ -1,15 +1,19 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:url_launcher/url_launcher.dart';
-import '../core/app_colors.dart';
+import '../theme/app_colors.dart';
 import '../core/widgets/customer_support_button.dart';
 import '../core/widgets/ethical_verse_banner.dart';
 import '../core/widgets/media_preview_widget.dart';
-import '../dashboard/components/bid_dialog.dart';
-import '../dashboard/buyer/payment_dialog.dart';
+import '../dashboard/buyer/bid_bottom_sheet.dart';
 import '../dashboard/components/rate_ticker.dart';
 import '../models/deal_status.dart';
+import '../services/bid_eligibility_service.dart';
+import '../services/trust_safety_service.dart';
+
+// Legacy marketplace implementation retained for reference.
+// Canonical buyer runtime uses dashboard buyer screens.
 
 class MarketplaceScreen extends StatefulWidget {
   const MarketplaceScreen({super.key});
@@ -24,7 +28,7 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
     return Directionality(
       textDirection: TextDirection.ltr,
       child: Scaffold(
-        backgroundColor: const Color(0xFFF4F7F1),
+        backgroundColor: AppColors.background,
         drawer: _buildAppDrawer(context),
         appBar: AppBar(
           title: Image.asset(
@@ -32,8 +36,8 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
             height: 34,
             fit: BoxFit.contain,
           ),
-          backgroundColor: AppColors.primaryGreen,
-          foregroundColor: Colors.white,
+          backgroundColor: AppColors.accentGold,
+          foregroundColor: AppColors.ctaTextDark,
           centerTitle: true,
           elevation: 4,
           actions: [
@@ -101,7 +105,7 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
                   if (snapshot.connectionState == ConnectionState.waiting) {
                     return const Center(
                       child: CircularProgressIndicator(
-                        color: AppColors.primaryGreen,
+                        color: AppColors.accentGold,
                       ),
                     );
                   }
@@ -109,7 +113,24 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
                     return _buildEmptyState();
                   }
 
-                  final listings = snapshot.data!.docs;
+                  final listings = List<QueryDocumentSnapshot>.from(
+                    snapshot.data!.docs,
+                  )..sort((a, b) {
+                      final aData = a.data() as Map<String, dynamic>;
+                      final bData = b.data() as Map<String, dynamic>;
+                      final scoreCompare = _featuredVisibilityScore(
+                        bData,
+                      ).compareTo(_featuredVisibilityScore(aData));
+                      if (scoreCompare != 0) return scoreCompare;
+
+                      final aTime = _parseListingTime(
+                        aData['bumpedAt'] ?? aData['createdAt'],
+                      );
+                      final bTime = _parseListingTime(
+                        bData['bumpedAt'] ?? bData['createdAt'],
+                      );
+                      return bTime.compareTo(aTime);
+                    });
                   return ListView.builder(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 16,
@@ -131,6 +152,60 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
     );
   }
 
+  String _promotionStatus(Map<String, dynamic> data) {
+    return (data['promotionStatus'] ?? '').toString().trim().toLowerCase();
+  }
+
+  bool _isPromotionActive(Map<String, dynamic> data) {
+    final status = _promotionStatus(data);
+    if (status == 'active') {
+      final expires = data['promotionExpiresAt'];
+      if (expires is Timestamp) {
+        return expires.toDate().isAfter(DateTime.now());
+      }
+      return true;
+    }
+    if (status.isNotEmpty && status != 'none') {
+      return false;
+    }
+    final priority = (data['priorityScore'] ?? '').toString().toLowerCase();
+    return data['featured'] == true || data['featuredAuction'] == true || priority == 'high';
+  }
+
+  DateTime _parseListingTime(dynamic raw) {
+    if (raw is Timestamp) return raw.toDate();
+    if (raw is DateTime) return raw;
+    return DateTime.fromMillisecondsSinceEpoch(0);
+  }
+
+  int _toInt(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse((value ?? '').toString()) ?? 0;
+  }
+
+  double _baseVisibilityScore(Map<String, dynamic> data) {
+    final listedAt = _parseListingTime(data['bumpedAt'] ?? data['createdAt']);
+    final ageMinutes = DateTime.now().difference(listedAt).inMinutes.toDouble();
+    final freshnessScore = -(ageMinutes / 60.0);
+
+    final bidCount = [
+      _toInt(data['totalBids']),
+      _toInt(data['bidsCount']),
+      _toInt(data['bidCount']),
+      _toInt(data['bid_count']),
+    ].reduce((a, b) => a > b ? a : b);
+    final demandScore = bidCount.clamp(0, 6) * 0.05;
+
+    return freshnessScore + demandScore;
+  }
+
+  double _featuredVisibilityScore(Map<String, dynamic> data) {
+    const promotionBoost = 0.75;
+    return _baseVisibilityScore(data) +
+        (_isPromotionActive(data) ? promotionBoost : 0.0);
+  }
+
   Widget _buildAppDrawer(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
     final userName = (user?.displayName ?? 'Digital Arhat User').trim();
@@ -143,7 +218,7 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(16),
-              color: AppColors.primaryGreen,
+              color: AppColors.accentGold,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -158,7 +233,7 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
                       const Text(
                         'Digital Arhat',
                         style: TextStyle(
-                          color: Colors.white,
+                          color: AppColors.ctaTextDark,
                           fontWeight: FontWeight.w700,
                           fontSize: 16,
                         ),
@@ -169,7 +244,7 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
                   Text(
                     'Rabita aur Support',
                     style: TextStyle(
-                      color: Colors.white,
+                      color: AppColors.ctaTextDark,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -182,11 +257,11 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
                 children: [
                   CircleAvatar(
                     radius: 12,
-                    backgroundColor: Colors.green.shade600,
+                    backgroundColor: AppColors.divider,
                     child: const Text(
                       'WA',
                       style: TextStyle(
-                        color: Colors.white,
+                        color: AppColors.primaryText,
                         fontSize: 9,
                         fontWeight: FontWeight.w800,
                       ),
@@ -195,7 +270,7 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
                   const SizedBox(width: 8),
                   const Icon(
                     Icons.support_agent,
-                    color: AppColors.primaryGreen,
+                    color: AppColors.accentGold,
                   ),
                 ],
               ),
@@ -249,6 +324,19 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
     final bool isAiVerified =
         data['isVerifiedSource'] == true &&
         (data['videoUrl'] ?? '').toString().trim().isNotEmpty;
+    final trustBadges = TrustSafetyService.resolveBuyerTrustBadges(
+      listingData: data,
+    );
+    final bool isFeatured = _isPromotionActive(data);
+    final bool isHotAuction =
+      (data['saleType'] ?? 'auction').toString().toLowerCase() == 'auction' &&
+      isFeatured;
+    final DateTime now = DateTime.now().toUtc();
+    final DateTime? endTime = (data['endTime'] is Timestamp)
+      ? (data['endTime'] as Timestamp).toDate().toUtc()
+      : null;
+    final bool endingSoon =
+      endTime != null && endTime.isAfter(now) && endTime.difference(now).inMinutes <= 20;
     final List<String> imageUrls = _extractImageUrls(data);
     final String videoUrl = (data['videoUrl'] ?? '').toString();
     final String audioUrl = (data['audioUrl'] ?? '').toString();
@@ -256,13 +344,14 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
     return Container(
       margin: const EdgeInsets.only(bottom: 20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.cardSurface,
         borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.divider),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 5),
+            color: AppColors.shadowDark,
+            blurRadius: 12,
+            offset: const Offset(0, 6),
           ),
         ],
       ),
@@ -294,7 +383,7 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
                       data['province'] ??
                       'Pakistan',
                   Icons.location_on,
-                  Colors.redAccent,
+                  AppColors.divider,
                 ),
               ),
               Positioned(
@@ -303,10 +392,31 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
                 child: _buildBadge(
                   data['quality'] ?? 'Mayari',
                   Icons.verified,
-                  const Color(0xFFFFD700),
+                  AppColors.accentGold,
                   isGold: true,
                 ),
               ),
+              if (isFeatured || isHotAuction)
+                Positioned(
+                  bottom: 12,
+                  left: 12,
+                  child: _buildBadge(
+                    isHotAuction ? '🔥 HOT AUCTION' : 'FEATURED',
+                    Icons.workspace_premium_rounded,
+                    isHotAuction ? AppColors.urgencyRed : AppColors.accentGold,
+                    isGold: !isHotAuction,
+                  ),
+                ),
+              if (endingSoon)
+                Positioned(
+                  bottom: 12,
+                  right: 12,
+                  child: _buildBadge(
+                    'ENDING SOON',
+                    Icons.timer_rounded,
+                    AppColors.urgencyRed,
+                  ),
+                ),
             ],
           ),
 
@@ -325,7 +435,7 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
                         style: const TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.w900,
-                          color: Colors.black87,
+                          color: AppColors.primaryText,
                         ),
                       ),
                     ),
@@ -335,7 +445,7 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
                       style: const TextStyle(
                         fontSize: 22,
                         fontWeight: FontWeight.bold,
-                        color: AppColors.primaryGreen,
+                        color: AppColors.accentGold,
                       ),
                     ),
                   ],
@@ -348,9 +458,9 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
                       vertical: 4,
                     ),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFFD700).withValues(alpha: 0.16),
+                      color: AppColors.accentGold.withValues(alpha: 0.16),
                       borderRadius: BorderRadius.circular(999),
-                      border: Border.all(color: const Color(0xFFFFD700)),
+                      border: Border.all(color: AppColors.accentGold),
                     ),
                     child: const Row(
                       mainAxisSize: MainAxisSize.min,
@@ -358,13 +468,13 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
                         Icon(
                           Icons.verified,
                           size: 14,
-                          color: Color(0xFFFFD700),
+                          color: AppColors.accentGold,
                         ),
                         SizedBox(width: 4),
                         Text(
                           'AI Verified',
                           style: TextStyle(
-                            color: Color(0xFFFFD700),
+                            color: AppColors.accentGold,
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
                           ),
@@ -373,11 +483,43 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
                     ),
                   ),
                 ],
+                if (trustBadges.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: trustBadges
+                        .map(
+                          (badge) => Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 9,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: _trustBadgeColor(badge.key).withValues(alpha: 0.14),
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(
+                                color: _trustBadgeColor(badge.key).withValues(alpha: 0.7),
+                              ),
+                            ),
+                            child: Text(
+                              badge.label,
+                              style: TextStyle(
+                                color: _trustBadgeColor(badge.key),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        )
+                        .toList(growable: false),
+                  ),
+                ],
                 const SizedBox(height: 8),
                 Text(
                   'Miqdar (Quantity): ${data['quantity'] ?? '--'}',
-                  style: TextStyle(
-                    color: Colors.grey[700],
+                  style: const TextStyle(
+                    color: AppColors.secondaryText,
                     fontSize: 15,
                     fontWeight: FontWeight.w500,
                   ),
@@ -387,8 +529,9 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
                   width: double.infinity,
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF0B2F18),
+                    color: AppColors.background.withValues(alpha: 0.35),
                     borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.divider),
                   ),
                   child: MediaPreviewWidget(
                     imageUrls: imageUrls,
@@ -397,86 +540,106 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
                     title: 'Media Section',
                   ),
                 ),
-                const Divider(height: 30, thickness: 1),
+                const Divider(
+                  height: 30,
+                  thickness: 1,
+                  color: AppColors.divider,
+                ),
 
                 Row(
                   children: [
                     const CircleAvatar(
-                      backgroundColor: Color(0xFFE8F5E9),
+                      backgroundColor: AppColors.cardSurface,
                       radius: 18,
                       child: Icon(
                         Icons.person,
                         size: 20,
-                        color: AppColors.primaryGreen,
+                        color: AppColors.accentGold,
                       ),
                     ),
                     const SizedBox(width: 10),
-                    const Expanded(
+                    Expanded(
                       child: Text(
-                        'Tasdeeq Shuda Seller',
+                        trustBadges.any((b) => b.key == 'verified' || b.key == 'trusted')
+                            ? 'Verified Seller Signals'
+                            : 'Seller details available',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
+                        style: const TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.bold,
+                          color: AppColors.primaryText,
                         ),
                       ),
                     ),
                     const Spacer(),
-                    isCompletedWinner
-                        ? ElevatedButton.icon(
-                            onPressed: () {
-                              showDialog<void>(
-                                context: context,
-                                builder: (_) => PaymentDialog(
-                                  listingId: docId,
-                                  listingData: data,
+                    Builder(
+                      builder: (context) {
+                        final highest = (data['highestBid'] is num)
+                            ? (data['highestBid'] as num).toDouble()
+                            : double.tryParse((data['highestBid'] ?? '').toString()) ?? 0.0;
+                        final base = (data['startingPrice'] is num)
+                            ? (data['startingPrice'] as num).toDouble()
+                            : double.tryParse((data['startingPrice'] ?? data['basePrice'] ?? data['price'] ?? '').toString()) ?? 0.0;
+                        final probeAmount = (highest > 0 ? highest : base) + 1;
+                        final bidEligibility = BidEligibilityService.evaluate(
+                          buyerId: FirebaseAuth.instance.currentUser?.uid ?? '',
+                          listingData: data,
+                          bidAmount: probeAmount,
+                        );
+
+                        return isCompletedWinner
+                            ? ElevatedButton.icon(
+                                onPressed: null,
+                                icon: const Icon(Icons.handshake_rounded, size: 18),
+                                label: const Text('Accepted / قبول شدہ'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: AppColors.divider,
+                                  foregroundColor: AppColors.secondaryText,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 20,
+                                    vertical: 12,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  elevation: 4,
+                                ),
+                              )
+                            : Tooltip(
+                                message: bidEligibility.allowed ? 'Place Bid' : bidEligibility.message,
+                                child: ElevatedButton.icon(
+                                  onPressed: !bidEligibility.allowed
+                                      ? null
+                                      : () async {
+                                          await showModalBottomSheet<void>(
+                                            context: context,
+                                            backgroundColor: Colors.transparent,
+                                            isScrollControlled: true,
+                                            builder: (_) => BidBottomSheet(
+                                              listingId: docId,
+                                              listingData: data,
+                                            ),
+                                          );
+                                        },
+                                  icon: const Icon(Icons.gavel_rounded, size: 18),
+                                  label: const Text('Boli Lagaen'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: AppColors.accentGold,
+                                    foregroundColor: AppColors.ctaTextDark,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 20,
+                                      vertical: 12,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    elevation: 4,
+                                  ),
                                 ),
                               );
-                            },
-                            icon: const Icon(
-                              Icons.account_balance_wallet,
-                              size: 18,
-                            ),
-                            label: const Text('Payment Karein'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF00C853),
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 20,
-                                vertical: 12,
-                              ),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              elevation: 4,
-                            ),
-                          )
-                        : ElevatedButton.icon(
-                            onPressed: () {
-                              showDialog(
-                                context: context,
-                                builder: (context) => BidDialog(
-                                  productData: data,
-                                  listingId: docId,
-                                ),
-                              );
-                            },
-                            icon: const Icon(Icons.gavel_rounded, size: 18),
-                            label: const Text('Boli Lagaen'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: AppColors.primaryGreen,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 20,
-                                vertical: 12,
-                              ),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              elevation: 4,
-                            ),
-                          ),
+                      },
+                    ),
                   ],
                 ),
               ],
@@ -485,6 +648,21 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
         ],
       ),
     );
+  }
+
+  Color _trustBadgeColor(String key) {
+    switch (key) {
+      case 'verified':
+        return AppColors.divider;
+      case 'trusted':
+        return AppColors.divider;
+      case 'moderated':
+        return AppColors.accentGold;
+      case 'ai':
+        return AppColors.secondaryText;
+      default:
+        return AppColors.secondaryText;
+    }
   }
 
   Widget _buildBadge(
@@ -497,17 +675,18 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         color: isGold
-            ? const Color(0xFF2E7D32)
-            : Colors.white.withValues(alpha: 0.9),
+            ? AppColors.cardSurface.withValues(alpha: 0.94)
+            : AppColors.background.withValues(alpha: 0.88),
         borderRadius: BorderRadius.circular(30),
-        border: isGold
-            ? Border.all(color: const Color(0xFFFFD700), width: 1.5)
-            : null,
+        border: Border.all(
+          color: isGold ? AppColors.accentGold : color.withValues(alpha: 0.85),
+          width: isGold ? 1.5 : 1,
+        ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 14, color: isGold ? const Color(0xFFFFD700) : color),
+          Icon(icon, size: 14, color: isGold ? AppColors.accentGold : color),
           const SizedBox(width: 4),
           Flexible(
             child: Text(
@@ -517,7 +696,7 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.bold,
-                color: isGold ? Colors.white : Colors.black87,
+                color: isGold ? AppColors.primaryText : AppColors.primaryText,
               ),
             ),
           ),
@@ -532,13 +711,16 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
       width: double.infinity,
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [Colors.grey[200]!, Colors.grey[300]!],
+          colors: [
+            AppColors.cardSurface,
+            AppColors.background,
+          ],
         ),
       ),
       child: const Icon(
         Icons.agriculture_rounded,
         size: 60,
-        color: Colors.grey,
+        color: AppColors.secondaryText,
       ),
     );
   }
@@ -548,11 +730,15 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.eco_outlined, size: 80, color: Colors.grey[300]),
+          const Icon(
+            Icons.eco_outlined,
+            size: 80,
+            color: AppColors.secondaryText,
+          ),
           const SizedBox(height: 10),
           const Text(
             'Mandi mein abhi koi maal dastiyab nahi hai.',
-            style: TextStyle(color: Colors.grey, fontSize: 16),
+            style: TextStyle(color: AppColors.secondaryText, fontSize: 16),
           ),
         ],
       ),
@@ -607,16 +793,16 @@ class _CategoryChipsRow extends StatelessWidget {
                   vertical: 8,
                 ),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: AppColors.cardSurface,
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
-                    color: AppColors.primaryGreen.withValues(alpha: 0.2),
+                    color: AppColors.divider,
                   ),
                 ),
                 child: Text(
                   label,
                   style: const TextStyle(
-                    color: AppColors.primaryGreen,
+                    color: AppColors.primaryText,
                     fontWeight: FontWeight.w700,
                     fontSize: 12,
                   ),

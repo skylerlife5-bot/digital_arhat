@@ -1,22 +1,18 @@
 ﻿import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:fl_chart/fl_chart.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
-import '../../core/constants.dart';
-import '../../core/security_filter.dart';
-import '../../core/widgets/customer_support_button.dart';
-import '../../models/deal_status.dart';
-import '../../routes.dart';
-import '../../auth/auth_wrapper.dart';
-import '../../services/admin_service.dart';
-import '../../services/marketplace_service.dart';
-import 'admin_payment_verification_screen.dart';
-import 'admin_deal_details_screen.dart';
-import 'payout_management_screen.dart';
+import '../../config/promotion_payment_config.dart';
+import '../../services/admin_action_service.dart';
+import '../../services/layer2_market_intelligence_service.dart';
+import '../../services/session_service.dart';
+import 'admin_listing_detail_screen.dart';
+
+class _AdminUiException implements Exception {
+  const _AdminUiException(this.message);
+
+  final String message;
+}
 
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({super.key});
@@ -25,178 +21,858 @@ class AdminDashboard extends StatefulWidget {
   State<AdminDashboard> createState() => _AdminDashboardState();
 }
 
-class _AdminDashboardState extends State<AdminDashboard> {
+class _AdminDashboardState extends State<AdminDashboard>
+    with TickerProviderStateMixin {
+  static const Color _bg = Color(0xFF0B1F3A);
+  static const Color _panelColor = Color(0xFF122B4A);
+  static const Color _gold = Color(0xFFFFD700);
+  static const Color _green = Color(0xFF2FCB8F);
+  static const Color _blue = Color(0xFF4B86F8);
+
   final FirebaseFirestore _db = FirebaseFirestore.instance;
-  final MarketplaceService _marketplaceService = MarketplaceService();
-  final AdminService _adminService = AdminService();
-  Stream<QuerySnapshot<Map<String, dynamic>>>? _pendingListingsStream;
-  Stream<QuerySnapshot<Map<String, dynamic>>>? _allBidsStream;
-  Stream<QuerySnapshot<Map<String, dynamic>>>? _adminAlertsStream;
-  Stream<QuerySnapshot<Map<String, dynamic>>>? _awaitingDealApprovalStream;
-  QuerySnapshot<Map<String, dynamic>>? _awaitingDealApprovalInitialData;
-  List<QueryDocumentSnapshot<Map<String, dynamic>>> _pendingDeals =
-      <QueryDocumentSnapshot<Map<String, dynamic>>>[];
-  final Set<String> _pendingDealActionListingIds = <String>{};
-  late Future<_AdminStatsSnapshot> _statsFuture;
-  late Future<_DealSummarySnapshot> _dealSummaryFuture;
-  int _selectedTab = 0;
-
-  static const Color navy = Color(0xFF0B1F3A);
-  static const Color royalBlue = Color(0xFF002366);
-  static const Color panel = Color(0xFF122B4A);
-  static const Color gold = Color(0xFFFFD700);
-
-  bool get _isInteractingWithPendingCard =>
-      _pendingDealActionListingIds.isNotEmpty;
+  final AdminActionService _adminActions = AdminActionService();
+  final Layer2MarketIntelligenceService _layer2MarketService =
+      Layer2MarketIntelligenceService();
+  late final TabController _tabs;
+  final Set<String> _loadingActions = <String>{};
+  final Set<String> _hiddenModerationIds = <String>{};
+  final Map<String, String> _auctionStatusOverrides = <String, String>{};
+  late Future<AdminMarketInsightsResult> _adminInsightsFuture;
 
   @override
   void initState() {
     super.initState();
-    _setupCachedStreams();
-    _statsFuture = _fetchAdminStats();
-    _dealSummaryFuture = _fetchDealSummary();
+    _tabs = TabController(length: 6, vsync: this);
+    _adminInsightsFuture = _layer2MarketService.buildAdminMarketInsights();
   }
 
-  void _setupCachedStreams() {
-    _pendingListingsStream = _db
-        .collection('listings')
-        .orderBy('createdAt', descending: true)
-        .snapshots();
-    final awaitingApprovalQuery = _db
-        .collection('listings')
-        .where('listingStatus', isEqualTo: DealStatus.pendingAdminApproval.name)
-        .orderBy('updatedAt', descending: true);
-    _awaitingDealApprovalStream = awaitingApprovalQuery.snapshots();
-    awaitingApprovalQuery.get().then((snapshot) {
-      if (!mounted) return;
-      setState(() {
-        _awaitingDealApprovalInitialData = snapshot;
-        if (!_isInteractingWithPendingCard) {
-          _pendingDeals =
-              List<QueryDocumentSnapshot<Map<String, dynamic>>>.from(
-                snapshot.docs,
-              );
-        }
-      });
-    });
-    _allBidsStream = FirebaseFirestore.instance
-        .collectionGroup('bids')
-        .orderBy('timestamp', descending: true)
-        .snapshots();
-    _adminAlertsStream = _db
-        .collection('admin_alerts')
-        .orderBy('timestamp', descending: true)
-        .snapshots();
-  }
-
-  Future<_AdminStatsSnapshot> _fetchAdminStats() async {
-    final usersSnap = await _db.collection('users').get();
-    final listingsSnap = await _db.collection('listings').get();
-    final dealsSnap = await _db.collection('deals').get();
-
-    final users = usersSnap.docs;
-    final listings = listingsSnap.docs;
-    final deals = dealsSnap.docs;
-
-    int pendingApprovals = 0;
-    int liveListings = 0;
-    double totalCommissionBase = 0;
-
-    for (final doc in listings) {
-      final data = doc.data();
-      final status = _str(data, 'status').toLowerCase();
-
-      if (status == 'pending' || !_bool(data, 'isApproved')) {
-        pendingApprovals++;
-      }
-      if (status == 'live' || status == DealStatus.active.value) {
-        liveListings++;
-      }
-    }
-
-    for (final doc in deals) {
-      final data = doc.data();
-      final status = _str(data, 'status').toLowerCase();
-      if (status == DealStatus.dealCompleted.value ||
-          status == 'deal_completed' ||
-          status == 'closed') {
-        final amount = _num(data, 'dealAmount') > 0
-            ? _num(data, 'dealAmount')
-            : _num(data, 'finalPrice');
-        totalCommissionBase += amount;
-      }
-    }
-
-    return _AdminStatsSnapshot(
-      totalUsers: users.length,
-      pendingApprovals: pendingApprovals,
-      liveListings: liveListings,
-      totalListings: listings.length,
-      netCommission: totalCommissionBase * 0.02,
-    );
-  }
-
-  void _refreshAdminStats() {
-    if (!mounted) return;
+  void _refreshAdminInsights() {
     setState(() {
-      _statsFuture = _fetchAdminStats();
-      _dealSummaryFuture = _fetchDealSummary();
+      _adminInsightsFuture = _layer2MarketService.buildAdminMarketInsights();
     });
   }
 
-  Future<_DealSummarySnapshot> _fetchDealSummary() async {
-    final listingsSnap = await _db.collection('listings').get();
-    final usersSnap = await _db
-        .collection('users')
-        .where('role', isEqualTo: 'seller')
-        .get();
+  @override
+  void dispose() {
+    _tabs.dispose();
+    super.dispose();
+  }
 
-    int activeAds = 0;
-    int pendingApprovals = 0;
-    int pendingPayouts = 0;
+  String _s(dynamic v, {String fallback = '-'}) {
+    final t = (v ?? '').toString().trim();
+    return t.isEmpty ? fallback : t;
+  }
 
-    for (final doc in listingsSnap.docs) {
-      final data = doc.data();
-      final listingStatus = _str(
-        data,
-        'listingStatus',
-        fallback: _str(data, 'status'),
-      ).toLowerCase();
-      if (listingStatus == DealStatus.active.value) {
-        activeAds++;
+  bool _b(dynamic v) {
+    if (v is bool) return v;
+    if (v is String) return v.toLowerCase() == 'true';
+    return false;
+  }
+
+  double _n(dynamic v) {
+    if (v is num) return v.toDouble();
+    return double.tryParse((v ?? '').toString()) ?? 0;
+  }
+
+  void _diag(String message) {
+    debugPrint('[AdminDashboard] $message');
+  }
+
+  String _firstText(Map<String, dynamic> data, List<String> keys) {
+    for (final key in keys) {
+      final value = _s(data[key], fallback: '');
+      if (value.isNotEmpty) return value;
+    }
+    final media = data['mediaMetadata'];
+    if (media is Map) {
+      for (final key in keys) {
+        final value = _s(media[key], fallback: '');
+        if (value.isNotEmpty) return value;
       }
-      if (listingStatus == DealStatus.pendingAdminApproval.name) {
-        pendingApprovals++;
+    }
+    return '';
+  }
+
+  List<String> _extractImageUrls(Map<String, dynamic> data) {
+    final urls = <String>[];
+    void addUrl(dynamic value) {
+      final url = (value ?? '').toString().trim();
+      if (url.isEmpty || url.toLowerCase() == 'null') return;
+      if (!url.startsWith('http')) return;
+      if (!urls.contains(url)) urls.add(url);
+    }
+
+    addUrl(data['imageUrl']);
+    addUrl(data['photoUrl']);
+    addUrl(data['trustPhotoUrl']);
+    addUrl(data['verificationTrustPhotoUrl']);
+
+    final imageUrls = data['imageUrls'];
+    if (imageUrls is List) {
+      for (final item in imageUrls) {
+        addUrl(item);
       }
     }
 
-    try {
-      final pendingWithdrawals = await _db
-          .collection('withdraw_requests')
-          .where('status', isEqualTo: 'pending')
-          .get();
-      pendingPayouts = pendingWithdrawals.docs.length;
-    } catch (_) {
-      for (final userDoc in usersSnap.docs) {
-        final data = userDoc.data();
-        final availableBalance = _num(data, 'availableBalance');
-        if (availableBalance > 0) {
-          pendingPayouts++;
+    final images = data['images'];
+    if (images is List) {
+      for (final item in images) {
+        addUrl(item);
+      }
+    }
+
+    final media = data['mediaMetadata'];
+    if (media is Map) {
+      final mediaImageUrls = media['imageUrls'];
+      if (mediaImageUrls is List) {
+        for (final item in mediaImageUrls) {
+          addUrl(item);
         }
       }
+      final trust = media['verificationTrustPhoto'];
+      if (trust is Map) addUrl(trust['url']);
     }
 
-    return _DealSummarySnapshot(
-      activeAds: activeAds,
-      pendingApprovals: pendingApprovals,
-      pendingPayouts: pendingPayouts,
+    return urls;
+  }
+
+  String _videoUrl(Map<String, dynamic> data) {
+    final direct = _firstText(data, const [
+      'videoUrl',
+      'verificationVideoUrl',
+      'videoURL',
+      'mediaVideoUrl',
+    ]);
+    if (direct.isNotEmpty) return direct;
+    final media = data['mediaMetadata'];
+    if (media is Map) {
+      final verification = media['verificationVideo'];
+      if (verification is Map) {
+        final nested = _s(verification['url'], fallback: '');
+        if (nested.isNotEmpty) return nested;
+      }
+    }
+    return '';
+  }
+
+  String _audioUrl(Map<String, dynamic> data) {
+    final direct = _firstText(data, const ['audioUrl', 'voiceUrl', 'audioURL']);
+    if (direct.isNotEmpty) return direct;
+    final media = data['mediaMetadata'];
+    if (media is Map) {
+      final nested = _s(media['audioUrl'], fallback: '');
+      if (nested.isNotEmpty) return nested;
+    }
+    return '';
+  }
+
+  String _promo(String raw) {
+    final s = raw.trim().toLowerCase();
+    if (s == 'promotion_pending_payment') return 'pending_review';
+    if (s == 'payment_under_review') return 'pending_review';
+    if (s == 'pending_payment') return 'pending_review';
+    return s.isEmpty ? 'none' : s;
+  }
+
+  DateTime? _toDate(dynamic value) {
+    if (value is Timestamp) return value.toDate();
+    if (value is DateTime) return value;
+    return null;
+  }
+
+  String _promoStatusForMetrics(Map<String, dynamic> data) {
+    final status = _promo(_s(data['promotionStatus'], fallback: 'none'));
+    if (status == 'active') {
+      final expiresAt = _toDate(data['promotionExpiresAt']);
+      if (expiresAt != null && expiresAt.isBefore(DateTime.now())) {
+        return 'expired';
+      }
+    }
+    return status;
+  }
+
+  bool _needsModeration(Map<String, dynamic> d) {
+    final status = _s(d['status']).toLowerCase();
+    return !_b(d['isApproved']) ||
+        status == 'pending' ||
+        status == 'review' ||
+        status == 'under_review' ||
+        status == 'pending_verification';
+  }
+
+  String _status(Map<String, dynamic> data) {
+    return _s(
+      data['status'],
+      fallback: _s(
+        data['listingStatus'],
+        fallback: _s(data['auctionStatus'], fallback: ''),
+      ),
+    ).toLowerCase();
+  }
+
+  String _auctionStatus(Map<String, dynamic> data) {
+    return _s(data['auctionStatus'], fallback: _status(data)).toLowerCase();
+  }
+
+  String _safeError(Object error) {
+    if (error is _AdminUiException) return error.message;
+    if (error is FirebaseException && (error.message ?? '').trim().isNotEmpty) {
+      return error.message!.trim();
+    }
+    return 'Operation failed';
+  }
+
+  Future<void> _traceFailure({
+    required String action,
+    required String targetCollection,
+    required String targetId,
+    required Object error,
+    String? previousStatus,
+    String? intendedStatus,
+    String notes = '',
+  }) async {
+    final admin = FirebaseAuth.instance.currentUser;
+    await _db.collection('admin_action_logs').add({
+      'entityType': targetCollection == 'users' ? 'user' : 'listing',
+      'entityId': targetId,
+      'actionType': action,
+      'actionBy': admin?.uid ?? 'admin',
+      'actionByEmail': admin?.email ?? '',
+      'actionByName': admin?.displayName ?? '',
+      'actionAt': FieldValue.serverTimestamp(),
+      'notes': notes,
+      'targetCollection': targetCollection,
+      'targetDocId': targetId,
+      'previousStatus': previousStatus,
+      'intendedStatus': intendedStatus,
+      'error': _safeError(error),
+      'result': 'failed',
+    });
+  }
+
+  Future<Map<String, dynamic>> _loadListing(String id) async {
+    final snap = await _db.collection('listings').doc(id).get();
+    if (!snap.exists) {
+      throw const _AdminUiException('Listing not found');
+    }
+    return snap.data() ?? <String, dynamic>{};
+  }
+
+  Future<String?> _askAdminNote(
+    String title, {
+    String hint = 'Add admin note',
+    bool required = false,
+  }) async {
+    final controller = TextEditingController();
+    final value = await showDialog<String>(
+      context: context,
+      builder: (ctx) {
+        String? localError;
+        return StatefulBuilder(
+          builder: (ctx, setLocalState) => AlertDialog(
+            title: Text(title),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: controller,
+                  minLines: 2,
+                  maxLines: 4,
+                  decoration: InputDecoration(
+                    border: const OutlineInputBorder(),
+                    hintText: hint,
+                    errorText: localError,
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              if (!required)
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, ''),
+                  child: const Text('Skip'),
+                ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  final note = controller.text.trim();
+                  if (required && note.isEmpty) {
+                    setLocalState(() {
+                      localError = 'Admin note is required';
+                    });
+                    return;
+                  }
+                  Navigator.pop(ctx, note);
+                },
+                child: const Text('Save'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    controller.dispose();
+    return value;
+  }
+
+  Future<void> _notifyUser({
+    required String userId,
+    required String type,
+    required String title,
+    required String body,
+    required String titleUr,
+    required String bodyUr,
+    String? listingId,
+    Map<String, dynamic>? metadata,
+  }) async {
+    await _db.collection('notifications').add({
+      'userId': userId,
+      'type': type,
+      'title': title,
+      'body': body,
+      'titleUr': titleUr,
+      'bodyUr': bodyUr,
+      'routeName': listingId == null ? '' : 'buyer_listing_detail',
+      'routeParams': listingId == null
+          ? <String, dynamic>{}
+          : {'listingId': listingId},
+      'listingId': listingId,
+      'metadata': metadata ?? <String, dynamic>{},
+      'createdAt': FieldValue.serverTimestamp(),
+      'read': false,
+    });
+  }
+
+  Future<void> _writeRevenueLedger({
+    required String entryType,
+    required String listingId,
+    required String sellerId,
+    required double amount,
+    required String revenueCategory,
+    required String status,
+    required String notes,
+    bool markApproved = false,
+  }) async {
+    await _db.collection('revenue_ledger').add({
+      'entryType': entryType,
+      'sourceListingId': listingId,
+      'sellerId': sellerId,
+      'amount': amount,
+      'revenueCategory': revenueCategory,
+      'status': status,
+      'createdAt': FieldValue.serverTimestamp(),
+      'approvedAt': markApproved ? FieldValue.serverTimestamp() : null,
+      'notes': notes,
+    });
+  }
+
+  Future<void> _log(
+    String entityType,
+    String entityId,
+    String action, {
+    String notes = '',
+    String? previousStatus,
+    String? newStatus,
+    String? previousAuctionStatus,
+    String? newAuctionStatus,
+    String? previousPromotionStatus,
+    String? newPromotionStatus,
+  }) async {
+    final admin = FirebaseAuth.instance.currentUser;
+    final uid = admin?.uid ?? 'admin';
+    final ts = FieldValue.serverTimestamp();
+    final target = entityType == 'user' ? 'users' : 'listings';
+    await _db.collection('admin_action_logs').add({
+      'entityType': entityType,
+      'entityId': entityId,
+      'actionType': action,
+      'actionBy': uid,
+      'actionByEmail': admin?.email ?? '',
+      'actionByName': admin?.displayName ?? '',
+      'actionAt': ts,
+      'notes': notes,
+      'reason': notes,
+      'targetCollection': target,
+      'targetDocId': entityId,
+      'previousStatus': previousStatus,
+      'newStatus': newStatus,
+      'previousAuctionStatus': previousAuctionStatus,
+      'newAuctionStatus': newAuctionStatus,
+      'previousPromotionStatus': previousPromotionStatus,
+      'newPromotionStatus': newPromotionStatus,
+      'previousStateSummary': {
+        'status': previousStatus,
+        'auctionStatus': previousAuctionStatus,
+        'promotionStatus': previousPromotionStatus,
+      },
+      'newStateSummary': {
+        'status': newStatus,
+        'auctionStatus': newAuctionStatus,
+        'promotionStatus': newPromotionStatus,
+      },
+      'result': 'success',
+    });
+    await _db.collection(target).doc(entityId).set({
+      'lastAdminAction': {
+        'actionType': action,
+        'actionBy': uid,
+        'actionAt': ts,
+        'notes': notes,
+      },
+      'updatedAt': ts,
+    }, SetOptions(merge: true));
+  }
+
+  bool _isActionLoading(String key) => _loadingActions.contains(key);
+
+  Future<void> _runAction({
+    required String key,
+    required String failedMessage,
+    required String failureAction,
+    required String targetCollection,
+    required String targetId,
+    String? previousStatus,
+    String? intendedStatus,
+    required Future<void> Function() work,
+    String? successMessage,
+    VoidCallback? onSuccess,
+  }) async {
+    if (_isActionLoading(key)) return;
+    _diag(
+      'action_tap action=$failureAction target=$targetCollection/$targetId',
+    );
+    setState(() => _loadingActions.add(key));
+    try {
+      await work();
+      if (!mounted) return;
+      onSuccess?.call();
+      if (successMessage != null && successMessage.isNotEmpty) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(successMessage)));
+      }
+    } catch (error) {
+      _diag(
+        'action_failure action=$failureAction target=$targetCollection/$targetId error=${_safeError(error)}',
+      );
+      try {
+        await _traceFailure(
+          action: failureAction,
+          targetCollection: targetCollection,
+          targetId: targetId,
+          error: error,
+          previousStatus: previousStatus,
+          intendedStatus: intendedStatus,
+        );
+      } catch (_) {
+        _diag(
+          'action_failure_log_write_failed action=$failureAction target=$targetCollection/$targetId',
+        );
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(failedMessage)));
+    } finally {
+      if (mounted) {
+        setState(() => _loadingActions.remove(key));
+      }
+    }
+  }
+
+  Future<void> _approve(String id, {String note = ''}) async {
+    final current = await _loadListing(id);
+    _diag(
+      'approve_listing start listing=$id status=${_status(current)} approved=${_b(current['isApproved'])}',
+    );
+    final status = _status(current);
+    if (_b(current['isApproved']) && (status == 'active' || status == 'live')) {
+      throw const _AdminUiException('Listing is already approved');
+    }
+    _diag(
+      'approve_listing request_start listing=$id function=approveListingAdmin',
+    );
+    await _adminActions.approveListingAdminWithNote(listingId: id, note: note);
+    final updated = await _db.collection('listings').doc(id).get();
+    final um = updated.data() ?? <String, dynamic>{};
+    _diag(
+      'approve_listing doc listing=$id isApproved=${um['isApproved']} status=${um['status']} listingStatus=${um['listingStatus']} auctionStatus=${um['auctionStatus']}',
+    );
+    _diag('approve_listing success listing=$id');
+  }
+
+  Future<void> _reject(String id, {required String note}) async {
+    final current = await _loadListing(id);
+    final status = _status(current);
+    if (status == 'rejected') {
+      throw const _AdminUiException('Listing is already rejected');
+    }
+    if (note.trim().isEmpty) {
+      throw const _AdminUiException('Admin note is required to reject listing');
+    }
+    _diag(
+      'reject_listing request_start listing=$id function=rejectListingAdmin',
+    );
+    await _adminActions.rejectListingAdmin(listingId: id, note: note);
+    _diag('reject_listing success listing=$id previousStatus=$status');
+  }
+
+  Future<void> _changes(String id, {required String note}) async {
+    final current = await _loadListing(id);
+    final status = _status(current);
+    if (note.trim().isEmpty) {
+      throw const _AdminUiException(
+        'Admin note is required to request changes',
+      );
+    }
+    _diag(
+      'request_changes request_start listing=$id function=requestListingChangesAdmin',
+    );
+    await _adminActions.requestListingChangesAdmin(listingId: id, note: note);
+    _diag('request_changes success listing=$id previousStatus=$status');
+  }
+
+  Future<void> _startAuction(String id, {String note = ''}) async {
+    final current = await _loadListing(id);
+    _diag(
+      'start_auction tap listing=$id status=${_status(current)} auction=${_auctionStatus(current)}',
+    );
+    final status = _status(current);
+    final auction = _auctionStatus(current);
+    if (status == 'rejected') {
+      throw const _AdminUiException(
+        'Cannot start auction for rejected listing',
+      );
+    }
+    if (auction == 'live') {
+      throw const _AdminUiException('Auction is already live');
+    }
+    if (auction == 'cancelled' || auction == 'completed') {
+      throw const _AdminUiException(
+        'Cannot restart cancelled or completed auction',
+      );
+    }
+    _diag('start_auction request_start listing=$id function=startAuctionAdmin');
+    await _adminActions.startAuctionAdmin(listingId: id, note: note);
+    final updated = await _db.collection('listings').doc(id).get();
+    final um = updated.data() ?? <String, dynamic>{};
+    _diag(
+      'start_auction doc listing=$id isApproved=${um['isApproved']} status=${um['status']} listingStatus=${um['listingStatus']} auctionStatus=${um['auctionStatus']}',
+    );
+    _diag('start_auction success listing=$id');
+  }
+
+  Future<void> _setAuction(String id, String status, {String note = ''}) async {
+    final current = await _loadListing(id);
+    final auction = _auctionStatus(current);
+    if (status == 'paused' && auction != 'live') {
+      throw _AdminUiException('Cannot pause auction while status is $auction');
+    }
+    if (status == 'live' && auction != 'paused') {
+      throw _AdminUiException('Cannot resume auction while status is $auction');
+    }
+    if (status == 'cancelled' &&
+        (auction == 'completed' || auction == 'cancelled')) {
+      throw _AdminUiException('Cannot cancel auction while status is $auction');
+    }
+    if (status == 'paused') {
+      _diag(
+        'pause_auction request_start listing=$id function=pauseAuctionAdmin',
+      );
+      await _adminActions.pauseAuctionAdmin(listingId: id, note: note);
+    }
+    if (status == 'live') {
+      _diag(
+        'resume_auction request_start listing=$id function=resumeAuctionAdmin',
+      );
+      await _adminActions.resumeAuctionAdmin(listingId: id, note: note);
+    }
+    if (status == 'cancelled') {
+      if (note.trim().isEmpty) {
+        throw const _AdminUiException(
+          'Admin note is required to cancel auction',
+        );
+      }
+      _diag(
+        'cancel_auction request_start listing=$id function=cancelAuctionAdmin',
+      );
+      await _adminActions.cancelAuctionAdmin(listingId: id, note: note);
+    }
+    _diag('${status}_auction success listing=$id previousAuction=$auction');
+  }
+
+  Future<void> _extend(String id, {String note = ''}) async {
+    final current = await _loadListing(id);
+    final auction = _auctionStatus(current);
+    if (auction != 'live' && auction != 'paused') {
+      throw _AdminUiException(
+        'Can only extend live or paused auction, current: $auction',
+      );
+    }
+    _diag(
+      'extend_auction request_start listing=$id function=extendAuctionAdmin extensionHours=2',
+    );
+    await _adminActions.extendAuctionAdmin(
+      listingId: id,
+      extensionHours: 2,
+      note: note,
+    );
+    _diag('extend_auction success listing=$id previousAuction=$auction');
+  }
+
+  Future<void> _promoStatus(
+    String id,
+    String status, {
+    String note = '',
+  }) async {
+    final current = await _loadListing(id);
+    final currentPromo = _promoStatusForMetrics(current);
+    final promoType = _s(
+      current['promotionType'],
+      fallback: _b(current['featuredAuction'])
+          ? 'featured_auction'
+          : 'featured_listing',
+    ).toLowerCase();
+    final amount = _n(current['featuredCost']);
+    if (status == currentPromo) {
+      throw _AdminUiException('Promotion is already $status');
+    }
+    if (status == 'active' && currentPromo != 'approved') {
+      throw const _AdminUiException('Approve promotion before activation');
+    }
+    if (status == 'rejected' && note.trim().isEmpty) {
+      throw const _AdminUiException('Rejection reason is required');
+    }
+    if (status == 'pending_review' && note.trim().isEmpty) {
+      throw const _AdminUiException(
+        'Reason is required to request better proof',
+      );
+    }
+    final now = Timestamp.now();
+    final updates = <String, dynamic>{
+      'promotionStatus': status,
+      'promotionType': promoType,
+      'promotionReview': {
+        'status': status,
+        'reason': note.trim(),
+        'updatedAt': now,
+      },
+      'promotionDecisionNote': note.trim(),
+      'moderationReason': note.trim(),
+      'promotionLastActionAt': now,
+      'lastFinanceAction': {
+        'actionType': 'promotion_$status',
+        'note': note.trim(),
+        'by': FirebaseAuth.instance.currentUser?.uid ?? 'admin',
+        'at': now,
+      },
+    };
+    if (status == 'pending_review') {
+      updates['promotionReviewRequired'] = true;
+      updates['promotionReviewAt'] = now;
+    }
+    if (status == 'approved') {
+      updates['promotionReviewRequired'] = false;
+      updates['promotionApprovedAt'] = now;
+    }
+    if (status == 'active') {
+      updates['featured'] = true;
+      updates['priorityScore'] = 'high';
+      updates['promotionActivatedAt'] = now;
+      updates['promotionStartsAt'] = (current['promotionStartsAt'] ?? now);
+      updates['promotionExpiresAt'] =
+          current['promotionExpiresAt'] ??
+          Timestamp.fromDate(DateTime.now().add(const Duration(days: 7)));
+    }
+    if (status == 'expired') {
+      updates['featured'] = false;
+      updates['featuredAuction'] = false;
+      updates['priorityScore'] = 'normal';
+      updates['promotionExpiredAt'] = now;
+    }
+    if (status == 'rejected') {
+      updates['promotionRejectedAt'] = now;
+      updates['promotionReviewRequired'] = false;
+    }
+    await _db
+        .collection('listings')
+        .doc(id)
+        .set(updates, SetOptions(merge: true));
+
+    final sellerId = _s(
+      current['sellerId'],
+      fallback: _s(
+        current['ownerId'],
+        fallback: _s(current['userId'], fallback: ''),
+      ),
+    );
+    if (sellerId.isNotEmpty && sellerId != '-' && amount > 0) {
+      final bool approvedEvent = status == 'approved' || status == 'active';
+      await _writeRevenueLedger(
+        entryType: 'promotion_$status',
+        listingId: id,
+        sellerId: sellerId,
+        amount: amount,
+        revenueCategory: promoType,
+        status: status,
+        notes: note.trim().isEmpty ? 'Promotion $status' : note.trim(),
+        markApproved: approvedEvent,
+      );
+    }
+
+    await _log(
+      'listing',
+      id,
+      'promotion_$status',
+      previousStatus: _status(current),
+      newStatus: _status(current),
+      previousAuctionStatus: _auctionStatus(current),
+      newAuctionStatus: _auctionStatus(current),
+      previousPromotionStatus: currentPromo,
+      newPromotionStatus: status,
+      notes: note.trim(),
+    );
+
+    if (sellerId.isNotEmpty && sellerId != '-') {
+      final title = _s(
+        current['itemName'],
+        fallback: _s(current['product'], fallback: 'Listing'),
+      );
+      final userFacingStatus = status == 'pending_review'
+          ? 'under review'
+          : status;
+      await _notifyUser(
+        userId: sellerId,
+        type: 'promotion_$status',
+        title: 'Promotion update',
+        body: note.trim().isEmpty
+            ? 'Promotion for $title is now $userFacingStatus.'
+            : 'Promotion for $title is now $userFacingStatus. Reason: $note',
+        titleUr: 'پروموشن اپڈیٹ',
+        bodyUr: note.trim().isEmpty
+            ? '$title کی پروموشن اسٹیٹس اب $userFacingStatus ہے۔'
+            : '$title کی پروموشن اسٹیٹس اب $userFacingStatus ہے۔ وجہ: $note',
+        listingId: id,
+        metadata: {'status': status, 'note': note.trim()},
+      );
+    }
+  }
+
+  Future<void> _userFlags(
+    String id, {
+    bool? trusted,
+    bool? suspended,
+    bool? restricted,
+    String note = '',
+  }) async {
+    final userSnap = await _db.collection('users').doc(id).get();
+    if (!userSnap.exists) {
+      throw const _AdminUiException('User not found');
+    }
+    final before = userSnap.data() ?? <String, dynamic>{};
+    final updates = <String, dynamic>{};
+    if (trusted != null) updates['trustedSeller'] = trusted;
+    if (suspended != null) updates['isSuspended'] = suspended;
+    if (restricted != null) updates['listingRestricted'] = restricted;
+    await _db.collection('users').doc(id).set(updates, SetOptions(merge: true));
+    await _log(
+      'user',
+      id,
+      'update_user_risk_flags',
+      notes:
+          'before=${before.toString()} after=${updates.toString()} note=$note',
+    );
+
+    if (suspended != null) {
+      await _notifyUser(
+        userId: id,
+        type: suspended ? 'account_suspended' : 'account_reactivated',
+        title: suspended ? 'Account suspended' : 'Account reactivated',
+        body: suspended
+            ? (note.trim().isEmpty
+                  ? 'Your account has been suspended by admin.'
+                  : 'Your account has been suspended: $note')
+            : 'Your account has been reactivated by admin.',
+        titleUr: suspended ? 'اکاؤنٹ معطل' : 'اکاؤنٹ بحال',
+        bodyUr: suspended
+            ? (note.trim().isEmpty
+                  ? 'ایڈمن نے آپ کا اکاؤنٹ معطل کر دیا ہے۔'
+                  : 'آپ کا اکاؤنٹ معطل کر دیا گیا: $note')
+            : 'ایڈمن نے آپ کا اکاؤنٹ دوبارہ بحال کر دیا ہے۔',
+        metadata: {
+          'note': note,
+          'action': suspended ? 'suspend_user' : 'reactivate_user',
+        },
+      );
+    }
+    if (restricted != null) {
+      await _notifyUser(
+        userId: id,
+        type: restricted ? 'listing_restricted' : 'listing_restriction_removed',
+        title: restricted
+            ? 'Listing restricted'
+            : 'Listing restriction removed',
+        body: restricted
+            ? (note.trim().isEmpty
+                  ? 'Your listing privileges were restricted by admin.'
+                  : 'Your listing privileges were restricted: $note')
+            : 'Your listing privileges are now restored.',
+        titleUr: restricted ? 'لسٹنگ محدود' : 'لسٹنگ بحال',
+        bodyUr: restricted
+            ? (note.trim().isEmpty
+                  ? 'ایڈمن نے آپ کی لسٹنگ کی سہولت محدود کر دی ہے۔'
+                  : 'آپ کی لسٹنگ کی سہولت محدود کی گئی: $note')
+            : 'آپ کی لسٹنگ کی سہولت دوبارہ بحال کر دی گئی ہے۔',
+        metadata: {
+          'note': note,
+          'action': restricted ? 'restrict_user' : 'allow_user_listings',
+        },
+      );
+    }
+  }
+
+  Future<void> _viewSellerActivity(String userId) async {
+    final listingSnap = await _db
+        .collection('listings')
+        .where('sellerId', isEqualTo: userId)
+        .limit(200)
+        .get();
+    if (!mounted) return;
+    final docs = listingSnap.docs;
+    final int total = docs.length;
+    final int live = docs.where((d) => _status(d.data()) == 'active').length;
+    final int rejected = docs
+        .where((d) => _status(d.data()) == 'rejected')
+        .length;
+    final int review = docs.where((d) => _needsModeration(d.data())).length;
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Seller Activity'),
+        content: Text(
+          'Total Listings: $total\nLive: $live\nUnder Review: $review\nRejected: $rejected',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
     );
   }
 
-  Future<void> _refreshCommandCenter() async {
-    _setupCachedStreams();
-    _refreshAdminStats();
-    await _statsFuture;
+  Future<void> _logout() async {
+    await SessionService.logoutToLogin(context);
+  }
+
+  void _refreshView() {
+    setState(() {
+      // Trigger stream rebuild without mutating business state.
+    });
   }
 
   @override
@@ -207,1950 +883,1732 @@ class _AdminDashboardState extends State<AdminDashboard> {
           .doc(FirebaseAuth.instance.currentUser?.uid)
           .snapshots(),
       builder: (context, roleSnap) {
-        final userData = roleSnap.data?.data() ?? <String, dynamic>{};
-        final role =
-            (userData['userRole'] ??
-                    userData['role'] ??
-                    userData['userType'] ??
-                    '')
-                .toString()
-                .trim()
-                .toLowerCase();
-
-        if (roleSnap.connectionState == ConnectionState.waiting) {
+        final role = _s(
+          roleSnap.data?.data()?['role'],
+          fallback: _s(roleSnap.data?.data()?['userRole']),
+        ).toLowerCase();
+        if (!roleSnap.hasData) {
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
           );
         }
-
         if (role != 'admin') {
-          return const AuthWrapper();
+          return const Scaffold(body: Center(child: Text('Access denied')));
         }
 
-        return SafeArea(
-          child: Scaffold(
-            backgroundColor: navy,
-            appBar: AppBar(
-              centerTitle: true,
-              title: Image.asset(
-                'assets/logo.png',
-                height: 34,
-                fit: BoxFit.contain,
-                filterQuality: FilterQuality.high,
+        return Scaffold(
+          backgroundColor: _bg,
+          appBar: AppBar(
+            automaticallyImplyLeading: false,
+            backgroundColor: _bg,
+            foregroundColor: Colors.white,
+            titleSpacing: 12,
+            title: const Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Digital Arhat',
+                  style: TextStyle(fontSize: 13, color: Colors.white70),
+                ),
+                Text(
+                  'Admin Command Center',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+                ),
+              ],
+            ),
+            actions: [
+              IconButton(
+                onPressed: _refreshView,
+                tooltip: 'Refresh',
+                icon: const Icon(Icons.refresh_rounded),
               ),
-              backgroundColor: navy,
-              foregroundColor: Colors.white,
-              actions: [
-                _buildPendingApprovalsBell(),
-                const CustomerSupportIconAction(),
-                IconButton(
-                  tooltip: 'Moderation',
-                  onPressed: () {
-                    Navigator.pushNamed(context, Routes.adminModeration);
-                  },
-                  icon: const Icon(Icons.security),
-                ),
-                IconButton(
-                  onPressed: () async {
-                    await FirebaseAuth.instance.signOut();
-                    if (!context.mounted) return;
-                    Navigator.of(context).pushNamedAndRemoveUntil(
-                      Routes.signIn,
-                      (route) => false,
-                    );
-                  },
-                  icon: const Icon(Icons.logout),
-                ),
+              IconButton(
+                onPressed: _logout,
+                tooltip: 'Logout',
+                icon: const Icon(Icons.logout_rounded, color: _gold),
+              ),
+            ],
+            bottom: TabBar(
+              controller: _tabs,
+              isScrollable: true,
+              indicator: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                color: _gold.withValues(alpha: 0.2),
+              ),
+              indicatorSize: TabBarIndicatorSize.tab,
+              labelColor: _gold,
+              unselectedLabelColor: Colors.white70,
+              labelStyle: const TextStyle(fontWeight: FontWeight.w700),
+              tabs: const [
+                Tab(text: 'Dashboard'),
+                Tab(text: 'Moderation'),
+                Tab(text: 'Auctions'),
+                Tab(text: 'Revenue'),
+                Tab(text: 'Users'),
+                Tab(text: 'Risk/Ops'),
               ],
             ),
-            floatingActionButton: const CustomerSupportFab(mini: false),
-            bottomNavigationBar: BottomNavigationBar(
-              currentIndex: _selectedTab,
-              onTap: (index) => setState(() => _selectedTab = index),
-              type: BottomNavigationBarType.fixed,
-              backgroundColor: royalBlue,
-              selectedItemColor: Colors.amber[800],
-              unselectedItemColor: Colors.white,
-              items: const [
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.analytics),
-                  label: 'Analytics',
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.people_alt),
-                  label: 'Users',
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.verified_user),
-                  label: 'Payments',
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.hourglass_top_rounded),
-                  label: 'Deals / س��د�',
-                ),
+          ),
+          body: Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [_bg, const Color(0xFF0C2745), _bg],
+              ),
+            ),
+            child: TabBarView(
+              controller: _tabs,
+              children: [
+                _dashboard(),
+                _moderation(),
+                _auctions(),
+                _revenue(),
+                _users(),
+                _riskOps(),
               ],
             ),
-            body: _selectedTab == 2
-                ? const AdminPaymentVerificationScreen(embedded: true)
-                : _selectedTab == 3
-                ? _buildAwaitingDealApprovalTab()
-                : RefreshIndicator(
-                    onRefresh: _refreshCommandCenter,
-                    child: SingleChildScrollView(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.all(16),
-                      child: _buildSelectedTab(),
-                    ),
-                  ),
           ),
         );
       },
     );
   }
 
-  Widget _buildSelectedTab() {
-    if (_selectedTab == 0) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildNetArhatCommissionTopCard(),
-          const SizedBox(height: 12),
-          _buildVerifyPaymentsCard(),
-          const SizedBox(height: 12),
-          _buildPendingSettlementsCard(),
-          const SizedBox(height: 12),
-          _buildDealSummaryCard(),
-          const SizedBox(height: 12),
-          _buildLiveMetricsGrid(),
-          const SizedBox(height: 16),
-          _buildNeedsActionList(),
-          const SizedBox(height: 16),
-          _buildDealCommandQueue(),
-          const SizedBox(height: 16),
-          _buildRecentBidsSection(),
-          const SizedBox(height: 16),
-          _buildLast7DaysChart(),
-        ],
-      );
-    }
+  Widget _dashboard() {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: _db.collection('listings').snapshots(),
+      builder: (context, snap) {
+        final docs =
+            snap.data?.docs ??
+            const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+        int pendingModeration = 0;
+        int pendingPromoReview = 0;
+        int liveListings = 0;
+        int liveAuctions = 0;
+        int activeFeaturedListings = 0;
+        int activeFeaturedAuctions = 0;
+        int rejectedCount = 0;
+        int changeRequestedCount = 0;
+        double promotionRevenue = 0;
 
-    if (_selectedTab == 1) {
-      return _buildUsersTab();
-    }
+        for (final doc in docs) {
+          final d = doc.data();
+          final status = _status(d);
+          final auctionStatus = _auctionStatus(d);
+          final saleType = _s(d['saleType'], fallback: 'auction').toLowerCase();
+          final promo = _promoStatusForMetrics(d);
+          final reviewState = _s(d['adminReviewStatus']).toLowerCase();
 
-    if (_selectedTab == 2) {
-      return const SizedBox.shrink();
-    }
+          if (_needsModeration(d)) pendingModeration++;
+          if (promo == 'pending_review') pendingPromoReview++;
 
-    if (_selectedTab == 3) {
-      return const SizedBox.shrink();
-    }
-
-    return const SizedBox.shrink();
-  }
-
-  Widget _buildAwaitingDealApprovalTab() {
-    final stream = _awaitingDealApprovalStream;
-    if (stream == null) {
-      return const SizedBox.shrink();
-    }
-
-    return Container(
-      color: navy,
-      child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: stream,
-        initialData: _awaitingDealApprovalInitialData,
-        builder: (context, snapshot) {
-          final incomingDocs = snapshot.data?.docs;
-          if (incomingDocs != null) {
-            _syncPendingDealsFromSnapshot(incomingDocs);
+          if (saleType == 'auction') {
+            if (auctionStatus == 'live') liveAuctions++;
+          } else {
+            if (status == 'active' || status == 'live') liveListings++;
           }
 
-          if (snapshot.connectionState == ConnectionState.waiting &&
-              _pendingDeals.isEmpty) {
-            return const Center(
-              child: CircularProgressIndicator(color: Colors.white),
-            );
+          if (promo == 'active' &&
+              _b(d['featured']) &&
+              !_b(d['featuredAuction'])) {
+            activeFeaturedListings++;
+          }
+          if (promo == 'active' &&
+              (_b(d['featuredAuction']) ||
+                  (saleType == 'auction' && _b(d['featured'])))) {
+            activeFeaturedAuctions++;
           }
 
-          if (_pendingDeals.isEmpty) {
-            return const Center(
-              child: Text(
-                'No deals awaiting admin approval',
-                style: TextStyle(color: Colors.white70),
-              ),
-            );
+          if (promo == 'approved' || promo == 'active') {
+            promotionRevenue += _n(d['featuredCost']);
           }
 
-          return ListView.separated(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 20),
-            itemCount: _pendingDeals.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 12),
-            itemBuilder: (context, index) {
-              final doc = _pendingDeals[index];
-              final listingId = doc.id;
-              final data = doc.data();
-              final product = _str(data, 'product').isEmpty
-                  ? _str(data, 'itemName')
-                  : _str(data, 'product');
-              final winnerId = _str(data, 'winnerId');
-              final sellerId = _str(data, 'sellerId');
-              final amount = _num(data, 'finalPrice') > 0
-                  ? _num(data, 'finalPrice')
-                  : _num(data, 'highestBid');
-              bool approving = false;
-              bool rejecting = false;
+          if (status == 'rejected' || reviewState == 'rejected') {
+            rejectedCount++;
+          }
+          if (reviewState == 'changes_requested') changeRequestedCount++;
+        }
 
-              return Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: panel,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: Colors.white12),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+        return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: _db.collection('users').snapshots(),
+          builder: (context, userSnap) {
+            final usersTotal = userSnap.data?.docs.length ?? 0;
+            return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+              stream: _db
+                  .collection('listings')
+                  .where('status', isEqualTo: 'delivered_pending_release')
+                  .limit(200)
+                  .snapshots(),
+              builder: (context, payoutSnap) {
+                final pendingSettlements = payoutSnap.data?.docs.length ?? 0;
+                return ListView(
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 18),
                   children: [
-                    Text(
-                      product,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 16,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'Winner: ${winnerId.isEmpty ? '--' : winnerId}',
-                      style: const TextStyle(color: Colors.white70),
-                    ),
-                    Text(
-                      'Seller: ${sellerId.isEmpty ? '--' : sellerId}',
-                      style: const TextStyle(color: Colors.white70),
-                    ),
-                    Text(
-                      'Bid Amount: Rs. ${amount.toStringAsFixed(0)}',
-                      style: const TextStyle(
-                        color: gold,
-                        fontWeight: FontWeight.w700,
+                    _panel(
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: _gold.withValues(alpha: 0.16),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Icon(
+                              Icons.insights_rounded,
+                              color: _gold,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Platform Fees',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'Featured Listing: Rs ${PromotionPaymentConfig.featuredListingFee}  |  Featured Auction: Rs ${PromotionPaymentConfig.featuredAuctionFee}',
+                                  style: const TextStyle(color: Colors.white70),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                     const SizedBox(height: 10),
-                    StatefulBuilder(
-                      builder: (context, setCardState) {
-                        Future<void> handleApprove() async {
-                          if (approving || rejecting) return;
-                          setCardState(() => approving = true);
-                          await _performPendingDealAction(
-                            listingId: listingId,
-                            action: () => _approveDealForPayment(
-                              listingId: listingId,
-                              listingData: data,
-                            ),
-                          );
-                          if (mounted) {
-                            setCardState(() => approving = false);
-                          }
-                        }
-
-                        Future<void> handleReject() async {
-                          if (approving || rejecting) return;
-                          setCardState(() => rejecting = true);
-                          await _performPendingDealAction(
-                            listingId: listingId,
-                            action: () => _rejectDealToActive(
-                              listingId: listingId,
-                              listingData: data,
-                            ),
-                          );
-                          if (mounted) {
-                            setCardState(() => rejecting = false);
-                          }
-                        }
-
-                        return Row(
-                          children: [
-                            Expanded(
-                              child: ElevatedButton.icon(
-                                onPressed: (approving || rejecting)
-                                    ? null
-                                    : handleApprove,
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.green,
-                                  foregroundColor: Colors.white,
-                                ),
-                                icon: approving
-                                    ? const SizedBox(
-                                        width: 14,
-                                        height: 14,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          color: Colors.white,
-                                        ),
-                                      )
-                                    : const Icon(Icons.verified_rounded),
-                                label: Text(
-                                  approving ? 'Approving...' : 'Approve Deal',
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: OutlinedButton.icon(
-                                onPressed: (approving || rejecting)
-                                    ? null
-                                    : handleReject,
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: Colors.redAccent,
-                                  side: const BorderSide(
-                                    color: Colors.redAccent,
-                                  ),
-                                ),
-                                icon: rejecting
-                                    ? const SizedBox(
-                                        width: 14,
-                                        height: 14,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          color: Colors.redAccent,
-                                        ),
-                                      )
-                                    : const Icon(Icons.cancel_rounded),
-                                label: Text(
-                                  rejecting ? 'Rejecting...' : 'Reject Deal',
-                                ),
-                              ),
-                            ),
-                          ],
-                        );
-                      },
-                    ),
-                  ],
-                ),
-              );
-            },
-          );
-        },
-      ),
-    );
-  }
-
-  void _syncPendingDealsFromSnapshot(
-    List<QueryDocumentSnapshot<Map<String, dynamic>>> incoming,
-  ) {
-    if (_isInteractingWithPendingCard) return;
-
-    final incomingIds = incoming.map((doc) => doc.id).toList(growable: false);
-    final currentIds = _pendingDeals
-        .map((doc) => doc.id)
-        .toList(growable: false);
-
-    if (listEquals(incomingIds, currentIds)) return;
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || _isInteractingWithPendingCard) return;
-      setState(() {
-        _pendingDeals = List<QueryDocumentSnapshot<Map<String, dynamic>>>.from(
-          incoming,
-        );
-      });
-    });
-  }
-
-  Future<void> _performPendingDealAction({
-    required String listingId,
-    required Future<void> Function() action,
-  }) async {
-    if (_pendingDealActionListingIds.contains(listingId)) return;
-
-    setState(() => _pendingDealActionListingIds.add(listingId));
-
-    try {
-      await action();
-      await Future<void>.delayed(const Duration(milliseconds: 300));
-      if (!mounted) return;
-      setState(() {
-        _pendingDeals.removeWhere((doc) => doc.id == listingId);
-      });
-    } finally {
-      if (mounted) {
-        setState(() => _pendingDealActionListingIds.remove(listingId));
-      }
-    }
-  }
-
-  Future<void> _approveDealForPayment({
-    required String listingId,
-    required Map<String, dynamic> listingData,
-  }) async {
-    HapticFeedback.mediumImpact();
-    final buyerId = _str(
-      listingData,
-      'winnerId',
-      fallback: _str(listingData, 'buyerId'),
-    );
-    final dealId = _str(listingData, 'dealId');
-
-    final batch = _db.batch();
-    final listingRef = _db.collection('listings').doc(listingId);
-    batch.set(listingRef, {
-      'listingStatus': DealStatus.awaitingPayment.value,
-      'status': DealStatus.awaitingPayment.value,
-      'auctionStatus': DealStatus.awaitingPayment.value,
-      'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
-
-    if (dealId.isNotEmpty) {
-      batch.set(_db.collection('deals').doc(dealId), {
-        'status': DealStatus.awaitingPayment.value,
-        'paymentStatus': DealStatus.awaitingPayment.value,
-        'currentStep': 'AWAITING_PAYMENT',
-        'lastUpdate': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-    }
-
-    if (buyerId.isNotEmpty) {
-      final title = SecurityFilter.maskAll(
-        'Deal Approved! Please proceed to payment.',
-      );
-      final body = SecurityFilter.maskAll(
-        'Deal Approved! Please proceed to payment.',
-      );
-      batch.set(_db.collection('notifications').doc(), {
-        'userId': buyerId,
-        'title': title,
-        'body': body,
-        'type': 'DEAL_APPROVED_AWAITING_PAYMENT',
-        'listingId': listingId,
-        'timestamp': FieldValue.serverTimestamp(),
-        'isRead': false,
-      });
-    }
-
-    await batch.commit();
-  }
-
-  Future<void> _rejectDealToActive({
-    required String listingId,
-    required Map<String, dynamic> listingData,
-  }) async {
-    HapticFeedback.mediumImpact();
-    final sellerId = _str(listingData, 'sellerId');
-
-    final batch = _db.batch();
-    final listingRef = _db.collection('listings').doc(listingId);
-    batch.set(listingRef, {
-      'listingStatus': DealStatus.active.value,
-      'status': DealStatus.active.value,
-      'auctionStatus': DealStatus.active.value,
-      'winnerId': null,
-      'buyerId': null,
-      'dealId': null,
-      'finalBidId': null,
-      'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
-
-    if (sellerId.isNotEmpty) {
-      final title = SecurityFilter.maskAll(
-        'Deal rejected by Admin. Your ad is now active again.',
-      );
-      final body = SecurityFilter.maskAll(
-        'Deal rejected by Admin. Your ad is now active again.',
-      );
-      batch.set(_db.collection('notifications').doc(), {
-        'userId': sellerId,
-        'title': title,
-        'body': body,
-        'type': 'DEAL_REJECTED_REACTIVATED',
-        'listingId': listingId,
-        'timestamp': FieldValue.serverTimestamp(),
-        'isRead': false,
-      });
-    }
-
-    await batch.commit();
-  }
-
-  Widget _buildNetArhatCommissionTopCard() {
-    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-      stream: _db.collection('Admin_Earnings').doc('total_revenue').snapshots(),
-      builder: (context, snap) {
-        final data = snap.data?.data() ?? <String, dynamic>{};
-        final netCommission = _num(data, 'totalCommissionEarned');
-
-        return Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: panel,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: gold, width: 2),
-          ),
-          child: Row(
-            children: [
-              const Icon(Icons.currency_exchange, color: gold, size: 32),
-              const SizedBox(width: 12),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Earnings ⬢ Net Arhat Commission',
-                    style: TextStyle(
-                      color: Colors.white70,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  Text(
-                    'Rs. ${netCommission.toStringAsFixed(0)}',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildDealSummaryCard() {
-    return FutureBuilder<_DealSummarySnapshot>(
-      future: _dealSummaryFuture,
-      builder: (context, snapshot) {
-        final data = snapshot.data ?? const _DealSummarySnapshot();
-        return Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            color: panel,
-            border: Border.all(color: Colors.white12),
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: _summaryMetric(
-                  label: 'Active Ads',
-                  value: data.activeAds,
-                  color: Colors.lightGreenAccent,
-                ),
-              ),
-              Expanded(
-                child: _summaryMetric(
-                  label: 'Pending Approvals',
-                  value: data.pendingApprovals,
-                  color: gold,
-                ),
-              ),
-              Expanded(
-                child: _summaryMetric(
-                  label: 'Pending Payouts',
-                  value: data.pendingPayouts,
-                  color: Colors.amber,
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildVerifyPaymentsCard() {
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: _db
-          .collection('listings')
-          .where('status', isEqualTo: 'awaiting_admin_approval')
-          .snapshots(),
-      builder: (context, snapshot) {
-        final count = snapshot.data?.docs.length ?? 0;
-        return InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: () => Navigator.pushNamed(context, Routes.adminPayments),
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: panel,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.white12),
-            ),
-            child: Stack(
-              children: [
-                Row(
-                  children: [
-                    const Icon(Icons.verified_user, color: gold, size: 30),
-                    const SizedBox(width: 12),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Verify Payments',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 18,
-                          ),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 2),
+                      child: Text(
+                        'Operations Snapshot',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 16,
                         ),
-                        Text(
-                          count > 0
-                              ? '$count receipts awaiting review'
-                              : 'No pending receipts',
-                          style: const TextStyle(color: Colors.white70),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _metricCard(
+                          'Moderation Queue',
+                          '$pendingModeration',
+                          _gold,
+                          Icons.fact_check_rounded,
+                        ),
+                        _metricCard(
+                          'Live Listings',
+                          '$liveListings',
+                          _green,
+                          Icons.storefront_rounded,
+                        ),
+                        _metricCard(
+                          'Live Auctions',
+                          '$liveAuctions',
+                          _blue,
+                          Icons.gavel_rounded,
+                        ),
+                        _metricCard(
+                          'Promotion Review',
+                          '$pendingPromoReview',
+                          Colors.orangeAccent,
+                          Icons.receipt_long_rounded,
+                        ),
+                        _metricCard(
+                          'Featured Listings',
+                          '$activeFeaturedListings',
+                          _green,
+                          Icons.workspace_premium_rounded,
+                        ),
+                        _metricCard(
+                          'Featured Auctions',
+                          '$activeFeaturedAuctions',
+                          _blue,
+                          Icons.local_fire_department_rounded,
+                        ),
+                        _metricCard(
+                          'Promotion Revenue',
+                          'Rs ${promotionRevenue.toStringAsFixed(0)}',
+                          _gold,
+                          Icons.payments_rounded,
+                        ),
+                        _metricCard(
+                          'Users Total',
+                          '$usersTotal',
+                          Colors.cyanAccent,
+                          Icons.groups_rounded,
+                        ),
+                        _metricCard(
+                          'Pending Settlements',
+                          '$pendingSettlements',
+                          Colors.deepOrangeAccent,
+                          Icons.account_balance_wallet_rounded,
+                        ),
+                        _metricCard(
+                          'Rejected',
+                          '$rejectedCount',
+                          Colors.redAccent,
+                          Icons.cancel_rounded,
+                        ),
+                        _metricCard(
+                          'Changes Requested',
+                          '$changeRequestedCount',
+                          Colors.amberAccent,
+                          Icons.edit_note_rounded,
                         ),
                       ],
                     ),
-                    const Spacer(),
-                    const Icon(
-                      Icons.chevron_right,
-                      color: Colors.white70,
-                      size: 30,
-                    ),
-                  ],
-                ),
-                if (count > 0)
-                  Positioned(
-                    top: 0,
-                    right: 0,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 7,
-                        vertical: 3,
-                      ),
-                      decoration: const BoxDecoration(
-                        color: Colors.red,
-                        shape: BoxShape.circle,
-                      ),
-                      child: Text(
-                        '$count',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildPendingSettlementsCard() {
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: _db
-          .collection('listings')
-          .where('status', isEqualTo: 'delivered_pending_release')
-          .snapshots(),
-      builder: (context, snapshot) {
-        final count = snapshot.data?.docs.length ?? 0;
-        return InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => const PayoutManagementScreen(),
-              ),
-            );
-          },
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: panel,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.white12),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.payments_rounded, color: gold, size: 30),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Pending Settlements',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 18,
-                        ),
-                      ),
-                      Text(
-                        count > 0
-                            ? '$count deals ready for payout release'
-                            : 'No payout ready deals',
-                        style: const TextStyle(color: Colors.white70),
-                      ),
-                    ],
-                  ),
-                ),
-                if (count > 0)
-                  Container(
-                    width: 24,
-                    height: 24,
-                    alignment: Alignment.center,
-                    decoration: const BoxDecoration(
-                      color: Colors.red,
-                      shape: BoxShape.circle,
-                    ),
-                    child: Text(
-                      '$count',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 10,
-                      ),
-                    ),
-                  ),
-                const SizedBox(width: 8),
-                const Icon(Icons.chevron_right, color: Colors.white70, size: 28),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _summaryMetric({
-    required String label,
-    required int value,
-    required Color color,
-  }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          value.toString(),
-          style: TextStyle(
-            color: color,
-            fontSize: 22,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: const TextStyle(
-            color: Colors.white70,
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildLiveMetricsGrid() {
-    return FutureBuilder<_AdminStatsSnapshot>(
-      future: _statsFuture,
-      builder: (context, snap) {
-        final stats = snap.data;
-        return GridView.count(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          crossAxisCount: 2,
-          crossAxisSpacing: 12,
-          mainAxisSpacing: 12,
-          childAspectRatio: 1.25,
-          children: [
-            _metricCard(
-              'Total Users',
-              (stats?.totalUsers ?? 0).toString(),
-              Icons.groups_2,
-            ),
-            _metricCard(
-              'Pending Approvals',
-              (stats?.pendingApprovals ?? 0).toString(),
-              Icons.pending_actions,
-              valueColor: gold,
-            ),
-            _metricCard(
-              'Live Listings',
-              (stats?.liveListings ?? 0).toString(),
-              Icons.storefront,
-            ),
-            _metricCard(
-              'Total Listings',
-              (stats?.totalListings ?? 0).toString(),
-              Icons.inventory_2,
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _metricCard(
-    String title,
-    String value,
-    IconData icon, {
-    Color valueColor = Colors.white,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(colors: [panel, navy]),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white24),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, color: gold),
-          const SizedBox(height: 8),
-          Text(
-            value,
-            style: TextStyle(
-              color: valueColor,
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            title,
-            style: const TextStyle(color: Colors.white70, fontSize: 12),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildNeedsActionList() {
-    final stream = _pendingListingsStream;
-    if (stream == null) {
-      return const SizedBox.shrink();
-    }
-
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: stream,
-      builder: (context, snap) {
-        final alertStream = _adminAlertsStream;
-        if (alertStream == null) {
-          return const SizedBox.shrink();
-        }
-
-        final docs = (snap.data?.docs ?? []).take(3).toList();
-
-        return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-          stream: alertStream,
-          builder: (context, alertSnap) {
-            final alerts = alertSnap.data?.docs ?? const [];
-            final flaggedListingIds = alerts
-                .map((a) => a.data()['listingId']?.toString() ?? '')
-                .where((id) => id.isNotEmpty)
-                .toSet();
-
-            return Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: panel,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: Colors.white12),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Foran Tawajjo Chahiyen',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  if (docs.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 8),
-                      child: Text(
-                        'Maal Saf Hai!',
-                        style: TextStyle(color: Colors.white70),
-                      ),
-                    )
-                  else
-                    ...docs.map((doc) {
-                      final data = doc.data();
-                      final seller = _str(
-                        data,
-                        'sellerName',
-                        fallback: 'Seller',
-                      );
-                      final city = _str(
-                        data,
-                        'city',
-                        fallback: 'Location Pending',
-                      );
-                      final product = _str(data, 'product', fallback: 'Fasal');
-                      final price = _num(data, 'price');
-                      final imageUrl = _str(data, 'imageUrl');
-                      final videoUrl = _str(data, 'videoUrl');
-                      final insight = _geminiInsight(data);
-                      final bool isFlagged = flaggedListingIds.contains(doc.id);
-
-                      return Card(
-                        color: Colors.white.withValues(alpha: 0.05),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          side: BorderSide(
-                            color: isFlagged
-                                ? Colors.redAccent
-                                : Colors.transparent,
-                            width: 1.8,
-                          ),
-                        ),
-                        child: ListTile(
-                          contentPadding: const EdgeInsets.all(10),
-                          onTap: () => _openListingDetail(doc.id, data),
-                          leading: ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: imageUrl.isNotEmpty
-                                ? CachedNetworkImage(
-                                    imageUrl: imageUrl,
-                                    width: 52,
-                                    height: 52,
-                                    fit: BoxFit.cover,
-                                    placeholder: (context, url) => Container(
-                                      width: 52,
-                                      height: 52,
-                                      color: Colors.white10,
-                                      child: const Center(
-                                        child: SizedBox(
-                                          width: 14,
-                                          height: 14,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    errorWidget: (context, url, error) =>
-                                        Container(
-                                          width: 52,
-                                          height: 52,
-                                          color: Colors.white10,
-                                          child: const Icon(
-                                            Icons.broken_image,
-                                            color: Colors.white54,
-                                            size: 18,
-                                          ),
-                                        ),
-                                  )
-                                : Container(
-                                    width: 52,
-                                    height: 52,
-                                    color: Colors.white10,
-                                    child: const Icon(
-                                      Icons.image_not_supported,
-                                      color: Colors.white54,
-                                      size: 18,
-                                    ),
-                                  ),
-                          ),
-                          title: Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  product,
-                                  style: const TextStyle(color: Colors.white),
-                                ),
-                              ),
-                              if (isFlagged)
-                                const Icon(
-                                  Icons.flag,
-                                  color: Colors.redAccent,
-                                  size: 18,
-                                ),
-                            ],
-                          ),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Seller: $seller',
-                                style: const TextStyle(
-                                  color: Colors.white54,
-                                  fontSize: 12,
-                                ),
-                              ),
-                              Text(
-                                'City: $city',
-                                style: const TextStyle(
-                                  color: Colors.white54,
-                                  fontSize: 12,
-                                ),
-                              ),
-                              Text(
-                                'Rs. ${price.toStringAsFixed(0)}',
-                                style: const TextStyle(color: Colors.white70),
-                              ),
-                              Row(
-                                children: [
-                                  const Icon(
-                                    Icons.photo,
-                                    size: 12,
-                                    color: Colors.white54,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    imageUrl.isNotEmpty ? 'Photo' : 'No Photo',
-                                    style: const TextStyle(
-                                      color: Colors.white54,
-                                      fontSize: 11,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  const Icon(
-                                    Icons.video_library,
-                                    size: 12,
-                                    color: Colors.white54,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    videoUrl.isNotEmpty ? 'Video' : 'No Video',
-                                    style: const TextStyle(
-                                      color: Colors.white54,
-                                      fontSize: 11,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              if (isFlagged)
-                                const Text(
-                                  'AI Flag',
-                                  style: TextStyle(
-                                    color: Colors.redAccent,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                )
-                              else if (insight.isUnusual)
-                                const Text(
-                                  'AI Alert: Unusual Price!',
-                                  style: TextStyle(
-                                    color: Colors.redAccent,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              const SizedBox(height: 8),
-                              Wrap(
-                                spacing: 8,
-                                runSpacing: 8,
-                                children: [
-                                  OutlinedButton.icon(
-                                    style: OutlinedButton.styleFrom(
-                                      foregroundColor: Colors.white,
-                                      side: const BorderSide(
-                                        color: Colors.white24,
-                                      ),
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                        vertical: 4,
-                                      ),
-                                      minimumSize: const Size(0, 30),
-                                      tapTargetSize:
-                                          MaterialTapTargetSize.shrinkWrap,
-                                    ),
-                                    onPressed: () =>
-                                        _openListingDetail(doc.id, data),
-                                    icon: const Icon(Icons.gavel, size: 15),
-                                    label: const Text(
-                                      'View Bids',
-                                      style: TextStyle(
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ),
-                                  ElevatedButton.icon(
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.green,
-                                      foregroundColor: Colors.white,
-                                      minimumSize: const Size(0, 30),
-                                      tapTargetSize:
-                                          MaterialTapTargetSize.shrinkWrap,
-                                    ),
-                                    onPressed: () =>
-                                        _approveListing(doc.id, data),
-                                    icon: const Icon(
-                                      Icons.play_circle_fill,
-                                      size: 18,
-                                    ),
-                                    label: const Text(
-                                      'Approve & Start Auction',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    }),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Widget _buildLast7DaysChart() {
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: _db
-          .collection('deals')
-          .orderBy('createdAt', descending: false)
-          .snapshots(),
-      builder: (context, snap) {
-        final docs = snap.data?.docs ?? [];
-        final sales = List<double>.filled(7, 0);
-        final commission = List<double>.filled(7, 0);
-        final now = DateTime.now();
-
-        for (final doc in docs) {
-          final data = doc.data();
-          final createdAt = _date(data, 'createdAt');
-          if (createdAt == null) continue;
-
-          final dayDiff = DateTime(now.year, now.month, now.day)
-              .difference(
-                DateTime(createdAt.year, createdAt.month, createdAt.day),
-              )
-              .inDays;
-          if (dayDiff < 0 || dayDiff > 6) continue;
-
-          final index = 6 - dayDiff;
-          final amount = _num(data, 'dealAmount') > 0
-              ? _num(data, 'dealAmount')
-              : _num(data, 'finalPrice');
-          sales[index] += amount;
-          commission[index] += amount * 0.02;
-        }
-
-        return Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: panel,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.white12),
-          ),
-          child: SizedBox(
-            height: 190,
-            child: LineChart(
-              LineChartData(
-                borderData: FlBorderData(show: false),
-                gridData: const FlGridData(
-                  show: true,
-                  horizontalInterval: 1000,
-                ),
-                titlesData: const FlTitlesData(
-                  leftTitles: AxisTitles(
-                    sideTitles: SideTitles(showTitles: true, reservedSize: 40),
-                  ),
-                  topTitles: AxisTitles(
-                    sideTitles: SideTitles(showTitles: false),
-                  ),
-                  rightTitles: AxisTitles(
-                    sideTitles: SideTitles(showTitles: false),
-                  ),
-                  bottomTitles: AxisTitles(
-                    sideTitles: SideTitles(showTitles: true),
-                  ),
-                ),
-                lineBarsData: [
-                  LineChartBarData(
-                    spots: List.generate(
-                      7,
-                      (i) => FlSpot(i.toDouble(), sales[i]),
-                    ),
-                    isCurved: true,
-                    curveSmoothness: 0.35,
-                    color: gold,
-                    barWidth: 3,
-                    dotData: const FlDotData(show: false),
-                  ),
-                  LineChartBarData(
-                    spots: List.generate(
-                      7,
-                      (i) => FlSpot(i.toDouble(), commission[i]),
-                    ),
-                    isCurved: true,
-                    curveSmoothness: 0.35,
-                    color: Colors.greenAccent,
-                    barWidth: 3,
-                    dotData: const FlDotData(show: false),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildDealCommandQueue() {
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: _db
-          .collection('deals')
-          .orderBy('createdAt', descending: true)
-          .limit(8)
-          .snapshots(),
-      builder: (context, snap) {
-        final docs = snap.data?.docs ?? [];
-
-        return Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: panel,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: Colors.white12),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Deal Command Queue',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
-                ),
-              ),
-              const SizedBox(height: 8),
-              if (docs.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 8),
-                  child: Text(
-                    'No deals available yet.',
-                    style: TextStyle(color: Colors.white70),
-                  ),
-                )
-              else
-                ...docs.map((doc) {
-                  final data = doc.data();
-                  final product = _str(
-                    data,
-                    'productName',
-                    fallback: _str(data, 'product', fallback: 'Deal'),
-                  );
-                  final escrowState = _str(
-                    data,
-                    'escrowState',
-                    fallback: 'PENDING',
-                  );
-                  final amount = _num(data, 'dealAmount') > 0
-                      ? _num(data, 'dealAmount')
-                      : _num(data, 'finalPrice');
-                  final status = _str(
-                    data,
-                    'paymentStatus',
-                    fallback: _str(data, 'status', fallback: 'pending'),
-                  );
-                  final normalizedPayment = _normalizePaymentStatus(status);
-                  final normalizedEscrow = _normalizeEscrowState(escrowState);
-                  final isHighRisk = _bool(data, 'isHighRisk');
-
-                  return Card(
-                    color: Colors.white.withValues(alpha: 0.05),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      side: BorderSide(
-                        color: isHighRisk ? Colors.redAccent : Colors.white12,
-                      ),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  product,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ),
-                              if (isHighRisk)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 3,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: Colors.red.withValues(alpha: 0.18),
-                                    borderRadius: BorderRadius.circular(999),
-                                    border: Border.all(color: Colors.redAccent),
-                                  ),
-                                  child: const Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        Icons.circle,
-                                        size: 8,
-                                        color: Colors.redAccent,
-                                      ),
-                                      SizedBox(width: 6),
-                                      Text(
-                                        'High-Risk',
-                                        style: TextStyle(
-                                          color: Colors.redAccent,
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            'Escrow: $normalizedEscrow ⬢ Payment: $normalizedPayment',
-                            style: const TextStyle(
-                              color: Colors.white70,
-                              fontSize: 12,
-                            ),
-                          ),
-                          Text(
-                            'Amount: Rs. ${amount.toStringAsFixed(0)}',
-                            style: const TextStyle(
-                              color: Colors.white60,
-                              fontSize: 12,
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: ElevatedButton.icon(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.indigo,
-                                foregroundColor: Colors.white,
-                                minimumSize: const Size(0, 34),
-                              ),
-                              onPressed: () => _openAdminDealDetails(doc.id),
-                              icon: Hero(
-                                tag: 'deal-review-${doc.id}',
-                                child: const Material(
-                                  type: MaterialType.transparency,
-                                  child: Icon(
-                                    Icons.admin_panel_settings,
-                                    size: 16,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ),
-                              label: const Text(
-                                'Review & Manage',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                }),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  void _openAdminDealDetails(String dealId) {
-    Navigator.of(context).push(
-      PageRouteBuilder(
-        transitionDuration: const Duration(milliseconds: 360),
-        reverseTransitionDuration: const Duration(milliseconds: 260),
-        pageBuilder: (context, animation, secondaryAnimation) {
-          return FadeTransition(
-            opacity: CurvedAnimation(
-              parent: animation,
-              curve: Curves.easeOutCubic,
-            ),
-            child: AdminDealDetailsScreen(
-              dealId: dealId,
-              heroTag: 'deal-review-$dealId',
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildUsersTab() {
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: _db.collection('users').snapshots(),
-      builder: (context, snap) {
-        final docs = snap.data?.docs ?? [];
-        return Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: panel,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.white12),
-          ),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: DataTable(
-              headingTextStyle: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-              ),
-              dataTextStyle: const TextStyle(color: Colors.white70),
-              columns: const [
-                DataColumn(label: Text('Name')),
-                DataColumn(label: Text('Role')),
-                DataColumn(label: Text('CNIC')),
-                DataColumn(label: Text('Verified')),
-              ],
-              rows: docs.map((doc) {
-                final data = doc.data();
-                final verified = _bool(data, 'isVerified');
-                return DataRow(
-                  cells: [
-                    DataCell(
-                      Text(
-                        _str(
-                          data,
-                          'name',
-                          fallback: _str(data, 'fullName', fallback: 'User'),
-                        ),
-                      ),
-                    ),
-                    DataCell(Text(_str(data, 'role', fallback: 'N/A'))),
-                    DataCell(Text(_str(data, 'cnic', fallback: 'N/A'))),
-                    DataCell(
-                      Switch(
-                        value: verified,
-                        onChanged: (value) async {
-                          await _db.collection('users').doc(doc.id).update({
-                            'isVerified': value,
-                            'verifiedAt': value
-                                ? FieldValue.serverTimestamp()
-                                : null,
-                          });
-                        },
-                      ),
-                    ),
-                  ],
-                );
-              }).toList(),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildRecentBidsSection() {
-    return _buildAdminPakistanMandiHubBidsPanel(title: 'Recent Bids');
-  }
-
-  Widget _buildAdminPakistanMandiHubBidsPanel({String title = 'Recent Bids'}) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: panel,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-              fontSize: 15,
-            ),
-          ),
-          const SizedBox(height: 8),
-          SizedBox(
-            height: 220,
-            child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-              stream:
-                  _allBidsStream ??
-                  FirebaseFirestore.instance
-                      .collectionGroup('bids')
-                      .orderBy('timestamp', descending: true)
-                      .snapshots(),
-              builder: (context, snapshot) {
-                if (!snapshot.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                if (snapshot.hasError) {
-                  return const Center(
-                    child: Text(
-                      'Bids load nahi ho sakin',
-                      style: TextStyle(color: Colors.white70),
-                    ),
-                  );
-                }
-
-                final docs = snapshot.data!.docs;
-                if (docs.isEmpty) {
-                  return const Center(
-                    child: Text(
-                      'Abhi tak koi boli nahi lagi',
-                      style: TextStyle(color: Colors.white54),
-                    ),
-                  );
-                }
-
-                return ListView.separated(
-                  itemCount: docs.length > 12 ? 12 : docs.length,
-                  separatorBuilder: (context, index) =>
-                      const Divider(height: 1, color: Colors.white12),
-                  itemBuilder: (context, index) {
-                    final data = docs[index].data();
-                    final amount = _num(data, 'bidAmount');
-                    final buyer = _str(data, 'buyerName', fallback: 'Kharidar');
-                    final listingId = _str(data, 'listingId', fallback: '--');
-                    final status = _str(data, 'status', fallback: 'pending');
-                    final pakistanAverageRate = _num(data, 'aiAverageRate') > 0
-                        ? _num(data, 'aiAverageRate')
-                        : _num(data, 'geminiAverageRate');
-                    return ListTile(
-                      onTap: listingId == '--'
-                          ? null
-                          : () => _openListingDetail(listingId, null),
-                      dense: true,
-                      title: Row(
-                        children: [
-                          Text(
-                            'Rs. ${amount.toStringAsFixed(0)}',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              buyer,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: Colors.white70,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Listing: $listingId ⬢ $status',
-                            style: const TextStyle(
-                              color: Colors.white54,
-                              fontSize: 11,
-                            ),
-                          ),
-                          Text(
-                            pakistanAverageRate > 0
-                                ? "Buyer's Bid vs Pakistan Average Mandi Rate: Rs. ${amount.toStringAsFixed(0)} vs Rs. ${pakistanAverageRate.toStringAsFixed(0)}"
-                                : "Buyer's Bid vs Pakistan Average Mandi Rate: Rs. ${amount.toStringAsFixed(0)} vs Rate Unavailable",
-                            style: const TextStyle(
-                              color: Colors.cyanAccent,
-                              fontSize: 10,
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _openListingDetail(String listingId, Map<String, dynamic>? listingData) {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: panel,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (ctx) {
-        final product = _str(listingData, 'product', fallback: 'Fasal');
-        final seller = _str(listingData, 'sellerName', fallback: 'Seller');
-
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
-            child: SizedBox(
-              height: MediaQuery.of(ctx).size.height * 0.72,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    product == 'Fasal' ? 'Listing Details' : product,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Seller: $seller ⬢ ID: $listingId',
-                    style: const TextStyle(color: Colors.white70, fontSize: 12),
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'Recent Bids',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Expanded(
-                    child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                      stream: _marketplaceService.getBidsStream(listingId),
-                      builder: (context, snapshot) {
-                        if (snapshot.connectionState ==
+                    const SizedBox(height: 12),
+                    FutureBuilder<AdminMarketInsightsResult>(
+                      future: _adminInsightsFuture,
+                      builder: (context, insightSnap) {
+                        if (insightSnap.connectionState ==
                             ConnectionState.waiting) {
-                          return const Center(
-                            child: CircularProgressIndicator(),
+                          return _panel(
+                            child: Row(
+                              children: const [
+                                SizedBox(
+                                  height: 16,
+                                  width: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                                SizedBox(width: 8),
+                                Text(
+                                  'Loading market insights...',
+                                  style: TextStyle(color: Colors.white70),
+                                ),
+                              ],
+                            ),
                           );
                         }
-
-                        if (snapshot.hasError) {
-                          return const Center(
-                            child: Text(
-                              'Listing bids load nahi ho sakin',
+                        final insights = insightSnap.data;
+                        if (insights == null) {
+                          return _panel(
+                            child: const Text(
+                              'Market insights unavailable',
                               style: TextStyle(color: Colors.white70),
                             ),
                           );
                         }
 
-                        final bids = snapshot.data?.docs ?? [];
-                        if (bids.isEmpty) {
-                          return const Center(
-                            child: Text(
-                              'Abhi tak koi boli nahi lagi',
-                              style: TextStyle(color: Colors.white54),
-                            ),
-                          );
-                        }
+                        final lines = <String>[
+                          ...insights.topRisingCrops,
+                          ...insights.topFallingCrops,
+                          ...insights.highDemandCategories,
+                        ];
 
-                        return ListView.separated(
-                          itemCount: bids.length,
-                          separatorBuilder: (context, index) =>
-                              const Divider(color: Colors.white12, height: 1),
-                          itemBuilder: (context, index) {
-                            final bidData = bids[index].data();
-                            final amount = _num(bidData, 'bidAmount');
-                            final buyer = _str(
-                              bidData,
-                              'buyerName',
-                              fallback: 'Kharidar',
-                            );
-                            final bidStatus = _str(
-                              bidData,
-                              'status',
-                              fallback: 'normal',
-                            );
-                            final pakistanAverageRate =
-                                _num(bidData, 'aiAverageRate') > 0
-                                ? _num(bidData, 'aiAverageRate')
-                                : _num(bidData, 'geminiAverageRate');
-                            return ListTile(
-                              dense: true,
-                              title: Row(
+                        return _panel(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
                                 children: [
-                                  Text(
-                                    'Rs. ${amount.toStringAsFixed(0)}',
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
+                                  const Expanded(
+                                    child: Text(
+                                      'Admin Market Insight',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w700,
+                                      ),
                                     ),
                                   ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      buyer,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        color: Colors.white70,
-                                        fontSize: 12,
-                                      ),
+                                  IconButton(
+                                    onPressed: _refreshAdminInsights,
+                                    icon: const Icon(
+                                      Icons.refresh,
+                                      color: _gold,
                                     ),
                                   ),
                                 ],
                               ),
-                              subtitle: Text(
-                                pakistanAverageRate > 0
-                                    ? 'Status: $bidStatus\nBuyer\'s Bid vs Pakistan Average Mandi Rate: Rs. ${amount.toStringAsFixed(0)} vs Rs. ${pakistanAverageRate.toStringAsFixed(0)}'
-                                    : 'Status: $bidStatus\nBuyer\'s Bid vs Pakistan Average Mandi Rate: Rs. ${amount.toStringAsFixed(0)} vs Rate Unavailable',
-                                style: const TextStyle(
-                                  color: Colors.white60,
-                                  fontSize: 11,
+                              const SizedBox(height: 6),
+                              if (lines.isEmpty)
+                                const Text(
+                                  'No strong market movement detected in last 24h.',
+                                  style: TextStyle(color: Colors.white70),
                                 ),
-                              ),
-                            );
-                          },
+                              ...lines
+                                  .take(6)
+                                  .map(
+                                    (line) => Padding(
+                                      padding: const EdgeInsets.only(bottom: 4),
+                                      child: Text(
+                                        '- $line',
+                                        style: const TextStyle(
+                                          color: Colors.white70,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                            ],
+                          ),
                         );
                       },
                     ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+                  ],
+                );
+              },
+            );
+          },
         );
       },
     );
   }
 
-  Future<void> _approveListing(
-    String listingId,
-    Map<String, dynamic> data, {
-    BuildContext? dialogContext,
-  }) async {
-    await _adminService.approveListingVisibility(listingId);
-    await FirebaseFirestore.instance
-        .collection('listings')
-        .doc(listingId)
-        .update({
-          'startTime': FieldValue.serverTimestamp(),
-          'endTime': Timestamp.fromDate(
-            DateTime.now().toUtc().add(const Duration(hours: 24)),
-          ),
-          'bidStartTime': FieldValue.serverTimestamp(),
-          'bidExpiryTime': Timestamp.fromDate(
-            DateTime.now().toUtc().add(const Duration(hours: 24)),
-          ),
-          'isBidForceClosed': false,
-          'bidClosedAt': null,
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
-
-    debugPrint(
-      'TIMESTAMP: Admin Approved at ${DateTime.now()} for listingId=$listingId',
-    );
-
-    _refreshAdminStats();
-
-    if (!mounted) return;
-    if (dialogContext != null && dialogContext.mounted) {
-      Navigator.pop(dialogContext);
-    }
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(duration: Duration(seconds: 5), 
-        content: Text('Mubarak! Maal Mandi mein Live ho gaya hai'),
-      ),
-    );
-  }
-
-  _AiCheck _geminiInsight(Map<String, dynamic> data) {
-    final product = _str(data, 'product').toLowerCase();
-    final price = _num(data, 'price');
-
-    double? baseline;
-    for (final entry in AppConstants.marketPriceByCrop.entries) {
-      final key = entry.key.toLowerCase();
-      if (product.contains(key) || key.contains(product)) {
-        baseline = entry.value;
-        break;
-      }
-    }
-
-    if (baseline == null || baseline <= 0 || price <= 0) {
-      return const _AiCheck(isUnusual: false, deviationPercent: 0);
-    }
-
-    final deviation = ((price - baseline) / baseline) * 100;
-    return _AiCheck(
-      isUnusual: deviation.abs() > 20,
-      deviationPercent: deviation,
-    );
-  }
-
-  String _str(Map<String, dynamic>? data, String key, {String fallback = ''}) {
-    if (data == null || !data.containsKey(key) || data[key] == null) {
-      return fallback;
-    }
-    return data[key].toString();
-  }
-
-  double _num(Map<String, dynamic>? data, String key, {double fallback = 0}) {
-    if (data == null || !data.containsKey(key) || data[key] == null) {
-      return fallback;
-    }
-    final value = data[key];
-    if (value is num) return value.toDouble();
-    return double.tryParse(value.toString()) ?? fallback;
-  }
-
-  bool _bool(Map<String, dynamic>? data, String key, {bool fallback = false}) {
-    if (data == null || !data.containsKey(key) || data[key] == null) {
-      return fallback;
-    }
-    final value = data[key];
-    if (value is bool) return value;
-    if (value is String) return value.toLowerCase() == 'true';
-    return fallback;
-  }
-
-  DateTime? _date(Map<String, dynamic>? data, String key) {
-    if (data == null || !data.containsKey(key) || data[key] == null) {
-      return null;
-    }
-    final value = data[key];
-    if (value is Timestamp) return value.toDate();
-    if (value is DateTime) return value;
-    return null;
-  }
-
-  String _normalizePaymentStatus(String raw) {
-    final normalized = raw.trim().toUpperCase();
-    switch (normalized) {
-      case 'AMANAT PENDING':
-      case 'AWAITING_PAYMENT':
-      case 'PENDING_ESCROW':
-      case 'PENDING':
-        return 'PENDING_ESCROW';
-      case 'PAID_TO_ESCROW':
-      case 'ESCROW_LOCKED':
-        return 'ACTIVE';
-      case 'COMPLETED':
-      case 'VERIFIED':
-      case 'FUNDS_RELEASED':
-        return 'VERIFIED';
-      case 'REFUNDED':
-        return 'REFUNDED';
-      default:
-        return normalized.isEmpty ? 'PENDING_ESCROW' : normalized;
-    }
-  }
-
-  String _normalizeEscrowState(String raw) {
-    final normalized = raw.trim().toUpperCase();
-    switch (normalized) {
-      case 'PENDING':
-      case 'FUNDS_LOCKED':
-        return 'ACTIVE';
-      case 'STOCK_IN_TRANSIT':
-        return 'IN_TRANSIT';
-      case 'STOCK_VERIFIED':
-        return 'VERIFIED';
-      case 'FUNDS_RELEASED':
-        return 'RELEASED';
-      case 'REFUNDED':
-        return 'REFUNDED';
-      default:
-        return normalized.isEmpty ? 'PENDING' : normalized;
-    }
-  }
-
-  Widget _buildPendingApprovalsBell() {
+  Widget _moderation() {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: _db
           .collection('listings')
-          .where('listingStatus', isEqualTo: DealStatus.pendingAdminApproval.name)
-          .limit(1)
+          .orderBy('createdAt', descending: true)
+          .limit(120)
           .snapshots(),
-      builder: (context, snapshot) {
-        final hasPending = (snapshot.data?.docs.length ?? 0) > 0;
-        return Stack(
-          clipBehavior: Clip.none,
-          children: [
-            IconButton(
-              tooltip: 'Pending Approvals',
-              onPressed: () => setState(() => _selectedTab = 3),
-              icon: const Icon(Icons.notifications_rounded),
-            ),
-            if (hasPending)
-              Positioned(
-                right: 10,
-                top: 10,
-                child: Container(
-                  width: 9,
-                  height: 9,
-                  decoration: const BoxDecoration(
-                    color: Colors.red,
-                    shape: BoxShape.circle,
+      builder: (context, snap) {
+        final docs =
+            (snap.data?.docs ??
+                    const <QueryDocumentSnapshot<Map<String, dynamic>>>[])
+                .where(
+                  (doc) =>
+                      _needsModeration(doc.data()) &&
+                      !_hiddenModerationIds.contains(doc.id),
+                )
+                .toList(growable: false);
+        if (docs.isEmpty) {
+          return _emptyState(
+            'No pending moderation items',
+            'New listings needing review will appear here.',
+            Icons.fact_check_rounded,
+          );
+        }
+        return ListView.builder(
+          padding: const EdgeInsets.all(12),
+          itemCount: docs.length,
+          itemBuilder: (context, index) {
+            final doc = docs[index];
+            final d = doc.data();
+            final currentStatus = _status(d);
+            final currentAuctionStatus = _auctionStatus(d);
+            final isApproved = _b(d['isApproved']);
+            final market = _n(d['marketAverage']) > 0
+                ? _n(d['marketAverage'])
+                : _n(d['market_average']);
+            final rate = _n(d['price']);
+            final delta = market > 0 ? ((rate - market) / market) * 100 : 0;
+            final imageCount = _extractImageUrls(d).length;
+            final hasPhoto = imageCount > 0;
+            final hasVideo = _videoUrl(d).isNotEmpty;
+            final hasAudio = _audioUrl(d).isNotEmpty;
+            final canApprove =
+                !(isApproved &&
+                    (currentStatus == 'active' ||
+                        currentStatus == 'approved' ||
+                        currentAuctionStatus == 'live'));
+            final canStartAuction =
+                currentStatus != 'rejected' &&
+                currentAuctionStatus != 'live' &&
+                currentAuctionStatus != 'cancelled' &&
+                currentAuctionStatus != 'completed';
+            return _panel(
+              margin: const EdgeInsets.only(bottom: 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _s(d['itemName'], fallback: _s(d['product'])),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
-                ),
+                  Text(
+                    '${_s(d['categoryLabel'], fallback: _s(d['category']))} > ${_s(d['subcategoryLabel'], fallback: _s(d['subcategory']))} > ${_s(d['variety'])}',
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      _statusBadge('Pending Review', Colors.orangeAccent),
+                      if (!hasPhoto || !hasVideo)
+                        _statusBadge('Low Evidence', Colors.amber),
+                    ],
+                  ),
+                  Text(
+                    'Seller: ${_s(d['sellerName'], fallback: _s(d['sellerId']))}',
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+                  Text(
+                    'Location: ${_s(d['city'], fallback: _s(d['district'], fallback: _s(d['location'])))}',
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+                  Text(
+                    'Qty: ${_n(d['quantity']).toStringAsFixed(0)} ${_s(d['unit'], fallback: _s(d['unitType']))} | Rate: Rs ${rate.toStringAsFixed(0)}',
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+                  Text(
+                    'Photo: ${hasPhoto ? 'yes' : 'no'} | Video: ${hasVideo ? 'yes' : 'no'} | Audio: ${hasAudio ? 'yes' : 'no'} | Images: $imageCount',
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+                  Text(
+                    market > 0
+                        ? 'Market avg Rs ${market.toStringAsFixed(0)} | Delta ${delta.toStringAsFixed(1)}%'
+                        : 'Market avg unavailable',
+                    style: TextStyle(
+                      color: market > 0 && delta.abs() > 20
+                          ? Colors.redAccent
+                          : Colors.white70,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _button(
+                        'Approve Listing',
+                        Colors.green,
+                        () => _runAction(
+                          key: 'approve_${doc.id}',
+                          failedMessage:
+                              'Could not approve listing. Please retry.',
+                          failureAction: 'approve_listing',
+                          targetCollection: 'listings',
+                          targetId: doc.id,
+                          work: () => _approve(doc.id),
+                          successMessage: 'Listing approved successfully',
+                          onSuccess: () {
+                            setState(() => _hiddenModerationIds.add(doc.id));
+                          },
+                        ),
+                        actionKey: 'approve_${doc.id}',
+                        enabled: canApprove,
+                      ),
+                      _button('Reject Listing', Colors.red, () async {
+                        final note = await _askAdminNote('Reject listing note');
+                        if (note == null || note.trim().isEmpty) return;
+                        await _runAction(
+                          key: 'reject_${doc.id}',
+                          failedMessage:
+                              'Could not reject listing. Please retry.',
+                          failureAction: 'reject_listing',
+                          targetCollection: 'listings',
+                          targetId: doc.id,
+                          work: () => _reject(doc.id, note: note),
+                          successMessage: 'Listing rejected',
+                          onSuccess: () {
+                            setState(() => _hiddenModerationIds.add(doc.id));
+                          },
+                        );
+                      }, actionKey: 'reject_${doc.id}'),
+                      _button(
+                        'Request Changes',
+                        Colors.orange,
+                        () async {
+                          final note = await _askAdminNote(
+                            'Request changes note',
+                          );
+                          if (note == null || note.trim().isEmpty) return;
+                          await _runAction(
+                            key: 'changes_${doc.id}',
+                            failedMessage:
+                                'Could not request changes. Please retry.',
+                            failureAction: 'request_changes',
+                            targetCollection: 'listings',
+                            targetId: doc.id,
+                            work: () => _changes(doc.id, note: note),
+                            successMessage: 'Changes requested',
+                            onSuccess: () {
+                              setState(() => _hiddenModerationIds.add(doc.id));
+                            },
+                          );
+                        },
+                        actionKey: 'changes_${doc.id}',
+                      ),
+                      _button(
+                        'View Full Details',
+                        Colors.blueGrey,
+                        () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) =>
+                                AdminListingDetailScreen(listingId: doc.id),
+                          ),
+                        ),
+                      ),
+                      _button(
+                        'Start Auction',
+                        Colors.blue,
+                        () => _runAction(
+                          key: 'start_${doc.id}',
+                          failedMessage:
+                              'Could not start auction. Please retry.',
+                          failureAction: 'start_auction',
+                          targetCollection: 'listings',
+                          targetId: doc.id,
+                          work: () => _startAuction(doc.id),
+                          successMessage: 'Auction started',
+                          onSuccess: () {
+                            setState(() {
+                              _hiddenModerationIds.add(doc.id);
+                              _auctionStatusOverrides[doc.id] = 'live';
+                            });
+                          },
+                        ),
+                        actionKey: 'start_${doc.id}',
+                        enabled: canStartAuction,
+                      ),
+                    ],
+                  ),
+                ],
               ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _auctions() {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: _db
+          .collection('listings')
+          .orderBy('updatedAt', descending: true)
+          .limit(120)
+          .snapshots(),
+      builder: (context, snap) {
+        final docs =
+            (snap.data?.docs ??
+                    const <QueryDocumentSnapshot<Map<String, dynamic>>>[])
+                .where(
+                  (doc) =>
+                      _s(
+                        doc.data()['saleType'],
+                        fallback: 'auction',
+                      ).toLowerCase() ==
+                      'auction',
+                )
+                .toList(growable: false);
+        if (docs.isEmpty) {
+          return _emptyState(
+            'No live auctions to manage',
+            'Auctions will appear here when listings are auction-enabled.',
+            Icons.gavel_rounded,
+          );
+        }
+        return ListView(
+          padding: const EdgeInsets.all(12),
+          children: docs.map((doc) {
+            final d = doc.data();
+            final auctionStatus =
+                _auctionStatusOverrides[doc.id] ??
+                _s(d['auctionStatus'], fallback: _s(d['status']));
+            final statusLower = auctionStatus.toLowerCase();
+            final canStart =
+                statusLower != 'live' &&
+                statusLower != 'cancelled' &&
+                statusLower != 'completed' &&
+                _status(d) != 'rejected';
+            final canPause = statusLower == 'live';
+            final canResume = statusLower == 'paused';
+            final canCancel =
+                statusLower != 'cancelled' && statusLower != 'completed';
+            final canExtend = statusLower == 'live' || statusLower == 'paused';
+            return _panel(
+              margin: const EdgeInsets.only(bottom: 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _s(d['itemName'], fallback: _s(d['product'])),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  Text(
+                    'Seller: ${_s(d['sellerName'], fallback: _s(d['sellerId']))}',
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+                  Text(
+                    'Highest bid: Rs ${_n(d['highestBid']).toStringAsFixed(0)} | Bids: ${_n(d['totalBids']).toInt()}',
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+                  Text(
+                    'Status: ${auctionStatus.toUpperCase()}',
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+                  const SizedBox(height: 6),
+                  _statusBadge(
+                    auctionStatus.toUpperCase(),
+                    auctionStatus == 'live'
+                        ? _green
+                        : auctionStatus == 'paused'
+                        ? Colors.amber
+                        : Colors.redAccent,
+                  ),
+                  Text(
+                    'Winning bidder: ${_s(d['winnerName'], fallback: _s(d['winnerId']))}',
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _button(
+                        'Start Auction',
+                        Colors.blue,
+                        () => _runAction(
+                          key: 'start_${doc.id}',
+                          failedMessage:
+                              'Could not start auction. Please retry.',
+                          failureAction: 'start_auction',
+                          targetCollection: 'listings',
+                          targetId: doc.id,
+                          work: () => _startAuction(doc.id),
+                          successMessage: 'Auction started',
+                          onSuccess: () {
+                            setState(
+                              () => _auctionStatusOverrides[doc.id] = 'live',
+                            );
+                          },
+                        ),
+                        actionKey: 'start_${doc.id}',
+                        enabled: canStart,
+                      ),
+                      _button(
+                        'Pause Auction',
+                        Colors.orange,
+                        () => _runAction(
+                          key: 'pause_${doc.id}',
+                          failedMessage:
+                              'Could not pause auction. Please retry.',
+                          failureAction: 'pause_auction',
+                          targetCollection: 'listings',
+                          targetId: doc.id,
+                          work: () => _setAuction(doc.id, 'paused'),
+                          successMessage: 'Auction paused',
+                          onSuccess: () {
+                            setState(
+                              () => _auctionStatusOverrides[doc.id] = 'paused',
+                            );
+                          },
+                        ),
+                        actionKey: 'pause_${doc.id}',
+                        enabled: canPause,
+                      ),
+                      _button(
+                        'Resume Auction',
+                        Colors.teal,
+                        () => _runAction(
+                          key: 'resume_${doc.id}',
+                          failedMessage:
+                              'Could not resume auction. Please retry.',
+                          failureAction: 'resume_auction',
+                          targetCollection: 'listings',
+                          targetId: doc.id,
+                          work: () => _setAuction(doc.id, 'live'),
+                          successMessage: 'Auction resumed',
+                          onSuccess: () {
+                            setState(
+                              () => _auctionStatusOverrides[doc.id] = 'live',
+                            );
+                          },
+                        ),
+                        actionKey: 'resume_${doc.id}',
+                        enabled: canResume,
+                      ),
+                      _button(
+                        'Cancel Auction',
+                        Colors.red,
+                        () => _runAction(
+                          key: 'cancel_${doc.id}',
+                          failedMessage:
+                              'Could not cancel auction. Please retry.',
+                          failureAction: 'cancel_auction',
+                          targetCollection: 'listings',
+                          targetId: doc.id,
+                          work: () async {
+                            final note = await _askAdminNote(
+                              'Cancel auction reason',
+                              hint: 'Policy or operational reason',
+                              required: true,
+                            );
+                            if (note == null) {
+                              throw const _AdminUiException('Action cancelled');
+                            }
+                            await _setAuction(doc.id, 'cancelled', note: note);
+                          },
+                          successMessage: 'Auction cancelled',
+                          onSuccess: () {
+                            setState(
+                              () =>
+                                  _auctionStatusOverrides[doc.id] = 'cancelled',
+                            );
+                          },
+                        ),
+                        actionKey: 'cancel_${doc.id}',
+                        enabled: canCancel,
+                      ),
+                      _button(
+                        'Extend +2h',
+                        Colors.indigo,
+                        () => _runAction(
+                          key: 'extend_${doc.id}',
+                          failedMessage:
+                              'Could not extend auction. Please retry.',
+                          failureAction: 'extend_auction',
+                          targetCollection: 'listings',
+                          targetId: doc.id,
+                          work: () => _extend(doc.id),
+                          successMessage: 'Auction extended by 2 hours',
+                        ),
+                        actionKey: 'extend_${doc.id}',
+                        enabled: canExtend,
+                      ),
+                      _button(
+                        'View Bids',
+                        Colors.blueGrey,
+                        () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) =>
+                                AdminListingDetailScreen(listingId: doc.id),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          }).toList(),
+        );
+      },
+    );
+  }
+
+  Widget _revenue() {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: _db
+          .collection('listings')
+          .orderBy('updatedAt', descending: true)
+          .limit(140)
+          .snapshots(),
+      builder: (context, snap) {
+        final docs =
+            (snap.data?.docs ??
+                    const <QueryDocumentSnapshot<Map<String, dynamic>>>[])
+                .where(
+                  (doc) =>
+                      _promo(
+                            _s(doc.data()['promotionStatus'], fallback: 'none'),
+                          ) !=
+                          'none' ||
+                      _b(doc.data()['featured']) ||
+                      _b(doc.data()['featuredAuction']),
+                )
+                .toList(growable: false);
+        if (docs.isEmpty) {
+          return _emptyState(
+            'No promotion payments awaiting review',
+            'Promotion requests and payment states appear here.',
+            Icons.payments_rounded,
+          );
+        }
+        int pendingReviews = 0;
+        int approved = 0;
+        int rejected = 0;
+        int active = 0;
+        double revenue = 0;
+        for (final doc in docs) {
+          final data = doc.data();
+          final status = _promoStatusForMetrics(data);
+          if (status == 'pending_review') {
+            pendingReviews++;
+          }
+          if (status == 'approved') approved++;
+          if (status == 'rejected') rejected++;
+          if (status == 'active') active++;
+          if (status == 'approved' || status == 'active') {
+            revenue += _n(data['featuredCost']);
+          }
+        }
+        return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: _db
+              .collection('revenue_ledger')
+              .orderBy('createdAt', descending: true)
+              .limit(500)
+              .snapshots(),
+          builder: (context, ledgerSnap) {
+            double featuredListingRevenue = 0;
+            double featuredAuctionRevenue = 0;
+            double todayRevenue = 0;
+            double weekRevenue = 0;
+            double monthRevenue = 0;
+            final now = DateTime.now();
+            final docs =
+                ledgerSnap.data?.docs ??
+                const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+            for (final doc in docs) {
+              final d = doc.data();
+              final status = _s(d['status'], fallback: '').toLowerCase();
+              if (status != 'approved' && status != 'active') continue;
+              final amount = _n(d['amount']);
+              final category = _s(
+                d['revenueCategory'],
+                fallback: '',
+              ).toLowerCase();
+              final createdAt = _toDate(d['createdAt']);
+              if (category == 'featured_auction') {
+                featuredAuctionRevenue += amount;
+              } else {
+                featuredListingRevenue += amount;
+              }
+              if (createdAt == null) continue;
+              if (createdAt.year == now.year &&
+                  createdAt.month == now.month &&
+                  createdAt.day == now.day) {
+                todayRevenue += amount;
+              }
+              if (!createdAt.isBefore(now.subtract(const Duration(days: 7)))) {
+                weekRevenue += amount;
+              }
+              if (createdAt.year == now.year && createdAt.month == now.month) {
+                monthRevenue += amount;
+              }
+            }
+
+            return ListView(
+              padding: const EdgeInsets.all(12),
+              children: [
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _metricCard(
+                      'Promo Revenue',
+                      'Rs ${revenue.toStringAsFixed(0)}',
+                      _gold,
+                      Icons.payments_rounded,
+                    ),
+                    _metricCard(
+                      'Featured Listing Revenue',
+                      'Rs ${featuredListingRevenue.toStringAsFixed(0)}',
+                      Colors.lightGreenAccent,
+                      Icons.workspace_premium_rounded,
+                    ),
+                    _metricCard(
+                      'Featured Auction Revenue',
+                      'Rs ${featuredAuctionRevenue.toStringAsFixed(0)}',
+                      Colors.orangeAccent,
+                      Icons.local_fire_department_rounded,
+                    ),
+                    _metricCard(
+                      'Pending Reviews',
+                      '$pendingReviews',
+                      Colors.orangeAccent,
+                      Icons.receipt_long_rounded,
+                    ),
+                    _metricCard(
+                      'Approved',
+                      '$approved',
+                      _green,
+                      Icons.verified_rounded,
+                    ),
+                    _metricCard(
+                      'Rejected',
+                      '$rejected',
+                      Colors.redAccent,
+                      Icons.cancel_rounded,
+                    ),
+                    _metricCard(
+                      'Active Promotions',
+                      '$active',
+                      _blue,
+                      Icons.workspace_premium_rounded,
+                    ),
+                    _metricCard(
+                      'Today Revenue',
+                      'Rs ${todayRevenue.toStringAsFixed(0)}',
+                      Colors.cyanAccent,
+                      Icons.today_rounded,
+                    ),
+                    _metricCard(
+                      'Week Revenue',
+                      'Rs ${weekRevenue.toStringAsFixed(0)}',
+                      Colors.tealAccent,
+                      Icons.calendar_view_week_rounded,
+                    ),
+                    _metricCard(
+                      'Month Revenue',
+                      'Rs ${monthRevenue.toStringAsFixed(0)}',
+                      Colors.amberAccent,
+                      Icons.calendar_month_rounded,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                ...docs.map((doc) {
+                  final d = doc.data();
+                  final status = _promoStatusForMetrics(d);
+                  final promoType = _b(d['featuredAuction'])
+                      ? 'featured_auction'
+                      : (_b(d['featured']) ? 'featured_listing' : 'none');
+                  return _panel(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _s(d['itemName'], fallback: _s(d['product'])),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        Text(
+                          'Seller: ${_s(d['sellerName'], fallback: _s(d['sellerId']))}',
+                          style: const TextStyle(color: Colors.white70),
+                        ),
+                        Text(
+                          'Promotion type: $promoType',
+                          style: const TextStyle(color: Colors.white70),
+                        ),
+                        const SizedBox(height: 6),
+                        _statusBadge(
+                          status,
+                          status == 'active'
+                              ? _green
+                              : status == 'rejected'
+                              ? Colors.redAccent
+                              : Colors.orangeAccent,
+                        ),
+                        Text(
+                          'Amount: Rs ${_n(d['featuredCost']).toStringAsFixed(0)} | Status: $status',
+                          style: const TextStyle(color: Colors.white70),
+                        ),
+                        Text(
+                          'Requested At: ${_s(d['promotionRequestedAt'], fallback: _s(d['createdAt']))}',
+                          style: const TextStyle(color: Colors.white70),
+                        ),
+                        Text(
+                          'Payment Ref: ${_s(d['promotionPaymentReference'], fallback: _s(d['paymentReference']))}',
+                          style: const TextStyle(color: Colors.white70),
+                        ),
+                        Text(
+                          'Proof: ${_s(d['promotionProofUrl'], fallback: _s(d['paymentReceiptUrl'], fallback: 'not_provided'))}',
+                          style: const TextStyle(color: Colors.white70),
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            _button(
+                              'Mark Payment Under Review',
+                              Colors.orange,
+                              () => _runAction(
+                                key: 'promo_review_${doc.id}',
+                                failedMessage:
+                                    'Could not mark payment under review. Please retry.',
+                                failureAction: 'promotion_payment_under_review',
+                                targetCollection: 'listings',
+                                targetId: doc.id,
+                                work: () async {
+                                  final note = await _askAdminNote(
+                                    'Request better promotion proof',
+                                    hint: 'Receipt mismatch or missing details',
+                                    required: true,
+                                  );
+                                  if (note == null) {
+                                    throw const _AdminUiException(
+                                      'Action cancelled',
+                                    );
+                                  }
+                                  await _promoStatus(
+                                    doc.id,
+                                    'pending_review',
+                                    note: note,
+                                  );
+                                },
+                                successMessage: 'Payment marked under review',
+                              ),
+                              actionKey: 'promo_review_${doc.id}',
+                            ),
+                            _button(
+                              'Approve Promotion',
+                              Colors.green,
+                              () => _runAction(
+                                key: 'promo_approved_${doc.id}',
+                                failedMessage:
+                                    'Could not approve promotion. Please retry.',
+                                failureAction: 'approve_promotion',
+                                targetCollection: 'listings',
+                                targetId: doc.id,
+                                work: () => _promoStatus(doc.id, 'approved'),
+                                successMessage: 'Promotion approved',
+                              ),
+                              actionKey: 'promo_approved_${doc.id}',
+                            ),
+                            _button(
+                              'Reject Promotion',
+                              Colors.red,
+                              () => _runAction(
+                                key: 'promo_rejected_${doc.id}',
+                                failedMessage:
+                                    'Could not reject promotion. Please retry.',
+                                failureAction: 'reject_promotion',
+                                targetCollection: 'listings',
+                                targetId: doc.id,
+                                work: () async {
+                                  final note = await _askAdminNote(
+                                    'Reject promotion reason',
+                                    hint: 'Invalid or incomplete payment proof',
+                                    required: true,
+                                  );
+                                  if (note == null) {
+                                    throw const _AdminUiException(
+                                      'Action cancelled',
+                                    );
+                                  }
+                                  await _promoStatus(
+                                    doc.id,
+                                    'rejected',
+                                    note: note,
+                                  );
+                                },
+                                successMessage: 'Promotion rejected',
+                              ),
+                              actionKey: 'promo_rejected_${doc.id}',
+                            ),
+                            _button(
+                              'Activate Promotion',
+                              Colors.blue,
+                              () => _runAction(
+                                key: 'promo_active_${doc.id}',
+                                failedMessage:
+                                    'Could not activate promotion. Please retry.',
+                                failureAction: 'activate_promotion',
+                                targetCollection: 'listings',
+                                targetId: doc.id,
+                                work: () => _promoStatus(doc.id, 'active'),
+                                successMessage: 'Promotion activated',
+                              ),
+                              actionKey: 'promo_active_${doc.id}',
+                            ),
+                            _button(
+                              'Deactivate Promotion',
+                              Colors.grey,
+                              () => _runAction(
+                                key: 'promo_expired_${doc.id}',
+                                failedMessage:
+                                    'Could not deactivate promotion. Please retry.',
+                                failureAction: 'deactivate_promotion',
+                                targetCollection: 'listings',
+                                targetId: doc.id,
+                                work: () => _promoStatus(doc.id, 'expired'),
+                                successMessage: 'Promotion deactivated',
+                              ),
+                              actionKey: 'promo_expired_${doc.id}',
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _users() {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: _db.collection('users').snapshots(),
+      builder: (context, snap) {
+        final docs =
+            snap.data?.docs ??
+            const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+        final totalUsers = docs.length;
+        final totalSellers = docs.where((u) {
+          final role = _s(
+            u.data()['role'],
+            fallback: _s(u.data()['userRole']),
+          ).toLowerCase();
+          return role == 'seller' || role == 'arhat';
+        }).length;
+        final totalBuyers = docs.where((u) {
+          final role = _s(
+            u.data()['role'],
+            fallback: _s(u.data()['userRole']),
+          ).toLowerCase();
+          return role == 'buyer';
+        }).length;
+        final suspendedUsers = docs
+            .where((u) => _b(u.data()['isSuspended']))
+            .length;
+        final trustedSellers = docs
+            .where((u) => _b(u.data()['trustedSeller']))
+            .length;
+        final restrictedUsers = docs
+            .where((u) => _b(u.data()['listingRestricted']))
+            .length;
+        final sellers = docs
+            .where((u) {
+              final role = _s(
+                u.data()['role'],
+                fallback: _s(u.data()['userRole']),
+              ).toLowerCase();
+              return role == 'seller' || role == 'arhat';
+            })
+            .toList(growable: false);
+        if (sellers.isEmpty) {
+          return _emptyState(
+            'No users need action',
+            'Seller moderation and account controls appear here.',
+            Icons.groups_rounded,
+          );
+        }
+        return ListView(
+          padding: const EdgeInsets.all(12),
+          children: [
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _metricCard(
+                  'Total Users',
+                  '$totalUsers',
+                  _gold,
+                  Icons.groups_rounded,
+                ),
+                _metricCard(
+                  'Total Sellers',
+                  '$totalSellers',
+                  _green,
+                  Icons.storefront_rounded,
+                ),
+                _metricCard(
+                  'Total Buyers',
+                  '$totalBuyers',
+                  _blue,
+                  Icons.shopping_basket_rounded,
+                ),
+                _metricCard(
+                  'Suspended Users',
+                  '$suspendedUsers',
+                  Colors.redAccent,
+                  Icons.block_rounded,
+                ),
+                _metricCard(
+                  'Trusted Sellers',
+                  '$trustedSellers',
+                  Colors.greenAccent,
+                  Icons.verified_user_rounded,
+                ),
+                _metricCard(
+                  'Restricted Users',
+                  '$restrictedUsers',
+                  Colors.orangeAccent,
+                  Icons.warning_rounded,
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            ...sellers.take(80).map((doc) {
+              final d = doc.data();
+              return _panel(
+                margin: const EdgeInsets.only(bottom: 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _s(
+                        d['name'],
+                        fallback: _s(d['fullName'], fallback: doc.id),
+                      ),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Text(
+                      'Trusted: ${_b(d['trustedSeller'])} | Suspended: ${_b(d['isSuspended'])} | Restricted: ${_b(d['listingRestricted'])}',
+                      style: const TextStyle(color: Colors.white70),
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        if (_b(d['trustedSeller']))
+                          _statusBadge('Trusted', _green),
+                        if (_b(d['isSuspended']))
+                          _statusBadge('Suspended', Colors.redAccent),
+                        if (_b(d['listingRestricted']))
+                          _statusBadge('Restricted', Colors.orangeAccent),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _button(
+                          'Mark Trusted',
+                          Colors.green,
+                          () => _runAction(
+                            key: 'trusted_${doc.id}',
+                            failedMessage:
+                                'Could not mark user as trusted. Please retry.',
+                            failureAction: 'mark_trusted',
+                            targetCollection: 'users',
+                            targetId: doc.id,
+                            work: () => _userFlags(doc.id, trusted: true),
+                            successMessage: 'Seller marked trusted',
+                          ),
+                          actionKey: 'trusted_${doc.id}',
+                        ),
+                        _button(
+                          'Suspend User',
+                          Colors.red,
+                          () => _runAction(
+                            key: 'suspend_${doc.id}',
+                            failedMessage:
+                                'Could not suspend user. Please retry.',
+                            failureAction: 'suspend_user',
+                            targetCollection: 'users',
+                            targetId: doc.id,
+                            work: () async {
+                              final note = await _askAdminNote(
+                                'Suspend seller reason',
+                                hint: 'Required reason for suspension',
+                                required: true,
+                              );
+                              if (note == null) {
+                                throw const _AdminUiException(
+                                  'Action cancelled',
+                                );
+                              }
+                              await _userFlags(
+                                doc.id,
+                                suspended: true,
+                                note: note,
+                              );
+                            },
+                            successMessage: 'User suspended',
+                          ),
+                          actionKey: 'suspend_${doc.id}',
+                        ),
+                        _button(
+                          'Reactivate User',
+                          Colors.teal,
+                          () => _runAction(
+                            key: 'reactivate_${doc.id}',
+                            failedMessage:
+                                'Could not reactivate user. Please retry.',
+                            failureAction: 'reactivate_user',
+                            targetCollection: 'users',
+                            targetId: doc.id,
+                            work: () => _userFlags(doc.id, suspended: false),
+                            successMessage: 'User reactivated',
+                          ),
+                          actionKey: 'reactivate_${doc.id}',
+                        ),
+                        _button(
+                          'Restrict User',
+                          Colors.orange,
+                          () => _runAction(
+                            key: 'restrict_${doc.id}',
+                            failedMessage:
+                                'Could not restrict user. Please retry.',
+                            failureAction: 'restrict_user',
+                            targetCollection: 'users',
+                            targetId: doc.id,
+                            work: () async {
+                              final note = await _askAdminNote(
+                                'Restrict seller listings reason',
+                                hint: 'Required reason for listing restriction',
+                                required: true,
+                              );
+                              if (note == null) {
+                                throw const _AdminUiException(
+                                  'Action cancelled',
+                                );
+                              }
+                              await _userFlags(
+                                doc.id,
+                                restricted: true,
+                                note: note,
+                              );
+                            },
+                            successMessage: 'Listings restricted',
+                          ),
+                          actionKey: 'restrict_${doc.id}',
+                        ),
+                        _button(
+                          'Allow Listings',
+                          Colors.blueGrey,
+                          () => _runAction(
+                            key: 'allow_${doc.id}',
+                            failedMessage:
+                                'Could not remove restriction. Please retry.',
+                            failureAction: 'allow_user_listings',
+                            targetCollection: 'users',
+                            targetId: doc.id,
+                            work: () => _userFlags(doc.id, restricted: false),
+                            successMessage: 'Listings enabled',
+                          ),
+                          actionKey: 'allow_${doc.id}',
+                        ),
+                        _button(
+                          'View Seller Activity',
+                          Colors.indigo,
+                          () => _viewSellerActivity(doc.id),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              );
+            }),
           ],
         );
       },
     );
   }
+
+  Widget _riskOps() {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: _db
+          .collection('admin_alerts')
+          .orderBy('timestamp', descending: true)
+          .limit(160)
+          .snapshots(),
+      builder: (context, alertSnap) {
+        final alerts =
+            alertSnap.data?.docs ??
+            const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+
+        return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: _db
+              .collection('listings')
+              .orderBy('createdAt', descending: true)
+              .limit(120)
+              .snapshots(),
+          builder: (context, listingSnap) {
+            final listings =
+                listingSnap.data?.docs ??
+                const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+
+            if (alerts.isEmpty && listings.isEmpty) {
+              return _emptyState(
+                'No active risk alerts',
+                'Admin alerts and high-risk items will appear here automatically.',
+                Icons.shield_outlined,
+              );
+            }
+
+            final suspiciousListings = alerts.where((doc) {
+              final d = doc.data();
+              final type = _s(d['type'], fallback: '').toLowerCase();
+              return type.contains('listing') || type.contains('price');
+            }).length;
+
+            final suspiciousBids = alerts.where((doc) {
+              final d = doc.data();
+              final type = _s(d['type'], fallback: '').toLowerCase();
+              return type.contains('bid') || _n(d['aiBidRiskScore']) > 0;
+            }).length;
+
+            final fraudAlerts = alerts.where((doc) {
+              final d = doc.data();
+              final type = _s(d['type'], fallback: '').toLowerCase();
+              final message = _s(d['message'], fallback: '').toLowerCase();
+              return type.contains('fraud') || message.contains('fraud');
+            }).length;
+
+            final listingHighRisk = listings.where((doc) {
+              final d = doc.data();
+              return _n(d['aiRiskScore']) >= 70 || _n(d['riskScore']) >= 70;
+            }).length;
+
+            final alertHighRisk = alerts.where((doc) {
+              final d = doc.data();
+              return _n(d['aiBidRiskScore']) >= 70 || _n(d['riskScore']) >= 70;
+            }).length;
+
+            final highRiskItems = listingHighRisk + alertHighRisk;
+
+            return ListView(
+              padding: const EdgeInsets.all(12),
+              children: [
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _metricCard(
+                      'Suspicious Listings',
+                      '$suspiciousListings',
+                      Colors.orangeAccent,
+                      Icons.store_mall_directory_rounded,
+                    ),
+                    _metricCard(
+                      'Suspicious Bids',
+                      '$suspiciousBids',
+                      Colors.deepOrangeAccent,
+                      Icons.gavel_rounded,
+                    ),
+                    _metricCard(
+                      'Fraud Alerts',
+                      '$fraudAlerts',
+                      Colors.redAccent,
+                      Icons.warning_amber_rounded,
+                    ),
+                    _metricCard(
+                      'High Risk Items',
+                      '$highRiskItems',
+                      _gold,
+                      Icons.shield_rounded,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                if (alerts.isEmpty)
+                  _panel(
+                    child: const Text(
+                      'No admin alerts found yet. Suspicious bid/listing alerts will appear here.',
+                      style: TextStyle(color: Colors.white70),
+                    ),
+                  )
+                else
+                  ...alerts.take(80).map((doc) {
+                    final d = doc.data();
+                    final alertType = _s(
+                      d['type'],
+                      fallback: 'alert',
+                    ).toUpperCase();
+                    final reason = _s(d['reason'], fallback: _s(d['message']));
+                    final listingId = _s(d['listingId'], fallback: '-');
+                    final bidId = _s(d['bidId'], fallback: '-');
+                    final riskScore = _n(d['riskScore']) > 0
+                        ? _n(d['riskScore'])
+                        : _n(d['aiBidRiskScore']);
+
+                    return _panel(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              _statusBadge(alertType, Colors.orangeAccent),
+                              if (riskScore > 0)
+                                _chip(
+                                  'Risk ${riskScore.toStringAsFixed(0)}',
+                                  riskScore >= 70
+                                      ? Colors.redAccent
+                                      : Colors.amber,
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            reason,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Listing: $listingId | Bid: $bidId',
+                            style: const TextStyle(color: Colors.white70),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _panel({
+    required Widget child,
+    EdgeInsetsGeometry margin = EdgeInsets.zero,
+  }) {
+    return Container(
+      margin: margin,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [_panelColor, const Color(0xFF163357)],
+        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white24),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x22000000),
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: child,
+    );
+  }
+
+  Widget _chip(String text, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: color,
+          fontWeight: FontWeight.w700,
+          fontSize: 11.5,
+        ),
+      ),
+    );
+  }
+
+  Widget _statusBadge(String text, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.95)),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: color,
+          fontWeight: FontWeight.w700,
+          fontSize: 11,
+        ),
+      ),
+    );
+  }
+
+  Widget _metricCard(String label, String value, Color color, IconData icon) {
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minWidth: 160, maxWidth: 240),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white24),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, color: color, size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              value,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+                fontSize: 18,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _emptyState(String title, String helper, IconData icon) {
+    return Center(
+      child: _panel(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: _gold, size: 28),
+            const SizedBox(height: 10),
+            Text(
+              title,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(helper, style: const TextStyle(color: Colors.white70)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _button(
+    String text,
+    Color color,
+    VoidCallback onTap, {
+    String? actionKey,
+    bool enabled = true,
+  }) {
+    final isLoading = actionKey != null && _isActionLoading(actionKey);
+    return ElevatedButton(
+      onPressed: (isLoading || !enabled) ? null : onTap,
+      style: ElevatedButton.styleFrom(
+        backgroundColor: color,
+        foregroundColor: Colors.white,
+        minimumSize: const Size(120, 42),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        disabledBackgroundColor: color.withValues(alpha: 0.45),
+      ),
+      child: isLoading
+          ? const SizedBox(
+              height: 16,
+              width: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+              ),
+            )
+          : Text(text, style: const TextStyle(fontWeight: FontWeight.w700)),
+    );
+  }
 }
-
-class _AiCheck {
-  final bool isUnusual;
-  final double deviationPercent;
-
-  const _AiCheck({required this.isUnusual, required this.deviationPercent});
-}
-
-class _AdminStatsSnapshot {
-  final int totalUsers;
-  final int pendingApprovals;
-  final int liveListings;
-  final int totalListings;
-  final double netCommission;
-
-  const _AdminStatsSnapshot({
-    required this.totalUsers,
-    required this.pendingApprovals,
-    required this.liveListings,
-    required this.totalListings,
-    required this.netCommission,
-  });
-}
-
-class _DealSummarySnapshot {
-  final int activeAds;
-  final int pendingApprovals;
-  final int pendingPayouts;
-
-  const _DealSummarySnapshot({
-    this.activeAds = 0,
-    this.pendingApprovals = 0,
-    this.pendingPayouts = 0,
-  });
-}
-

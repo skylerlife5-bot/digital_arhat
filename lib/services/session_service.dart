@@ -9,10 +9,8 @@ class SessionService {
   static Future<void> logoutToLogin(BuildContext context) async {
     await FirebaseAuth.instance.signOut();
     if (!context.mounted) return;
-    Navigator.of(context).pushNamedAndRemoveUntil(
-      Routes.signIn,
-      (route) => false,
-    );
+    Navigator.of(
+      context,
+    ).pushNamedAndRemoveUntil(Routes.welcome, (route) => false);
   }
 }
-

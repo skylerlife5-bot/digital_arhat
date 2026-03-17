@@ -55,7 +55,7 @@ class UserApproval extends StatelessWidget {
             child: StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
                   .collection('users')
-                  .where('verificationStatus', isEqualTo: 'pending')
+                  .where('verificationStatus', whereIn: ['pending', 'pending_review'])
                   .snapshots(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {

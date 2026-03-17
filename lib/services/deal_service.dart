@@ -1,4 +1,4 @@
-﻿import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../deals/deal_model.dart';
 import '../models/deal_status.dart' as deal_status;
@@ -9,7 +9,7 @@ class DealService {
   final String _uid = FirebaseAuth.instance.currentUser?.uid ?? '';
   final EscrowService _escrowService = EscrowService();
 
-  // 1. Create a New Deal with Escrow Logic �S&
+  // 1. Create a New Deal with Escrow Logic ✅
   // Note: Isay BiddingService se call kiya jata hai jab seller bid accept kare
   Future<void> createDealFromBid(
     Map<String, dynamic> bidData,
@@ -20,7 +20,7 @@ class DealService {
 
       double bidAmount = (bidData['bidAmount'] as num).toDouble();
 
-      // �x�� 1% + 1% Calculation (Platform Fee)
+      // 🧠 1% + 1% Calculation (Platform Fee)
       double commissionPerSide = bidAmount * 0.01;
       double buyerTotal = bidAmount + commissionPerSide;
       double sellerReceivable = bidAmount - commissionPerSide;
@@ -49,7 +49,7 @@ class DealService {
     }
   }
 
-  // 2. Get My Deals (Real-time Stream) �S&
+  // 2. Get My Deals (Real-time Stream) ✅
   Stream<List<DealModel>> getMyDeals(bool isSeller) {
     if (_uid.isEmpty) return Stream.value([]);
 
@@ -65,7 +65,7 @@ class DealService {
         );
   }
 
-  // 3. Update Deal Status & Trigger Admin Alerts �S&
+  // 3. Update Deal Status & Trigger Admin Alerts ✅
   Future<void> updateDealStatus(String dealId, String newStatus) async {
     try {
       final normalizedStatus = newStatus.trim().toLowerCase();
@@ -159,4 +159,3 @@ class DealService {
     });
   }
 }
-

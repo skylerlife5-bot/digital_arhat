@@ -25,6 +25,7 @@ class _AdminPaymentVerificationScreenState
   final Set<String> _verifyingListingIds = <String>{};
   final Set<String> _rejectingListingIds = <String>{};
   int _refreshTick = 0;
+  bool get _phase1PaymentsEnabled => false;
 
   double _toDouble(dynamic value) {
     if (value is num) return value.toDouble();
@@ -450,6 +451,53 @@ class _AdminPaymentVerificationScreenState
 
   @override
   Widget build(BuildContext context) {
+    if (!_phase1PaymentsEnabled) {
+      final placeholder = Center(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: _cardBlue,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: Colors.white24),
+            ),
+            child: const Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.info_outline_rounded, color: Colors.amber, size: 30),
+                SizedBox(height: 10),
+                Text(
+                  'Deal approval workflow will return in Phase-2.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                ),
+                SizedBox(height: 6),
+                Text(
+                  'یہ فیچر Phase-2 میں فعال ہوگا',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white70),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      if (widget.embedded) {
+        return placeholder;
+      }
+
+      return Scaffold(
+        appBar: const CustomAppBar(
+          title: 'Admin Phase-1',
+          backgroundColor: _royalBlue,
+        ),
+        body: placeholder,
+      );
+    }
+
     if (widget.embedded) {
       return _buildBody();
     }

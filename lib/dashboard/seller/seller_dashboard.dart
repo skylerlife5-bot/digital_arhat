@@ -1,1244 +1,1334 @@
-﻿import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'dart:ui';
-import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:url_launcher/url_launcher.dart';
-import 'package:lottie/lottie.dart';
-import 'package:intl/intl.dart';
-import '../../core/widgets/custom_app_bar.dart';
-import '../../core/widgets/customer_support_button.dart';
-import '../../core/widgets/verse_card.dart';
-import '../../services/weather_services.dart';
-import '../../services/bidding_service.dart';
-import '../../services/marketplace_service.dart';
-import '../../services/market_rate_service.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
-// �S& Corrected Single Imports
-import 'add_listing_screen.dart';
+import '../../routes.dart';
+import '../../theme/app_colors.dart';
 import 'seller_bids.dart';
 import 'seller_listings.dart';
 
 class SellerDashboard extends StatefulWidget {
-  final Map<String, dynamic> userData;
   const SellerDashboard({super.key, required this.userData});
+
+  final Map<String, dynamic> userData;
 
   @override
   State<SellerDashboard> createState() => _SellerDashboardState();
 }
 
 class _SellerDashboardState extends State<SellerDashboard> {
-  final WeatherService _weatherService = WeatherService();
-  final MarketplaceService _marketplaceService = MarketplaceService();
-  // ignore: unused_field
-  final BiddingService _biddingService = BiddingService();
+  static const Color _greenDark = AppColors.background;
+  static const Color _gold = AppColors.accentGold;
 
-  Stream<QuerySnapshot<Map<String, dynamic>>>? _incomingBidsStream;
-  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _bidsSubscription;
-  final ScrollController _scrollController = ScrollController();
-  FlutterExceptionHandler? _previousFlutterErrorHandler;
-  late Future<_WeatherViewData?> _weatherFuture;
-  int _lastBidCount = -1;
-  bool _widgetErrorDetected = false;
-  bool _paymentBannerDismissed = false;
-  bool _paymentBannerVisible = false;
-  final NumberFormat _pkr = NumberFormat.currency(
-    locale: 'en_US',
-    symbol: 'Rs. ',
-    decimalDigits: 0,
-  );
+  DateTime _lastSyncedAt = DateTime.now();
+  bool _ayatExpanded = false;
+  bool _secureTradingExpanded = true;
 
-  String get _resolvedSellerId =>
-      widget.userData['uid']?.toString() ??
-      FirebaseAuth.instance.currentUser?.uid ??
-      '';
-
-  int _sellerBidCount(List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
-    final sellerId = _resolvedSellerId;
-    if (sellerId.isEmpty) return 0;
-    return docs
-        .where((doc) => (doc.data()['sellerId']?.toString() ?? '') == sellerId)
-        .length;
+  String get _sellerUid {
+    final authUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    final localUid = (widget.userData['uid'] ?? '').toString().trim();
+    return authUid.isNotEmpty ? authUid : localUid;
   }
 
-  @override
-  void initState() {
-    super.initState();
-    _installGlobalErrorGuard();
-    _setupCachedStreams();
-    _weatherFuture = _fetchWeatherViewData();
-    _listenIncomingBids();
+  String get _sellerName {
+    final raw = (widget.userData['name'] ?? '').toString().trim();
+    return raw.isEmpty ? 'Seller' : raw;
   }
 
-  @override
-  void dispose() {
-    _bidsSubscription?.cancel();
-    _scrollController.dispose();
-    FlutterError.onError = _previousFlutterErrorHandler;
-    super.dispose();
-  }
-
-  void _installGlobalErrorGuard() {
-    _previousFlutterErrorHandler = FlutterError.onError;
-    FlutterError.onError = (FlutterErrorDetails details) {
-      _previousFlutterErrorHandler?.call(details);
-      if (!mounted || _widgetErrorDetected) return;
-      setState(() {
-        _widgetErrorDetected = true;
-      });
-    };
-  }
-
-  void _setupCachedStreams() {
-    final String sellerId = _resolvedSellerId;
-    if (sellerId.isNotEmpty) {
-      _incomingBidsStream = _marketplaceService.getSellerIncomingBidsStream(
-        sellerId,
-      );
+  Stream<QuerySnapshot<Map<String, dynamic>>> _sellerListingsStream() {
+    if (_sellerUid.isEmpty) {
+      return FirebaseFirestore.instance
+          .collection('listings')
+          .where('sellerId', isEqualTo: '__none__')
+          .snapshots();
     }
+
+    return FirebaseFirestore.instance
+        .collection('listings')
+        .where('sellerId', isEqualTo: _sellerUid)
+        .snapshots();
   }
 
-  Future<_WeatherViewData?> _fetchWeatherViewData() async {
-    try {
-      final String district =
-          widget.userData['district']?.toString() ?? "Lahore";
-      final String crop = widget.userData['crop']?.toString() ?? "Gandum";
-
-      final data = await _weatherService.getWeatherData(district);
-      String advisory = "�&��س�& ک�R �&ع����&ات دست�Rاب � ہ�Rں ہ�Rں�";
-
-      if ((data['success'] == true) && data.isNotEmpty) {
-        advisory = await _weatherService.getAIAdvisory(
-          data['condition'] ?? "Clear",
-          data['temp'] ?? 25,
-          crop,
-        );
-      }
-
-      return _WeatherViewData(data: data, advisory: advisory, failed: false);
-    } catch (_) {
-      return const _WeatherViewData(data: null, advisory: '', failed: true);
-    }
-  }
-
-  Future<void> _refreshWeather() async {
-    if (!mounted) return;
-    setState(() {
-      _weatherFuture = _fetchWeatherViewData();
-    });
-    await _weatherFuture;
-  }
-
-  void _listenIncomingBids() {
-    final stream = _incomingBidsStream;
-    if (stream == null) return;
-
-    _bidsSubscription = stream.listen(
-      (snapshot) {
-        if (!mounted) return;
-
-        final int count = _sellerBidCount(snapshot.docs);
-        if (_lastBidCount >= 0 && count > _lastBidCount) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(duration: Duration(seconds: 5),
-              behavior: SnackBarBehavior.floating,
-              content: Text('Nayi boli receive hui hai!'),
-            ),
-          );
-        }
-
-        _lastBidCount = count;
-      },
-      onError: (error) {
-        debugPrint(
-          'SELLER_INCOMING_BIDS_ERROR|ts=${DateTime.now().toIso8601String()}|error=$error',
-        );
-      },
-    );
-  }
-
-  Future<void> _openDealWhatsApp() async {
-    final currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
-    if (currentUid.isEmpty) return;
-
-    try {
-      final dealSnap = await FirebaseFirestore.instance
+  Stream<QuerySnapshot<Map<String, dynamic>>> _sellerDealsStream() {
+    if (_sellerUid.isEmpty) {
+      return FirebaseFirestore.instance
           .collection('deals')
-          .where('sellerId', isEqualTo: currentUid)
-          .orderBy('createdAt', descending: true)
-          .limit(10)
-          .get();
-
-      final paidDealDoc = _firstPaidDeal(dealSnap.docs);
-      if (paidDealDoc == null) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            duration: Duration(seconds: 5),
-            behavior: SnackBarBehavior.floating,
-            content: Text('WhatsApp ایسکرو ادائیگی کے بعد فعال ہوتا ہے۔'),
-          ),
-        );
-        return;
-      }
-
-      final dealDoc = paidDealDoc;
-      final dealData = dealDoc.data();
-      final dealId = dealDoc.id;
-      final buyerId = (dealData['buyerId'] ?? '').toString().trim();
-      final product =
-          (dealData['productName'] ?? dealData['product'] ?? 'Fasal')
-              .toString()
-              .trim();
-
-      if (buyerId.isEmpty) {
-        throw Exception('Buyer record missing for this deal.');
-      }
-
-      final buyerSnap = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(buyerId)
-          .get();
-      final buyerData = buyerSnap.data() ?? <String, dynamic>{};
-      final rawPhone = (buyerData['phone'] ?? buyerData['phoneNumber'] ?? '')
-          .toString();
-      final waPhone = _normalizeWaPhone(rawPhone);
-      if (waPhone.isEmpty) {
-        throw Exception('خریدار کا WhatsApp نمبر دستیاب نہیں ہے۔');
-      }
-
-      final message =
-          'السلام علیکم۔ ڈیل آئی ڈی: $dealId کے حوالے سے رابطہ کر رہا ہوں۔ پروڈکٹ: $product';
-      final uri = Uri.parse(
-        'https://wa.me/$waPhone?text=${Uri.encodeComponent(message)}',
-      );
-
-      final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
-      if (!opened && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(duration: Duration(seconds: 5),
-            behavior: SnackBarBehavior.floating,
-            content: Text('WhatsApp کھولا نہیں جا سکا۔'),
-          ),
-        );
-      }
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          duration: const Duration(seconds: 5),
-          behavior: SnackBarBehavior.floating,
-          content: Text(e.toString().replaceAll('Exception: ', '')),
-        ),
-      );
+          .where('sellerId', isEqualTo: '__none__')
+          .snapshots();
     }
-  }
 
-  Query<Map<String, dynamic>> _sellerDealsQuery(String uid) {
     return FirebaseFirestore.instance
         .collection('deals')
-        .where('sellerId', isEqualTo: uid)
-        .orderBy('createdAt', descending: true)
-        .limit(10);
+        .where('sellerId', isEqualTo: _sellerUid)
+        .snapshots();
   }
 
-  QueryDocumentSnapshot<Map<String, dynamic>>? _firstPaidDeal(
-    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
-  ) {
-    for (final doc in docs) {
-      final paymentStatus = (doc.data()['paymentStatus'] ?? '')
-          .toString()
-          .toUpperCase();
-      if (paymentStatus == 'VERIFIED') {
-        return doc;
-      }
+  Stream<DocumentSnapshot<Map<String, dynamic>>> _sellerProfileStream() {
+    if (_sellerUid.isEmpty) {
+      return FirebaseFirestore.instance
+          .collection('users')
+          .doc('__none__')
+          .snapshots();
     }
-    return null;
+
+    return FirebaseFirestore.instance
+        .collection('users')
+        .doc(_sellerUid)
+        .snapshots();
   }
 
-  void _dismissPaymentBanner() {
-    _paymentBannerDismissed = true;
-    _paymentBannerVisible = false;
-    ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
+  Future<void> _refreshDashboard() async {
+    if (_sellerUid.isNotEmpty) {
+      await Future.wait([
+        FirebaseFirestore.instance
+            .collection('listings')
+            .where('sellerId', isEqualTo: _sellerUid)
+            .limit(25)
+            .get(),
+        FirebaseFirestore.instance
+            .collection('deals')
+            .where('sellerId', isEqualTo: _sellerUid)
+            .limit(25)
+            .get(),
+        FirebaseFirestore.instance.collection('users').doc(_sellerUid).get(),
+      ]);
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _lastSyncedAt = DateTime.now();
+    });
   }
 
-  void _showPaymentReceivedBanner() {
-    if (!mounted || _paymentBannerVisible || _paymentBannerDismissed) return;
-    _paymentBannerVisible = true;
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.showMaterialBanner(
-      MaterialBanner(
-        backgroundColor: const Color(0xFF0E3A66),
-        leading: const Icon(
-          Icons.verified_rounded,
-          color: Colors.lightGreenAccent,
-        ),
-        content: TweenAnimationBuilder<double>(
-          tween: Tween<double>(begin: 0.88, end: 1),
-          duration: const Duration(milliseconds: 540),
-          curve: Curves.easeOutBack,
-          builder: (context, value, child) =>
-              Transform.scale(scale: value, child: child),
-          child: const Text(
-            'Payment Received: خریدار کی ادائیگی تصدیق ہو گئی ہے۔ اب آپ اعتماد کے ساتھ مال روانہ کر سکتے ہیں۔',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: _dismissPaymentBanner,
-            child: const Text('Theek Hai', style: TextStyle(color: Colors.amber)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _normalizeWaPhone(String raw) {
-    final digits = raw.replaceAll(RegExp(r'[^0-9+]'), '');
-    if (digits.isEmpty) return '';
-
-    if (digits.startsWith('+')) {
-      return digits.substring(1);
-    }
-
-    if (digits.startsWith('00')) {
-      return digits.substring(2);
-    }
-
-    if (digits.startsWith('92')) {
-      return digits;
-    }
-
-    if (digits.startsWith('0')) {
-      return '92${digits.substring(1)}';
-    }
-
-    return '92$digits';
+  Future<void> _logout() async {
+    HapticFeedback.mediumImpact();
+    await FirebaseAuth.instance.signOut();
+    if (!mounted) return;
+    Navigator.of(context).pushNamedAndRemoveUntil(Routes.welcome, (route) => false);
   }
 
   @override
   Widget build(BuildContext context) {
-    const goldColor = Color(0xFFFFD700);
-    const darkGreen = Color(0xFF011A0A);
-
     return Scaffold(
-      backgroundColor: darkGreen,
-      appBar: CustomAppBar(
-        centerTitle: true,
+      backgroundColor: _greenDark,
+      appBar: AppBar(
+        elevation: 0,
         backgroundColor: Colors.transparent,
-        titleWidget: Image.asset(
-          'assets/logo.png',
-          height: 34,
-          fit: BoxFit.contain,
-          filterQuality: FilterQuality.high,
+        titleSpacing: 12,
+        title: const Text(
+          'Seller Dashboard / ڈیش بورڈ',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(color: AppColors.primaryText, fontWeight: FontWeight.w700),
         ),
         actions: [
-          if ((FirebaseAuth.instance.currentUser?.uid ?? '').isNotEmpty)
-            StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-              stream: _sellerDealsQuery(
-                FirebaseAuth.instance.currentUser!.uid,
-              ).snapshots(),
-              builder: (context, snapshot) {
-                final docs = snapshot.data?.docs ?? const [];
-                final canChat = _firstPaidDeal(docs) != null;
-                if (!canChat) return const SizedBox.shrink();
-                return IconButton(
-                  onPressed: () {
-                    HapticFeedback.lightImpact();
-                    _openDealWhatsApp();
-                  },
-                  icon: const Icon(Icons.chat, color: Colors.amber),
-                  tooltip: 'Deal WhatsApp',
-                );
-              },
-            ),
-          CustomerSupportIconAction(
-            userName: (widget.userData['name'] ?? '').toString(),
+          IconButton(
+            tooltip: 'Logout / لاگ آؤٹ',
+            onPressed: _logout,
+            icon: const Icon(Icons.logout_rounded, color: _gold),
           ),
         ],
       ),
-
-      floatingActionButton: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          CustomerSupportFab(
-            userName: (widget.userData['name'] ?? '').toString(),
-            mini: true,
-          ),
-          const SizedBox(height: 10),
-          FloatingActionButton.extended(
-            backgroundColor: goldColor,
-            elevation: 10,
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) =>
-                      AddListingScreen(userData: widget.userData),
-                ),
-              );
-            },
-            icon: const Icon(
-              Icons.add_shopping_cart_rounded,
-              color: Colors.black,
-              size: 24,
-            ),
-            label: const Text(
-              "Maal Bechein",
-              style: TextStyle(
-                color: Colors.black,
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
-              ),
-            ),
-          ),
-        ],
-      ),
-
       body: RefreshIndicator(
-        color: goldColor,
-        onRefresh: _refreshWeather,
-        child: SingleChildScrollView(
-          controller: _scrollController,
+        color: _gold,
+        onRefresh: _refreshDashboard,
+        child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildHeader(),
-              const SizedBox(height: 20),
-              RepaintBoundary(child: _buildWeatherCard()),
-              const SizedBox(height: 15),
-              const VerseCard(),
-              const SizedBox(height: 12),
-              _buildSellerTrustCard(),
-              const SizedBox(height: 15),
-              const RepaintBoundary(child: _MarketRatesTickerSection()),
-              const SizedBox(height: 25),
-              const Text(
-                "Main Menu",
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 15),
-
-              GridView.count(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                crossAxisCount: 2,
-                crossAxisSpacing: 15,
-                mainAxisSpacing: 15,
-                children: [
-                  _buildMenuCard("�&�Rرا اسٹاک", Icons.inventory_2_rounded, () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (c) => const SellerListingsScreen(),
-                      ),
-                    );
-                  }),
-                  _buildBidsMenuCard(),
-                  _buildMenuCard("�&� ���R ر�Rٹس", Icons.trending_up_rounded, () {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(duration: Duration(seconds: 5),
-                        content: Text("ر�Rٹس اپ ���Rٹ ہ�� رہ� ہ�Rں..."),
-                      ),
-                    );
-                  }),
-                  _buildMenuCard(
-                    "��ا�ٹ",
-                    Icons.account_balance_wallet_rounded,
-                    () {
-                      _openWalletSheet();
-                    },
-                  ),
-                ],
-              ),
-              const SizedBox(height: 100),
-            ],
-          ),
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 24),
+          children: [
+            _buildGreetingCard(),
+            const SizedBox(height: 10),
+            _buildAyatCard(),
+            const SizedBox(height: 12),
+            _buildStatsRow(),
+            const SizedBox(height: 8),
+            _buildLastSyncedLabel(),
+            const SizedBox(height: 14),
+            const _SectionTitle(
+              titleEn: 'Primary Actions',
+              titleUr: 'بنیادی کام',
+            ),
+            const SizedBox(height: 10),
+            _buildPrimaryActionGrid(),
+            const SizedBox(height: 14),
+            const _SectionTitle(
+              titleEn: 'Action Center',
+              titleUr: 'اہم الرٹس',
+            ),
+            const SizedBox(height: 8),
+            _buildActionCenter(),
+            const SizedBox(height: 14),
+            _buildSecureTradingCard(),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildHeader() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          "Assalam-o-Alaikum,",
-          style: TextStyle(color: Colors.white60, fontSize: 14),
+  Widget _buildGreetingCard() {
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: _sellerProfileStream(),
+      builder: (context, snapshot) {
+        final profile = snapshot.data?.data() ?? const <String, dynamic>{};
+        final phoneVerified =
+            _readBool(profile['phoneVerified']) ||
+            _readBool(profile['isPhoneVerified']);
+        final videoVerified =
+            _readBool(profile['videoVerified']) ||
+            _readBool(profile['isFaceVerified']);
+        final trusted = phoneVerified && videoVerified;
+
+        final reasons = <String>[
+          if (!videoVerified) 'Video Verification Required / ویڈیو تصدیق لازمی',
+          if (!phoneVerified) 'Phone Not Verified / فون تصدیق نہیں',
+        ];
+
+        return _DashboardCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const CircleAvatar(
+                    radius: 22,
+                    backgroundColor: AppColors.softOverlayGold,
+                    child: Icon(Icons.person_rounded, color: _gold),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Assalam-o-Alaikum / السلام علیکم',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: AppColors.secondaryText, fontSize: 13),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          _sellerName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: AppColors.primaryText,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  _TrustBadge(isVerified: trusted),
+                ],
+              ),
+              if (reasons.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: reasons
+                      .map(
+                        (message) => _SignalChip(
+                          text: message,
+                          color: const Color(0xFFFFB74D),
+                          icon: Icons.warning_amber_rounded,
+                        ),
+                      )
+                      .toList(growable: false),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildAyatCard() {
+    return _DashboardCard(
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          initiallyExpanded: _ayatExpanded,
+          onExpansionChanged: (value) {
+            setState(() {
+              _ayatExpanded = value;
+            });
+          },
+          tilePadding: EdgeInsets.zero,
+          collapsedIconColor: _gold,
+          iconColor: _gold,
+          title: const Text(
+            'Motivation / رہنمائی',
+            style: TextStyle(color: _gold, fontWeight: FontWeight.w700),
+          ),
+          children: const [
+            Align(
+              alignment: Alignment.centerRight,
+              child: Directionality(
+                textDirection: TextDirection.rtl,
+                child: Text(
+                  'وَأَوْفُوا الْكَيْلَ وَالْمِيزَانَ بِالْقِسْطِ',
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    color: _gold,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 18,
+                  ),
+                ),
+              ),
+            ),
+            SizedBox(height: 5),
+            Directionality(
+              textDirection: TextDirection.rtl,
+              child: Text(
+                'ناپ اور تول انصاف کے ساتھ پورا کرو',
+                style: TextStyle(
+                  color: AppColors.primaryText,
+                  fontSize: 15,
+                  fontFamily: 'JameelNoori',
+                ),
+              ),
+            ),
+            SizedBox(height: 3),
+            Directionality(
+              textDirection: TextDirection.rtl,
+              child: Text(
+                'سورۃ الانعام 6:152',
+                style: TextStyle(
+                  color: AppColors.secondaryText,
+                  fontSize: 13,
+                  fontFamily: 'JameelNoori',
+                ),
+              ),
+            ),
+          ],
         ),
-        Text(
-          widget.userData['fullName'] ?? "Kisan Bhai",
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 24,
-            fontWeight: FontWeight.bold,
+      ),
+    );
+  }
+
+  Widget _buildStatsRow() {
+    return Row(
+      children: [
+        Expanded(
+          child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: _sellerListingsStream(),
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return const _StatCard(
+                  titleEn: 'Active Listings',
+                  titleUr: 'فعال لسٹنگز',
+                  value: '—',
+                  icon: Icons.storefront_rounded,
+                  subtitle: 'خرابی / Error',
+                );
+              }
+              if (!snapshot.hasData) {
+                return const _StatSkeleton();
+              }
+
+              final count = snapshot.data!.docs.where((doc) {
+                final status = (doc.data()['status'] ?? '')
+                    .toString()
+                    .toLowerCase();
+                return status.isEmpty || status == 'active' || status == 'live';
+              }).length;
+
+              return _StatCard(
+                titleEn: 'Active Listings',
+                titleUr: 'فعال لسٹنگز',
+                value: '$count',
+                icon: Icons.storefront_rounded,
+                subtitle: 'Realtime / براہِ راست',
+              );
+            },
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: _sellerDealsStream(),
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return const _StatCard(
+                  titleEn: 'Pending Deals',
+                  titleUr: 'زیر التواء سودے',
+                  value: '—',
+                  icon: Icons.pending_actions_rounded,
+                  subtitle: 'خرابی / Error',
+                );
+              }
+              if (!snapshot.hasData) {
+                return const _StatSkeleton();
+              }
+
+              final pending = snapshot.data!.docs.where((doc) {
+                final data = doc.data();
+                final status = (data['status'] ?? '').toString().toLowerCase();
+                final payment = (data['paymentStatus'] ?? '')
+                    .toString()
+                    .toLowerCase();
+                return status.contains('pending') ||
+                    payment.contains('pending');
+              }).length;
+
+              return _StatCard(
+                titleEn: 'Pending Deals',
+                titleUr: 'زیر التواء سودے',
+                value: '$pending',
+                icon: Icons.pending_actions_rounded,
+                subtitle: 'Realtime / براہِ راست',
+              );
+            },
           ),
         ),
       ],
     );
   }
 
-  Widget _buildSellerTrustCard() {
-    final sellerUid = FirebaseAuth.instance.currentUser?.uid ?? '';
-    if (sellerUid.isEmpty) return const SizedBox.shrink();
-
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: FirebaseFirestore.instance
-          .collection('deals')
-          .where('sellerId', isEqualTo: sellerUid)
-          .orderBy('createdAt', descending: true)
-          .limit(10)
-          .snapshots(),
-      builder: (context, snapshot) {
-        final docs = snapshot.data?.docs ?? const [];
-        final hasVerified = docs.any(
-          (doc) =>
-              (doc.data()['paymentStatus'] ?? '').toString().toUpperCase() ==
-              'VERIFIED',
-        );
-        if (!hasVerified) return const SizedBox.shrink();
-
-        if (!_paymentBannerDismissed && !_paymentBannerVisible) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!mounted) return;
-            _showPaymentReceivedBanner();
-          });
-        }
-
-        return ClipRRect(
-          borderRadius: BorderRadius.circular(18),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: const Color(0xFF0E3A66).withValues(alpha: 0.7),
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: Colors.amber.withValues(alpha: 0.85)),
-              ),
-              child: const Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(Icons.verified, color: Colors.blueAccent, size: 22),
-                  SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'خ��شخبر�R! خر�Rدار ک�R ر��& ا�R���&�  ک�� �&��ص��� ہ�� � ک�R ہ�� اب آپ اط�&�R� ا�  س� �&ا� ���R��R��ر کر سکت� ہ�Rں� �&ا� ک�R تصد�R� ہ��ت� ہ�R ر��& آپ ک� ��ا�ٹ �&�Rں آ جائ� گ�R�',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                        fontFamily: 'Jameel Noori Nastaliq',
-                        height: 1.35,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
+  Widget _buildLastSyncedLabel() {
+    final label =
+        '${_two(_lastSyncedAt.hour)}:${_two(_lastSyncedAt.minute)} ${_lastSyncedAt.hour >= 12 ? 'PM' : 'AM'}';
+    return Text(
+      'Last synced / آخری اپڈیٹ: $label',
+      style: const TextStyle(color: AppColors.secondaryText, fontSize: 12),
     );
   }
 
-  Widget _buildWeatherCard() {
-    try {
-      if (_widgetErrorDetected) {
-        return const SizedBox.shrink();
-      }
-      return FutureBuilder<_WeatherViewData?>(
-        future: _weatherFuture,
-        builder: (context, snapshot) {
-          const goldColor = Color(0xFFFFD700);
-
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            final String districtLabel =
-                (widget.userData['district']?.toString().trim().isNotEmpty ??
-                    false)
-                ? widget.userData['district'].toString().trim()
-                : 'Lahore';
-            return Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [Color(0xFFB3E5FC), Color(0xFF4FC3F7)],
+  Widget _buildPrimaryActionGrid() {
+    return GridView.count(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      crossAxisCount: 2,
+      crossAxisSpacing: 10,
+      mainAxisSpacing: 10,
+      childAspectRatio: 1.14,
+      children: [
+        _ActionTile(
+          icon: Icons.add_business_rounded,
+          titleEn: 'Add Listing',
+          titleUr: 'مال بیچیں',
+          semanticsLabel: 'Add Listing',
+          onTap: () {
+            HapticFeedback.lightImpact();
+            Navigator.of(context).pushNamed(
+              Routes.postListingOption,
+              arguments: <String, dynamic>{'userData': widget.userData},
+            );
+          },
+        ),
+        _ActionTile(
+          icon: Icons.view_list_rounded,
+          titleEn: 'My Listings',
+          titleUr: 'میری لسٹنگز',
+          semanticsLabel: 'My Listings',
+          onTap: () {
+            HapticFeedback.lightImpact();
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const SellerListingsScreen()),
+            );
+          },
+        ),
+        _ActionTile(
+          icon: Icons.gavel_rounded,
+          titleEn: 'Bids',
+          titleUr: 'بولیاں',
+          semanticsLabel: 'Bids',
+          onTap: () {
+            HapticFeedback.lightImpact();
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const SellerBidsScreen(
+                  listingId: 'ALL',
+                  productName: 'Tamam Faslein',
+                  basePrice: 0,
                 ),
-                borderRadius: BorderRadius.circular(15),
-                border: Border.all(color: Colors.white10),
               ),
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 38,
-                    height: 38,
-                    child: Lottie.asset(
-                      'assets/lottie/sun.json',
-                      repeat: true,
-                      fit: BoxFit.contain,
-                      errorBuilder: (context, error, stackTrace) => const Icon(
-                        Icons.wb_sunny,
-                        color: goldColor,
-                        size: 24,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+            );
+          },
+        ),
+        _ActionTile(
+          icon: Icons.handshake_outlined,
+          titleEn: 'Deals',
+          titleUr: 'سودے',
+          semanticsLabel: 'Deals',
+          onTap: () {
+            HapticFeedback.lightImpact();
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Deals screen coming soon')),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildActionCenter() {
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: _sellerProfileStream(),
+      builder: (context, userSnapshot) {
+        return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: _sellerListingsStream(),
+          builder: (context, listingsSnapshot) {
+            return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+              stream: _sellerDealsStream(),
+              builder: (context, dealsSnapshot) {
+                if (userSnapshot.hasError ||
+                    listingsSnapshot.hasError ||
+                    dealsSnapshot.hasError) {
+                  return _DashboardCard(
+                    child: Row(
                       children: [
-                        Text(
-                          '�&��س�& اپ���Rٹ ہ�� رہا ہ�... ($districtLabel)',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
+                        const Icon(
+                          Icons.wifi_off_rounded,
+                          color: AppColors.accentGoldAccent,
+                        ),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Text(
+                            'آف لائن مسئلہ، دوبارہ کوشش کریں',
+                            style: TextStyle(color: AppColors.primaryText),
                           ),
                         ),
-                        const Text(
-                          'درجہ حرارت: --°C',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: Colors.white70,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const Text(
-                          '�&��س�& �&ع�&��� ک� �&طاب� ہ��',
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: Colors.white70,
-                            fontSize: 11,
-                            fontFamily: 'Jameel Noori',
-                          ),
+                        TextButton(
+                          onPressed: _refreshDashboard,
+                          child: const Text('Retry'),
                         ),
                       ],
                     ),
-                  ),
-                ],
-              ),
-            );
-          }
+                  );
+                }
 
-          final model = snapshot.data;
-          if (model == null || model.failed || model.data == null) {
-            return Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.05),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.white10),
-              ),
-              child: const Text(
-                'Mausam ki malumat mausoos nahi ho sakin',
-                style: TextStyle(
-                  color: Colors.white70,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            );
-          }
+                if (!userSnapshot.hasData ||
+                    !listingsSnapshot.hasData ||
+                    !dealsSnapshot.hasData) {
+                  return const _DashboardCard(child: _ActionCenterSkeleton());
+                }
 
-          final weatherData = model.data!;
-          final advisory = model.advisory;
-          final bool showWarning = weatherData['isRainLikely'] == true;
-          final String districtLabel =
-              (widget.userData['district']?.toString().trim().isNotEmpty ??
-                  false)
-              ? widget.userData['district'].toString().trim()
-              : 'Lahore';
-          final String condition =
-              (weatherData['description'] ??
-                      weatherData['condition'] ??
-                      'Clear')
-                  .toString();
-          final String romanCondition = _romanUrduCondition(condition);
-          final dynamic rawTemp = weatherData['temp'];
-          final double? parsedTemp = rawTemp is num
-              ? rawTemp.toDouble()
-              : double.tryParse(rawTemp?.toString() ?? '');
-          final String tempLabel = parsedTemp == null
-              ? '--°C'
-              : '${parsedTemp.round().toInt()}°C';
-          final advisoryText = () {
-            final raw = advisory.trim();
-            final hasEnglish = RegExp(r'[A-Za-z]').hasMatch(raw);
-            if (raw.isEmpty || raw.toLowerCase().contains('null') || hasEnglish) {
-              return showWarning
-                  ? 'احت�Rاط کر�Rں�R بارش کا ا�&کا�  �&��ج��د ہ��'
-                  : '�&��س�& �&ع�&��� ک� �&طاب� ہ��';
-            }
-            return raw;
-          }();
-          final gradients = _weatherGradientForTime(DateTime.now());
+                final profile =
+                    userSnapshot.data?.data() ?? const <String, dynamic>{};
+                final listings =
+                    listingsSnapshot.data?.docs ??
+                    const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+                final deals =
+                    dealsSnapshot.data?.docs ??
+                    const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
 
-          return Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: gradients,
-              ),
-              borderRadius: BorderRadius.circular(15),
-              border: Border.all(
-                color: showWarning
-                    ? Colors.redAccent.withValues(alpha: 0.7)
-                    : Colors.white10,
-              ),
-            ),
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 38,
-                  height: 38,
-                  child: Lottie.asset(
-                    _weatherAnimationAsset(condition),
-                    repeat: true,
-                    fit: BoxFit.contain,
-                    errorBuilder: (context, error, stackTrace) => Icon(
-                      _weatherIconForCondition(condition),
-                      color: showWarning ? Colors.redAccent : goldColor,
-                      size: 24,
+                final alerts = <_ActionAlert>[];
+
+                final videoVerified =
+                    _readBool(profile['videoVerified']) ||
+                    _readBool(profile['isFaceVerified']);
+                if (!videoVerified) {
+                  alerts.add(
+                    const _ActionAlert(
+                      title: 'Verification Video لازمی',
+                      subtitle: 'ہر نئی لسٹنگ کیلئے GPS ویڈیو ضروری ہے',
+                      color: Color(0xFFFFB74D),
+                      icon: Icons.videocam_off_rounded,
                     ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
+                  );
+                }
+
+                final hasLowPriceWarning = listings.any((doc) {
+                  final data = doc.data();
+                  final price =
+                      _toDouble(data['price']) ?? _toDouble(data['rate']) ?? 0;
+                  final market =
+                      _toDouble(data['marketRate']) ??
+                      _toDouble(data['market_average']) ??
+                      _toDouble(data['marketAverage']) ??
+                      0;
+                  if (price <= 0 || market <= 0) return false;
+                  return price < market * 0.65 || price > market * 1.65;
+                });
+
+                if (hasLowPriceWarning) {
+                  alerts.add(
+                    const _ActionAlert(
+                      title: 'Low price warning / کم قیمت الرٹ',
+                      subtitle: 'کچھ ریٹس مارکیٹ سے کافی مختلف ہیں',
+                      color: Color(0xFFFFA726),
+                      icon: Icons.trending_down_rounded,
+                    ),
+                  );
+                }
+
+                final suspiciousFlag =
+                    _readBool(profile['suspiciousActivity']) ||
+                    listings.any((doc) {
+                      final data = doc.data();
+                      final suspicious = _readBool(data['isSuspicious']);
+                      final risk = _toDouble(data['riskScore']) ?? 0;
+                      return suspicious || risk >= 70;
+                    });
+
+                if (suspiciousFlag) {
+                  alerts.add(
+                    const _ActionAlert(
+                      title: 'Suspicious activity flag / مشکوک',
+                      subtitle: 'AI نے ممکنہ فراڈ سرگرمی نشان زد کی',
+                      color: Color(0xFFE53935),
+                      icon: Icons.report_problem_rounded,
+                    ),
+                  );
+                }
+
+                final submittedDeals = deals
+                    .where((doc) {
+                      final data = doc.data();
+                      final paymentStatus = (data['paymentStatus'] ?? '')
+                          .toString()
+                          .toLowerCase()
+                          .trim();
+                      return paymentStatus == 'payment_submitted';
+                    })
+                    .toList(growable: false);
+
+                if (submittedDeals.isNotEmpty) {
+                  alerts.add(
+                    _ActionAlert(
+                      title:
+                          'Deal update received / سودا اپڈیٹ (${submittedDeals.length})',
+                      subtitle:
+                          'Buyer ne response diya hai, براہِ راست رابطہ کریں',
+                      color: const Color(0xFF26A69A),
+                      icon: Icons.local_shipping_rounded,
+                    ),
+                  );
+                }
+
+                if (alerts.isEmpty && submittedDeals.isEmpty) {
+                  return _buildSystemStatusCard();
+                }
+
+                return _DashboardCard(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '$romanCondition ($districtLabel)',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 13,
-                        ),
-                      ),
-                      Text(
-                        'درجہ حرارت: $tempLabel',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      Text(
-                        advisoryText,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 11,
-                          fontFamily: 'Jameel Noori',
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
-      );
-    } catch (_) {
-      return const SizedBox.shrink();
-    }
-  }
-
-  List<Color> _weatherGradientForTime(DateTime now) {
-    final hour = now.hour;
-    if (hour >= 5 && hour < 16) {
-      return const [Color(0xFFB3E5FC), Color(0xFF4FC3F7)];
-    }
-    if (hour >= 16 && hour < 24) {
-      return const [Color(0xFFFF7043), Color(0xFF6A1B9A)];
-    }
-    return const [Color(0xFF5E35B1), Color(0xFF311B92)];
-  }
-
-  String _weatherAnimationAsset(String condition) {
-    final lower = condition.toLowerCase();
-    if (lower.contains('rain') ||
-        lower.contains('drizzle') ||
-        lower.contains('storm')) {
-      return 'assets/lottie/rain.json';
-    }
-    if (lower.contains('sun') || lower.contains('clear')) {
-      return 'assets/lottie/sun.json';
-    }
-    return 'assets/lottie/cloudy.json';
-  }
-
-  IconData _weatherIconForCondition(String condition) {
-    final lower = condition.toLowerCase();
-    if (lower.contains('rain') ||
-        lower.contains('drizzle') ||
-        lower.contains('storm')) {
-      return Icons.thunderstorm;
-    }
-    if (lower.contains('cloud') ||
-        lower.contains('overcast') ||
-        lower.contains('mist')) {
-      return Icons.cloud;
-    }
-    if (lower.contains('sun') || lower.contains('clear')) {
-      return Icons.wb_sunny;
-    }
-    return Icons.wb_cloudy;
-  }
-
-  String _romanUrduCondition(String condition) {
-    final lower = condition.toLowerCase();
-    if (lower.contains('rain') ||
-        lower.contains('drizzle') ||
-        lower.contains('storm')) {
-      return 'بارش';
-    }
-    if (lower.contains('cloud') ||
-        lower.contains('overcast') ||
-        lower.contains('mist')) {
-      return 'باد�';
-    }
-    if (lower.contains('sun') || lower.contains('clear')) {
-      return 'صاف آس�&ا� ';
-    }
-    return 'باد�';
-  }
-
-  Widget _buildMenuCard(
-    String title,
-    IconData icon,
-    VoidCallback onTap, {
-    bool showBadge = false,
-  }) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: () {
-          HapticFeedback.lightImpact();
-          onTap();
-        },
-        borderRadius: BorderRadius.circular(20),
-        child: Container(
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.05),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.white10),
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  CircleAvatar(
-                    backgroundColor: const Color(
-                      0xFFFFD700,
-                    ).withValues(alpha: 0.1),
-                    child: Icon(icon, color: const Color(0xFFFFD700)),
-                  ),
-                  if (showBadge)
-                    const Positioned(
-                      right: -1,
-                      top: -1,
-                      child: CircleAvatar(
-                        radius: 5,
-                        backgroundColor: Colors.redAccent,
-                      ),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Text(
-                title,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 14,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildBidsMenuCard() {
-    final stream = _incomingBidsStream;
-    if (stream == null) {
-      return _buildMenuCard("ب����Rاں (Bids)", Icons.gavel_rounded, () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (c) => const SellerBidsScreen(
-              listingId: "ALL",
-              productName: "Tamam Faslein",
-              basePrice: 0.0,
-            ),
-          ),
-        );
-      });
-    }
-
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: stream,
-      builder: (context, snapshot) {
-        final sellerCount = _sellerBidCount(snapshot.data?.docs ?? const []);
-        if (snapshot.hasData) {
-          debugPrint('UI REFRESHED: Bids found = $sellerCount');
-        } else {
-          debugPrint('UI REFRESHED: Bids found = 0');
-        }
-        final bool showBadge = sellerCount > 0;
-        return _buildMenuCard("ب����Rاں (Bids)", Icons.gavel_rounded, () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (c) => const SellerBidsScreen(
-                listingId: "ALL",
-                productName: "Tamam Faslein",
-                basePrice: 0.0,
-              ),
-            ),
-          );
-        }, showBadge: showBadge);
-      },
-    );
-  }
-
-  Future<void> _openWalletSheet() async {
-    final sellerUid = FirebaseAuth.instance.currentUser?.uid ?? '';
-    if (sellerUid.isEmpty) return;
-
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: const Color(0xFF011A0A),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
-      ),
-      builder: (context) {
-        return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-          stream: FirebaseFirestore.instance
-              .collection('users')
-              .doc(sellerUid)
-              .snapshots(),
-          builder: (context, snapshot) {
-            final map = snapshot.data?.data() ?? <String, dynamic>{};
-            final bool isFlagged = map['isAccountFlagged'] == true;
-            final pending = (map['pendingBalance'] is num)
-                ? (map['pendingBalance'] as num).toDouble()
-                : double.tryParse((map['pendingBalance'] ?? '0').toString()) ??
-                      0.0;
-            final available = (map['availableBalance'] is num)
-                ? (map['availableBalance'] as num).toDouble()
-                : double.tryParse(
-                        (map['availableBalance'] ?? '0').toString(),
-                      ) ??
-                      0.0;
-            final lifetime = (map['lifetimeEarnings'] is num)
-                ? (map['lifetimeEarnings'] as num).toDouble()
-                : double.tryParse(
-                        (map['lifetimeEarnings'] ?? '0').toString(),
-                      ) ??
-                      0.0;
-
-            return Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Seller Wallet / س�R�ر ��ا�ٹ',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w800,
-                      fontFamily: 'Jameel Noori Nastaliq',
-                      fontSize: 18,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    'Pending Balance: ${_pkr.format(pending)}',
-                    style: const TextStyle(color: Colors.white70),
-                  ),
-                  Text(
-                    'Available Balance: ${_pkr.format(available)}',
-                    style: const TextStyle(color: Colors.white70),
-                  ),
-                  Text(
-                    'Lifetime Earnings: ${_pkr.format(lifetime)}',
-                    style: const TextStyle(
-                      color: Colors.lightGreenAccent,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  const Text(
-                    'Payment History',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    height: 170,
-                    child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                      stream: FirebaseFirestore.instance
-                          .collection('transactions')
-                          .where('type', isEqualTo: 'payout')
-                          .where('sellerId', isEqualTo: sellerUid)
-                          .orderBy('timestamp', descending: true)
-                          .limit(10)
-                          .snapshots(),
-                      builder: (context, txSnapshot) {
-                        if (txSnapshot.connectionState ==
-                            ConnectionState.waiting) {
-                          return const Center(
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          );
-                        }
-                        final txDocs = txSnapshot.data?.docs ?? const [];
-                        if (txDocs.isEmpty) {
-                          return const Center(
-                            child: Text(
-                              'No payout history yet.',
-                              style: TextStyle(color: Colors.white60),
-                            ),
-                          );
-                        }
-                        return ListView.separated(
-                          itemCount: txDocs.length,
-                          separatorBuilder: (_, _) => const Divider(
-                            color: Colors.white12,
-                            height: 10,
-                          ),
-                          itemBuilder: (context, index) {
-                            final tx = txDocs[index].data();
-                            final net = (tx['amountPaid'] is num)
-                                ? (tx['amountPaid'] as num).toDouble()
-                                : double.tryParse(
-                                        (tx['amountPaid'] ?? '0').toString(),
-                                      ) ??
-                                      0.0;
-                            final listingId =
-                                (tx['listingId'] ?? '--').toString();
-                            return ListTile(
-                              dense: true,
-                              contentPadding: EdgeInsets.zero,
-                              title: Text(
-                                'Deal: $listingId',
-                                style: const TextStyle(color: Colors.white70),
+                    children:
+                        alerts
+                            .take(3)
+                            .map(
+                              (alert) => Padding(
+                                padding: const EdgeInsets.only(bottom: 8),
+                                child: _ActionAlertTile(alert: alert),
                               ),
-                              trailing: Text(
-                                _pkr.format(net),
-                                style: const TextStyle(
-                                  color: Colors.lightGreenAccent,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            );
-                          },
-                        );
-                      },
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  if (isFlagged)
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: Colors.redAccent.withValues(alpha: 0.2),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: Colors.redAccent),
-                      ),
-                      child: const Text(
-                        'Security Violation: Withdraw actions are locked for this account.',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w700,
-                          fontFamily: 'Jameel Noori Nastaliq',
-                        ),
-                      ),
-                    ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: isFlagged
-                          ? null
-                          : () {
-                              HapticFeedback.lightImpact();
-                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(duration: Duration(seconds: 5),
-                                  content: Text('Withdraw request submitted.'),
+                            )
+                            .toList(growable: false)
+                          ..addAll(
+                            submittedDeals.take(2).map((dealDoc) {
+                              final deal = dealDoc.data();
+                              final product =
+                                  (deal['productName'] ??
+                                          deal['itemName'] ??
+                                          'Deal')
+                                      .toString();
+                              final listingId = (deal['listingId'] ?? '')
+                                  .toString();
+                              return Padding(
+                                padding: const EdgeInsets.only(top: 8),
+                                child: Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.all(10),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.primaryText.withValues(alpha: 0.06),
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(color: AppColors.primaryText24),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        product,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: AppColors.primaryText,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Row(
+                                        children: [
+                                          const Text(
+                                            'Deal: ',
+                                            style: TextStyle(
+                                              color: AppColors.secondaryText,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                          Expanded(
+                                            child: Text(
+                                              dealDoc.id,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                color: AppColors.secondaryText,
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      if (listingId.isNotEmpty)
+                                        Row(
+                                          children: [
+                                            const Text(
+                                              'Listing: ',
+                                              style: TextStyle(
+                                                color: AppColors.secondaryText,
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                            Expanded(
+                                              child: Text(
+                                                listingId,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: const TextStyle(
+                                                  color: AppColors.secondaryText,
+                                                  fontSize: 12,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      const SizedBox(height: 8),
+                                      SizedBox(
+                                        width: double.infinity,
+                                        child: ElevatedButton.icon(
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: _gold,
+                                            foregroundColor: AppColors.ctaTextDark,
+                                          ),
+                                          onPressed: () => _startDelivery(
+                                            dealId: dealDoc.id,
+                                            listingId: listingId,
+                                          ),
+                                          icon: const Icon(
+                                            Icons.local_shipping_rounded,
+                                          ),
+                                          label: const Text(
+                                            'Start Delivery / ڈیلیوری شروع کریں',
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               );
-                              Navigator.pop(context);
-                            },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.amber,
-                        foregroundColor: Colors.black,
-                      ),
-                      icon: const Icon(Icons.account_balance_wallet_rounded),
-                      label: const Text('Withdraw / ر��& � کا��Rں'),
-                    ),
+                            }),
+                          ),
                   ),
-                ],
-              ),
+                );
+              },
             );
           },
         );
       },
     );
   }
-}
 
-class _MarketRatesTickerSection extends StatefulWidget {
-  const _MarketRatesTickerSection();
+  Future<void> _startDelivery({
+    required String dealId,
+    required String listingId,
+  }) async {
+    try {
+      await FirebaseFirestore.instance.collection('deals').doc(dealId).set({
+        'currentStep': 'DELIVERY_PENDING',
+        'status': 'delivery_pending',
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
 
-  @override
-  State<_MarketRatesTickerSection> createState() =>
-      _MarketRatesTickerSectionState();
-}
-
-class _MarketRatesTickerSectionState extends State<_MarketRatesTickerSection> {
-  final MarketRateService _rateService = MarketRateService();
-  Timer? _timer;
-  List<MarketRate> _rates = const [];
-
-  @override
-  void initState() {
-    super.initState();
-    _rates = _rateService.getLatestRates();
-    _timer = Timer.periodic(const Duration(seconds: 6), (_) {
       if (!mounted) return;
-      final latest = _rateService.getLatestRates();
-      if (!_hasRatesChanged(latest, _rates)) return;
-      setState(() {
-        _rates = latest;
-      });
-    });
-  }
-
-  bool _hasRatesChanged(List<MarketRate> latest, List<MarketRate> current) {
-    if (latest.length != current.length) return true;
-    for (int i = 0; i < latest.length; i++) {
-      if (latest[i].cropName != current[i].cropName) return true;
-      if (latest[i].currentPrice != current[i].currentPrice) return true;
-      if (latest[i].change != current[i].change) return true;
-      if (latest[i].trend != current[i].trend) return true;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Delivery step started / ڈیلیوری مرحلہ شروع ہوگیا'),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to start delivery right now')),
+      );
     }
-    return false;
   }
 
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
+  Widget _buildSystemStatusCard() {
+    return _DashboardCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: const [
+          Text(
+            'System Status / سسٹم اسٹیٹس',
+            style: TextStyle(color: _gold, fontWeight: FontWeight.w700),
+          ),
+          SizedBox(height: 8),
+          _StatusOkLine(
+            text: 'All listings verified / تمام اشتہارات تصدیق شدہ ہیں',
+          ),
+          _StatusOkLine(text: 'No fraud alerts / کوئی فراڈ الرٹ نہیں ہے'),
+          _StatusOkLine(
+            text:
+                'Accepted bids unlock contact / قبول شدہ بولی پر رابطہ اَن لاک ہوتا ہے',
+          ),
+        ],
+      ),
+    );
   }
+
+  Widget _buildSecureTradingCard() {
+    return _DashboardCard(
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          initiallyExpanded: _secureTradingExpanded,
+          onExpansionChanged: (value) {
+            setState(() {
+              _secureTradingExpanded = value;
+            });
+          },
+          tilePadding: EdgeInsets.zero,
+          collapsedIconColor: _gold,
+          iconColor: _gold,
+          leading: const Icon(Icons.shield_rounded, color: _gold),
+          title: const Text(
+            'Secure Trading / محفوظ تجارت',
+            style: TextStyle(color: _gold, fontWeight: FontWeight.w700),
+          ),
+          children: const [
+            _SecurePoint(
+              en: 'After bid acceptance, buyer and seller connect directly',
+              ur: 'بولی قبول ہونے کے بعد خریدار اور فروخت کنندہ براہِ راست رابطہ کرتے ہیں',
+            ),
+            _SecurePoint(
+              en: 'Complete deal offline after verifying listing and contact details',
+              ur: 'لسٹنگ اور رابطہ کی تصدیق کے بعد براہِ راست سودا مکمل کریں',
+            ),
+            _SecurePoint(
+              en: 'Every listing requires a verification video with GPS',
+              ur: 'ہر اشتہار کے لیے GPS کے ساتھ تصدیقی ویڈیو لازمی ہے',
+            ),
+            _SecurePoint(
+              en: 'AI system monitors fraud and suspicious activity',
+              ur: 'مصنوعی ذہانت (AI) دھوکہ دہی اور مشکوک سرگرمیوں پر نظر رکھتی ہے',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static bool _readBool(dynamic value) {
+    if (value is bool) return value;
+    final text = value?.toString().toLowerCase() ?? '';
+    return text == 'true' || text == '1' || text == 'yes';
+  }
+
+  static double? _toDouble(dynamic value) {
+    if (value is num) return value.toDouble();
+    if (value is String) return double.tryParse(value);
+    return null;
+  }
+
+  String _two(int value) => value.toString().padLeft(2, '0');
+}
+
+class _DashboardCard extends StatelessWidget {
+  const _DashboardCard({required this.child});
+
+  final Widget child;
 
   @override
   Widget build(BuildContext context) {
-    if (_rates.isEmpty) return const SizedBox.shrink();
-
     return Container(
-      height: 50,
       width: double.infinity,
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(
-          bottom: BorderSide(
-            color: Colors.grey.withValues(alpha: 0.2),
-            width: 1,
+        color: AppColors.cardSurface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: AppColors.secondarySurface,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.shadowDark.withValues(alpha: 0.28),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(12),
+      child: child,
+    );
+  }
+}
+
+class _SectionTitle extends StatelessWidget {
+  const _SectionTitle({required this.titleEn, required this.titleUr});
+
+  final String titleEn;
+  final String titleUr;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            titleEn,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: AppColors.primaryText,
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+            ),
           ),
         ),
-      ),
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        physics: const BouncingScrollPhysics(),
-        itemCount: _rates.length,
-        separatorBuilder: (context, index) => VerticalDivider(
-          color: Colors.grey.withValues(alpha: 0.25),
-          indent: 10,
-          endIndent: 10,
-        ),
-        itemBuilder: (context, index) {
-          final rate = _rates[index];
-          final bool isUp = rate.trend == 'up';
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  rate.cropName,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12,
-                    color: Color(0xFFB8860B),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  'Rs. ${rate.currentPrice.toStringAsFixed(0)}',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12,
-                    color: Colors.black87,
-                  ),
-                ),
-                Icon(
-                  isUp ? Icons.arrow_drop_up : Icons.arrow_drop_down,
-                  color: isUp ? Colors.green : Colors.red,
-                  size: 22,
-                ),
-              ],
+        const SizedBox(width: 8),
+        Directionality(
+          textDirection: TextDirection.rtl,
+          child: Text(
+            titleUr,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: AppColors.secondaryText,
+              fontSize: 15,
+              fontFamily: 'JameelNoori',
             ),
-          );
-        },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _TrustBadge extends StatelessWidget {
+  const _TrustBadge({required this.isVerified});
+
+  final bool isVerified;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: isVerified ? const Color(0xFF2E7D32) : const Color(0xFFFFB74D),
+        borderRadius: BorderRadius.circular(32),
+      ),
+      child: Text(
+        isVerified ? 'Verified ✅' : 'Unverified ⚠️',
+        style: const TextStyle(
+          color: AppColors.primaryText,
+          fontWeight: FontWeight.w700,
+          fontSize: 12,
+        ),
       ),
     );
   }
 }
 
-class _WeatherViewData {
-  final Map<String, dynamic>? data;
-  final String advisory;
-  final bool failed;
-
-  const _WeatherViewData({
-    required this.data,
-    required this.advisory,
-    required this.failed,
+class _SignalChip extends StatelessWidget {
+  const _SignalChip({
+    required this.text,
+    required this.color,
+    required this.icon,
   });
+
+  final String text;
+  final Color color;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.17),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: 0.55)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: color, size: 14),
+          const SizedBox(width: 5),
+          Flexible(
+            child: Text(
+              text,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: color,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatCard extends StatelessWidget {
+  const _StatCard({
+    required this.titleEn,
+    required this.titleUr,
+    required this.value,
+    required this.icon,
+    required this.subtitle,
+  });
+
+  final String titleEn;
+  final String titleUr;
+  final String value;
+  final IconData icon;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return _DashboardCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: _SellerDashboardState._gold, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  titleEn,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppColors.primaryText,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Text(
+            titleUr,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: AppColors.secondaryText,
+              fontSize: 13,
+              fontFamily: 'JameelNoori',
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: _SellerDashboardState._gold,
+              fontSize: 24,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            subtitle,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: AppColors.primaryText60, fontSize: 11),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatSkeleton extends StatelessWidget {
+  const _StatSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return const _DashboardCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _SkeletonLine(width: 110, height: 14),
+          SizedBox(height: 8),
+          _SkeletonLine(width: 80, height: 24),
+          SizedBox(height: 6),
+          _SkeletonLine(width: 90, height: 11),
+        ],
+      ),
+    );
+  }
+}
+
+class _ActionTile extends StatelessWidget {
+  const _ActionTile({
+    required this.icon,
+    required this.titleEn,
+    required this.titleUr,
+    required this.semanticsLabel,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String titleEn;
+  final String titleUr;
+  final String semanticsLabel;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: semanticsLabel,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: onTap,
+          child: Ink(
+            decoration: BoxDecoration(
+              color: AppColors.primaryText.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: _SellerDashboardState._gold.withValues(alpha: 0.4),
+              ),
+            ),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 120),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    CircleAvatar(
+                      radius: 21,
+                      backgroundColor: _SellerDashboardState._gold.withValues(
+                        alpha: 0.20,
+                      ),
+                      child: Icon(icon, color: _SellerDashboardState._gold),
+                    ),
+                    const SizedBox(height: 9),
+                    Text(
+                      titleEn,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: AppColors.primaryText,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Directionality(
+                      textDirection: TextDirection.rtl,
+                      child: Text(
+                        titleUr,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: AppColors.secondaryText,
+                          fontSize: 13,
+                          fontFamily: 'JameelNoori',
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ActionAlert {
+  const _ActionAlert({
+    required this.title,
+    required this.subtitle,
+    required this.color,
+    required this.icon,
+  });
+
+  final String title;
+  final String subtitle;
+  final Color color;
+  final IconData icon;
+}
+
+class _ActionAlertTile extends StatelessWidget {
+  const _ActionAlertTile({required this.alert});
+
+  final _ActionAlert alert;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: alert.color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: alert.color.withValues(alpha: 0.52)),
+      ),
+      padding: const EdgeInsets.all(10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(alert.icon, color: alert.color),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  alert.title,
+                  style: TextStyle(
+                    color: alert.color,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  alert.subtitle,
+                  style: const TextStyle(color: AppColors.secondaryText, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ActionCenterSkeleton extends StatelessWidget {
+  const _ActionCenterSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Column(
+      children: [
+        _SkeletonLine(height: 40),
+        SizedBox(height: 8),
+        _SkeletonLine(height: 40),
+      ],
+    );
+  }
+}
+
+class _StatusOkLine extends StatelessWidget {
+  const _StatusOkLine({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 7),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.only(top: 1),
+            child: Icon(
+              Icons.check_circle_rounded,
+              color: Color(0xFF66BB6A),
+              size: 17,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(color: AppColors.primaryText, fontSize: 13),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SecurePoint extends StatelessWidget {
+  const _SecurePoint({required this.en, required this.ur});
+
+  final String en;
+  final String ur;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: AppColors.primaryText.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: _SellerDashboardState._gold.withValues(alpha: 0.28),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              en,
+              style: const TextStyle(
+                color: AppColors.primaryText,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 5),
+            Directionality(
+              textDirection: TextDirection.rtl,
+              child: Padding(
+                padding: const EdgeInsets.only(right: 2),
+                child: Text(
+                  ur,
+                  style: const TextStyle(
+                    color: AppColors.secondaryText,
+                    fontSize: 14,
+                    height: 1.3,
+                    fontFamily: 'JameelNoori',
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SkeletonLine extends StatelessWidget {
+  const _SkeletonLine({this.width, required this.height});
+
+  final double? width;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: AppColors.primaryText.withValues(alpha: 0.2),
+        borderRadius: BorderRadius.circular(8),
+      ),
+    );
+  }
 }
 

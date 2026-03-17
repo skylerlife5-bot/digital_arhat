@@ -1,4 +1,5 @@
 ﻿import 'package:flutter/material.dart';
+import '../../theme/app_colors.dart';
 
 class PrimaryGradientButton extends StatelessWidget {
   const PrimaryGradientButton({
@@ -18,9 +19,9 @@ class PrimaryGradientButton extends StatelessWidget {
   final double fontSize;
   final bool isLoading;
 
-  static const Color _gold = Color(0xFFFFD700);
-  static const Color _lightAmber = Color(0xFFFFE082);
-  static const Color _textDark = Color(0xFF1A1A1A);
+  static const Color _gold = AppColors.accentGold;
+  static const Color _lightAmber = Color(0xFFF7D877);
+  static const Color _textDark = Colors.black;
 
   bool get _enabled => onPressed != null && !isLoading;
 
@@ -53,7 +54,7 @@ class PrimaryGradientButton extends StatelessWidget {
           boxShadow: _enabled
               ? [
                   BoxShadow(
-                    color: _gold.withValues(alpha: 0.24),
+                    color: AppColors.shadowDark.withValues(alpha: 0.35),
                     blurRadius: 14,
                     offset: const Offset(0, 6),
                   ),

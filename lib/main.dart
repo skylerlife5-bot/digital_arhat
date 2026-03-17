@@ -10,7 +10,6 @@ import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import 'auth/auth_wrapper.dart';
-import 'auth/login_screen.dart';
 import 'dashboard/buyer/buyer_dashboard.dart';
 import 'dashboard/role_router.dart';
 import 'firebase_options.dart';
@@ -19,15 +18,53 @@ import 'services/ai_generative_service.dart';
 import 'services/analytics_service.dart';
 import 'services/deep_link_service.dart';
 import 'services/notification_service.dart';
-import 'splash/splash_screen.dart';
+import 'services/phase1_notification_engine.dart';
+import 'theme/app_theme.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+bool _appCheckActivated = false;
+
+Future<void> _activateAppCheckSafely() async {
+  if (_appCheckActivated) {
+    debugPrint('APP START AFTER APP CHECK (already activated)');
+    debugPrint('[AppCheck] Activation skipped (already activated)');
+    return;
+  }
+
+  // Allow forcing debug provider in QA builds with --dart-define=APP_CHECK_DEBUG=true.
+  const forceDebugAppCheck = bool.fromEnvironment(
+    'APP_CHECK_DEBUG',
+    defaultValue: false,
+  );
+  final useDebugProvider = kDebugMode || forceDebugAppCheck;
+
+  debugPrint(
+    '[AppCheck] Branch selected: ${useDebugProvider ? 'DEBUG provider' : 'RELEASE Play Integrity provider'} '
+    '(kDebugMode=$kDebugMode, APP_CHECK_DEBUG=$forceDebugAppCheck)',
+  );
+  debugPrint('[AppCheck] Activation starting');
+
+  await FirebaseAppCheck.instance.activate(
+    providerAndroid: useDebugProvider
+        ? const AndroidDebugProvider()
+        : const AndroidPlayIntegrityProvider(),
+    providerApple: useDebugProvider
+        ? const AppleDebugProvider()
+        : const AppleDeviceCheckProvider(),
+  );
+  debugPrint('[AppCheck] Activation succeeded');
+  _appCheckActivated = true;
+}
 
 Future<void> main() async {
+  debugPrint('APP START REACHED MAIN');
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  debugPrint('APP START BEFORE FIREBASE INIT');
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  debugPrint('APP START AFTER FIREBASE INIT');
+  debugPrint('APP START BEFORE APP CHECK');
+  await _activateAppCheckSafely();
+  debugPrint('APP START AFTER APP CHECK');
   runApp(const DigitalArhatApp());
 }
 
@@ -66,20 +103,16 @@ class InitializationService {
     _firebaseReady = true;
 
     try {
-      await FirebaseAppCheck.instance.activate(
-        providerAndroid: kDebugMode
-          ? const AndroidDebugProvider()
-          : const AndroidPlayIntegrityProvider(),
-        providerApple: kDebugMode
-          ? const AppleDebugProvider()
-          : const AppleDeviceCheckProvider(),
-      );
+      await _activateAppCheckSafely();
     } catch (_) {}
 
     await Future.any<void>([
       Future.wait<void>([
         _setupInteractedMessage(),
-        NotificationService.initialize(onNotificationTap: _handleMessage),
+        NotificationService.initialize(
+          onNotificationTap: _handleMessage,
+          onNotificationTapData: _handleMessageData,
+        ),
         DeepLinkService.initialize(
           onListingDeepLink: (listingId) async {
             await AnalyticsService().logJoinAttribution(
@@ -113,9 +146,14 @@ Future<void> _setupInteractedMessage() async {
 }
 
 void _handleMessage(RemoteMessage message) {
-  final listingId = message.data['listingId']?.toString() ?? '';
-  final dealId = message.data['dealId']?.toString() ?? listingId;
-  final type = (message.data['type'] ?? '').toString().toUpperCase();
+  _handleMessageData(message.data);
+}
+
+void _handleMessageData(Map<String, dynamic> messageData) {
+  final listingId = messageData['listingId']?.toString() ?? '';
+  final type = (messageData['type'] ?? '').toString().toUpperCase();
+  final targetRole =
+      (messageData['targetRole'] ?? '').toString().trim().toLowerCase();
 
   unawaited(
     AnalyticsService().logJoinAttribution(
@@ -129,7 +167,7 @@ void _handleMessage(RemoteMessage message) {
     return;
   }
 
-  if (message.data['type'] == 'BID_UPDATE' && listingId.isNotEmpty) {
+  if (type == 'BID_UPDATE' && listingId.isNotEmpty) {
     navigatorKey.currentState?.pushNamed(
       Routes.placeBid,
       arguments: {'docId': listingId},
@@ -137,21 +175,31 @@ void _handleMessage(RemoteMessage message) {
     return;
   }
 
-  if (NotificationService.isDealAlert(message) && dealId.isNotEmpty) {
+  if (Phase1NotificationType.all.contains(type)) {
+    if (targetRole == 'seller' ||
+        type == Phase1NotificationType.listingApproved ||
+        type == Phase1NotificationType.newBidReceived ||
+        type == Phase1NotificationType.bidAcceptedConfirmation) {
+      navigatorKey.currentState?.pushNamed(
+        Routes.sellerDashboard,
+        arguments: <String, dynamic>{
+          if (listingId.isNotEmpty) 'listingId': listingId,
+          'focus': 'bids',
+        },
+      );
+      return;
+    }
+
+    if (listingId.isNotEmpty) {
+      _openListingDetails(listingId);
+      return;
+    }
+
     navigatorKey.currentState?.pushNamed(
-      Routes.escrowStatus,
-      arguments: <String, dynamic>{
-        'dealId': dealId,
-        'listingId': listingId,
-        'title': message.data['title']?.toString() ?? '',
-      },
+      Routes.buyerDashboard,
+      arguments: const <String, dynamic>{},
     );
     return;
-  }
-
-  if ((type == 'ESCROW_CONFIRMED' || type == 'PRICE_ALERT') &&
-      listingId.isNotEmpty) {
-    _openListingDetails(listingId);
   }
 }
 
@@ -166,38 +214,17 @@ void _openListingDetails(String listingId) {
 class DigitalArhatApp extends StatelessWidget {
   const DigitalArhatApp({super.key});
 
-  static const Color _brandDarkGreen = Color(0xFF002810);
-  static const Color _brandGold = Color(0xFFFFD700);
-
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Digital Arhat',
       debugShowCheckedModeBanner: false,
       navigatorKey: navigatorKey,
-      theme: ThemeData(
-        useMaterial3: true,
-        primaryColor: _brandDarkGreen,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: _brandGold,
-          primary: _brandDarkGreen,
-          secondary: _brandGold,
-        ),
-        scaffoldBackgroundColor: _brandDarkGreen,
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Colors.transparent,
-          surfaceTintColor: Colors.transparent,
-          elevation: 0,
-          foregroundColor: Colors.white,
-          centerTitle: true,
-        ),
-      ),
+      theme: AppTheme.darkTheme,
       routes: <String, WidgetBuilder>{
         ...Routes.getRoutes(),
-        '/login': (context) => const LoginScreen(),
-        '/home': (context) => const RoleRouter(),
       },
-      home: const SplashScreen(),
+      initialRoute: Routes.splash,
       onUnknownRoute: (_) => MaterialPageRoute(
         builder: (_) => const Scaffold(
           body: Center(child: Text('Mandi Band Hai (Route Not Found)')),
@@ -246,7 +273,7 @@ class _LaunchGateState extends State<_LaunchGate> {
   @override
   Widget build(BuildContext context) {
     if (!InitializationService.isCompleted) {
-      return const SplashScreen();
+      return const AuthWrapper();
     }
 
     if (!InitializationService.isFirebaseReady) {
@@ -310,7 +337,8 @@ class _VersionGuardState extends State<VersionGuard> {
           .get();
 
       final minVersion = configDoc.data()?['min_app_version']?.toString() ?? '';
-      if (minVersion.isNotEmpty && _isLowerVersion(appInfo.version, minVersion)) {
+      if (minVersion.isNotEmpty &&
+          _isLowerVersion(appInfo.version, minVersion)) {
         if (!mounted || _dialogShown) return;
         setState(() => _dialogShown = true);
         _showUpdateDialog(appInfo.version, minVersion);
@@ -333,7 +361,9 @@ class _VersionGuardState extends State<VersionGuard> {
         canPop: false,
         child: AlertDialog(
           title: const Text('Update Required'),
-          content: Text('A newer version ($min) is required. Current: $current'),
+          content: Text(
+            'A newer version ($min) is required. Current: $current',
+          ),
           actions: [
             TextButton(onPressed: () {}, child: const Text('Go to Store')),
           ],

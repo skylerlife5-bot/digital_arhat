@@ -1,7 +1,9 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../assets.dart';
 import '../../services/session_service.dart';
+import '../../theme/app_colors.dart';
 
 class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
   const CustomAppBar({
@@ -10,7 +12,7 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
     this.titleWidget,
     this.centerTitle = true,
     this.backgroundColor,
-    this.foregroundColor = Colors.white,
+    this.foregroundColor = AppColors.primaryText,
     this.actions = const <Widget>[],
     this.showSettings = true,
     this.onLogout,
@@ -31,7 +33,7 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
   Future<void> _openSettings(BuildContext context) async {
     await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: const Color(0xFF0F2C1A),
+      backgroundColor: AppColors.cardSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
@@ -43,21 +45,27 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 ListTile(
-                  leading: const Icon(Icons.settings, color: Colors.white70),
+                  leading: const Icon(
+                    Icons.settings,
+                    color: AppColors.secondaryText,
+                  ),
                   title: Text(
                     'Settings',
                     style: GoogleFonts.merriweather(
-                      color: Colors.white,
+                      color: AppColors.primaryText,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),
                 ListTile(
-                  leading: const Icon(Icons.logout, color: Colors.redAccent),
+                  leading: const Icon(
+                    Icons.logout,
+                    color: AppColors.urgencyRed,
+                  ),
                   title: Text(
                     'Logout',
                     style: GoogleFonts.inter(
-                      color: Colors.redAccent,
+                      color: AppColors.urgencyRed,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -84,12 +92,13 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
       centerTitle: centerTitle,
       backgroundColor: backgroundColor,
       foregroundColor: foregroundColor,
-      title: titleWidget ??
+      title:
+          titleWidget ??
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               Image.asset(
-                'assets/logo.png',
+                AppAssets.logoPath,
                 height: 34,
                 fit: BoxFit.contain,
                 filterQuality: FilterQuality.high,
@@ -116,4 +125,3 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
     );
   }
 }
-
