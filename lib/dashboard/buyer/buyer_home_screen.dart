@@ -13,45 +13,178 @@ import '../../core/widgets/app_logo.dart';
 import '../../core/widgets/custom_app_bar.dart';
 import '../../core/widgets/customer_support_button.dart';
 import '../../routes.dart';
+import '../assistant/aarhat_assistant_fab.dart';
+import '../assistant/aarhat_assistant_sheet.dart';
+import '../assistant/aarhat_assistant_welcome_sheet.dart';
+import '../assistant/assistant_prefs_service.dart';
 import '../../services/analytics_service.dart';
 import '../../services/marketplace_service.dart';
 import '../../services/notification_service.dart';
 import '../../services/trust_safety_service.dart';
 import '../../services/weather_services.dart';
 import '../../theme/app_colors.dart';
+import '../../marketplace/utils/mandi_display_utils.dart';
+import '../../marketplace/services/mandi_home_presenter.dart';
 import '../../marketplace/screens/all_mandi_rates_screen.dart';
 import '../../marketplace/services/pakistan_mandi_priority_registry.dart';
 import 'bid_bottom_sheet.dart';
 import 'watchlist_screen.dart';
 
-const List<MandiType?> _homeCategoryOrder = <MandiType?>[
-  MandiType.crops,
-  MandiType.seeds,
-  MandiType.fruit,
-  MandiType.dryFruits,
-  MandiType.vegetables,
-  MandiType.spices,
-  MandiType.livestock,
-  MandiType.milk,
-  MandiType.fertilizer,
-  MandiType.machinery,
-  null,
-  MandiType.tools,
+class _HomeCategoryItem {
+  const _HomeCategoryItem({
+    required this.id,
+    required this.type,
+    required this.label,
+    required this.assetPath,
+    required this.fallbackIcon,
+  });
+
+  final String id;
+  final MandiType type;
+  final String label;
+  final String assetPath;
+  final IconData fallbackIcon;
+}
+
+class _BakraMiniCardItem {
+  const _BakraMiniCardItem({
+    required this.type,
+    required this.label,
+    required this.assetPath,
+    required this.imageFit,
+    required this.imageAlignment,
+    required this.fallbackIcon,
+  });
+
+  final String type;
+  final String label;
+  final String assetPath;
+  final BoxFit imageFit;
+  final Alignment imageAlignment;
+  final IconData fallbackIcon;
+}
+
+const List<_BakraMiniCardItem> _bakraMiniCardItems = <_BakraMiniCardItem>[
+  _BakraMiniCardItem(
+    type: 'bakray',
+    label: 'Bakray / بکرے',
+    assetPath: 'assets/bakra_mandi/bakray.png',
+    imageFit: BoxFit.cover,
+    imageAlignment: Alignment(-0.08, -0.34),
+    fallbackIcon: Icons.pets_rounded,
+  ),
+  _BakraMiniCardItem(
+    type: 'gaye',
+    label: 'Gaye / گائے',
+    assetPath: 'assets/bakra_mandi/gaye.png',
+    imageFit: BoxFit.cover,
+    imageAlignment: Alignment(0.10, -0.22),
+    fallbackIcon: Icons.agriculture_rounded,
+  ),
+  _BakraMiniCardItem(
+    type: 'dumba',
+    label: 'Dumba / دنبہ',
+    assetPath: 'assets/bakra_mandi/dumba.png',
+    imageFit: BoxFit.cover,
+    imageAlignment: Alignment(0, -0.16),
+    fallbackIcon: Icons.cruelty_free_rounded,
+  ),
+  _BakraMiniCardItem(
+    type: 'oont',
+    label: 'Oont / اونٹ',
+    assetPath: 'assets/bakra_mandi/oont.png',
+    imageFit: BoxFit.cover,
+    imageAlignment: Alignment(0.18, -0.18),
+    fallbackIcon: Icons.terrain_rounded,
+  ),
 ];
 
-const Map<MandiType, String> _homeCategoryLabels = <MandiType, String>{
-  MandiType.crops: 'Crops / فصلیں',
-  MandiType.seeds: 'Seeds / بیج',
-  MandiType.fruit: 'Fruits / پھل',
-  MandiType.dryFruits: 'Dry Fruits / خشک میوہ',
-  MandiType.vegetables: 'Vegetables / سبزیاں',
-  MandiType.spices: 'Spices / مصالحے',
-  MandiType.livestock: 'Livestock / مویشی',
-  MandiType.milk: 'Milk & Dairy / دودھ اور ڈیری',
-  MandiType.fertilizer: 'Fertilizer / کھاد',
-  MandiType.machinery: 'Machinery / مشینری',
-  MandiType.tools: 'Tools / اوزار',
-};
+const List<_HomeCategoryItem> _homeCategories = <_HomeCategoryItem>[
+  _HomeCategoryItem(
+    id: 'crops',
+    type: MandiType.crops,
+    label: 'Crops / فصلیں',
+    assetPath: 'assets/categories/crops.png',
+    fallbackIcon: Icons.grass_rounded,
+  ),
+  _HomeCategoryItem(
+    id: 'seeds',
+    type: MandiType.seeds,
+    label: 'Seeds / بیج',
+    assetPath: 'assets/categories/seeds.png',
+    fallbackIcon: Icons.grain_rounded,
+  ),
+  _HomeCategoryItem(
+    id: 'vegetables',
+    type: MandiType.vegetables,
+    label: 'Vegetables / سبزیاں',
+    assetPath: 'assets/categories/vegetables.png',
+    fallbackIcon: Icons.eco_rounded,
+  ),
+  _HomeCategoryItem(
+    id: 'fruit',
+    type: MandiType.fruit,
+    label: 'Fruits / پھل',
+    assetPath: 'assets/categories/fruits.png',
+    fallbackIcon: Icons.apple_rounded,
+  ),
+  _HomeCategoryItem(
+    id: 'dry_fruits',
+    type: MandiType.dryFruits,
+    label: 'Dry Fruits / خشک میوہ',
+    assetPath: 'assets/categories/dry_fruits.png',
+    fallbackIcon: Icons.nature_rounded,
+  ),
+  _HomeCategoryItem(
+    id: 'spices',
+    type: MandiType.spices,
+    label: 'Spices / مصالحے',
+    assetPath: 'assets/categories/spices.png',
+    fallbackIcon: Icons.spa_rounded,
+  ),
+  _HomeCategoryItem(
+    id: 'flowers',
+    type: MandiType.flowers,
+    label: 'Flowers / پھول',
+    assetPath: 'assets/categories/flowers.png',
+    fallbackIcon: Icons.local_florist_rounded,
+  ),
+  _HomeCategoryItem(
+    id: 'livestock',
+    type: MandiType.livestock,
+    label: 'Livestock / مویشی',
+    assetPath: 'assets/categories/livestock.png',
+    fallbackIcon: Icons.pets_rounded,
+  ),
+  _HomeCategoryItem(
+    id: 'poultry',
+    type: MandiType.livestock,
+    label: 'Poultry / پولٹری',
+    assetPath: 'assets/categories/poultry.png',
+    fallbackIcon: Icons.egg_alt_rounded,
+  ),
+  _HomeCategoryItem(
+    id: 'milk',
+    type: MandiType.milk,
+    label: 'Milk & Dairy / دودھ اور ڈیری',
+    assetPath: 'assets/categories/milk_dairy.png',
+    fallbackIcon: Icons.water_drop_rounded,
+  ),
+  _HomeCategoryItem(
+    id: 'fertilizer',
+    type: MandiType.fertilizer,
+    label: 'Fertilizer / کھاد',
+    assetPath: 'assets/categories/fertilizer.png',
+    fallbackIcon: Icons.science_rounded,
+  ),
+  _HomeCategoryItem(
+    id: 'machinery',
+    type: MandiType.machinery,
+    label: 'Machinery / مشینری',
+    assetPath: 'assets/categories/machinery.png',
+    fallbackIcon: Icons.agriculture_rounded,
+  ),
+];
 
 class BuyerHomeScreen extends StatefulWidget {
   final Map<String, dynamic> userData;
@@ -73,6 +206,7 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
 
   String _searchQuery = '';
   MandiType? _selectedCategory;
+  String? _selectedHomeCategoryId;
   String? _selectedSubcategoryId;
   String? _selectedProvinceFilter;
   String? _selectedDistrictFilter;
@@ -103,9 +237,11 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
 
   void _logMandiParse(String message) => _logMandiLine('MANDI_PARSE', message);
 
-  void _logMandiReject(String message) => _logMandiLine('MANDI_REJECT', message);
+  void _logMandiReject(String message) =>
+      _logMandiLine('MANDI_REJECT', message);
 
-  void _logMandiRender(String message) => _logMandiLine('MANDI_RENDER', message);
+  void _logMandiRender(String message) =>
+      _logMandiLine('MANDI_RENDER', message);
 
   Map<String, dynamic>? _weatherData;
   String _advisory = 'موسم کی معلومات تازہ کی جا رہی ہیں۔';
@@ -118,6 +254,7 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
   _activeListingsContextSubscription;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
   _mandiRatesSubscription;
+  StreamSubscription<bool>? _bakraToggleSubscription;
   Timer? _tickerAutoScrollTimer;
   Timer? _mandiRatesRefreshTimer;
   final Set<String> _shownWinnerNotifications = <String>{};
@@ -132,17 +269,49 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
   final Map<String, String> _provinceUrduByEn = <String, String>{};
   final Map<String, String> _districtUrduByEn = <String, String>{};
   final Map<String, String> _tehsilUrduByEn = <String, String>{};
+  final Map<String, String> _cityUrduByEn = <String, String>{};
+  bool? _bakraRuntimeEnabled;
 
   @override
   void initState() {
     super.initState();
     _selectedCategory = null;
+    _selectedHomeCategoryId = null;
     _setupCachedStreams();
     _setupLiveMandiTicker();
     _startTickerAutoScroll();
     unawaited(_loadFilterLocationAsset());
     _loadWeather();
     _listenApprovedWinnerStatus();
+    _listenBakraToggle();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeShowWelcome());
+  }
+
+  Future<void> _maybeShowWelcome() async {
+    final seen = await AssistantPrefsService.hasSeenWelcome();
+    if (seen || !mounted) return;
+    await AarhatAssistantWelcomeSheet.show(
+      context,
+      userData: widget.userData,
+    );
+  }
+
+  void _listenBakraToggle() {
+    _bakraToggleSubscription?.cancel();
+    _bakraToggleSubscription = SeasonalBakraMandiConfig.visibilityStream()
+        .listen((value) {
+          if (!mounted) return;
+          setState(() {
+            _bakraRuntimeEnabled = value;
+          });
+        });
+    unawaited(() async {
+      final persisted = await SeasonalBakraMandiConfig.loadRuntimeVisibility();
+      if (!mounted) return;
+      setState(() {
+        _bakraRuntimeEnabled = persisted;
+      });
+    }());
   }
 
   void _setupCachedStreams() {
@@ -187,6 +356,7 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
     _approvedWinnerSubscription?.cancel();
     _activeListingsContextSubscription?.cancel();
     _mandiRatesSubscription?.cancel();
+    _bakraToggleSubscription?.cancel();
     _tickerAutoScrollTimer?.cancel();
     _mandiRatesRefreshTimer?.cancel();
     _tickerScrollController.dispose();
@@ -211,22 +381,26 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
       final parsed = parseResult.items;
       final snapshotPreview = _buildNearbyMandiSnapshotItemsForDebug(parsed);
       parseResult.stats.finalSnapshotItems = snapshotPreview.length;
-        final tickerCityMix = parsed
+      debugPrint('[MandiPulse] final_home_ticker_count=${parsed.length}');
+      debugPrint(
+        '[MandiPulse] final_home_snapshot_count=${snapshotPreview.length}',
+      );
+      final tickerCityMix = parsed
           .map((item) => _normalizeLocationToken(item.location))
           .where((value) => value.isNotEmpty)
           .toSet()
           .toList(growable: false);
-        final tickerSubcategoryMix = parsed
+      final tickerSubcategoryMix = parsed
           .map((item) => item.subcategoryKey.trim().toLowerCase())
           .where((value) => value.isNotEmpty)
           .toSet()
           .toList(growable: false);
-        final snapshotCityMix = snapshotPreview
+      final snapshotCityMix = snapshotPreview
           .map((item) => _normalizeLocationToken(item.location))
           .where((value) => value.isNotEmpty)
           .toSet()
           .toList(growable: false);
-        final snapshotSubcategoryMix = snapshotPreview
+      final snapshotSubcategoryMix = snapshotPreview
           .map((item) => item.subcategoryKey.trim().toLowerCase())
           .where((value) => value.isNotEmpty)
           .toSet()
@@ -247,7 +421,8 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
         'comparabilityReject=${parseResult.stats.comparabilityReject} duplicateReject=${parseResult.stats.duplicateReject} '
         'missingSubcategory=${parseResult.stats.emptySubcategoryReject} nonRenderable=${parseResult.stats.nonRenderableReject}',
       );
-      if (parseResult.stats.finalTickerItems <= 1 && parseResult.stats.postDedupItems > 1) {
+      if (parseResult.stats.finalTickerItems <= 1 &&
+          parseResult.stats.postDedupItems > 1) {
         _logMandiDebug(
           '[MANDI_COLLAPSE_REASON] collapseAt=postSubcategoryDiversification '
           'postDedupItems=${parseResult.stats.postDedupItems} '
@@ -282,7 +457,8 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
     } catch (_) {
       if (!mounted) return;
       setState(() {
-        _mandiSnapshotFallbackNote = 'مقامی منڈی کے ریٹس عارضی طور پر دستیاب نہیں۔';
+        _mandiSnapshotFallbackNote =
+            'مقامی منڈی کے ریٹس عارضی طور پر دستیاب نہیں۔';
         if (_liveMandiTickerItems.isEmpty) {
           _mandiTickerInfoText = 'منڈی ریٹ لوڈ نہیں ہو سکے۔';
         }
@@ -293,9 +469,13 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
   Future<_MandiStageFetchResult> _fetchMandiDocsByStrictLocationStages() async {
     final context = await _resolveMandiFetchContext();
     const int stageLimit = 28;
-    final exactCityValues = <String>{if (context.cityEn.trim().isNotEmpty) context.cityEn.trim()};
-    final cityAliasValues = _expandLocationAliases(<String>{context.cityEn, context.cityUr})
-      ..removeWhere((value) => exactCityValues.contains(value.trim()));
+    final exactCityValues = <String>{
+      if (context.cityEn.trim().isNotEmpty) context.cityEn.trim(),
+    };
+    final cityAliasValues = _expandLocationAliases(<String>{
+      context.cityEn,
+      context.cityUr,
+    })..removeWhere((value) => exactCityValues.contains(value.trim()));
 
     final merged = <String, QueryDocumentSnapshot<Map<String, dynamic>>>{};
     var stageBNearestDocsCount = 0;
@@ -352,7 +532,8 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
     for (final nearestCity in context.nearestCityCandidatesEn) {
       final normalizedCandidate = _normalizeLocationToken(nearestCity);
       final normalizedCity = _normalizeLocationToken(context.cityEn);
-      if (normalizedCandidate.isEmpty || normalizedCandidate == normalizedCity) {
+      if (normalizedCandidate.isEmpty ||
+          normalizedCandidate == normalizedCity) {
         continue;
       }
       final docs = await _queryMandiRatesByFields(
@@ -385,7 +566,10 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
 
     final stageCDistrictDocs = await _queryMandiRatesByFields(
       fields: const <String>['district', 'city', 'mandiName'],
-      values: _expandLocationAliases(<String>{context.districtEn, context.districtUr}),
+      values: _expandLocationAliases(<String>{
+        context.districtEn,
+        context.districtUr,
+      }),
       limit: stageLimit,
       stageLabel: 'StageC-district',
     );
@@ -407,7 +591,10 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
 
     final stageDProvinceDocs = await _queryMandiRatesByFields(
       fields: const <String>['province', 'district'],
-      values: _expandLocationAliases(<String>{context.provinceEn, context.provinceUr}),
+      values: _expandLocationAliases(<String>{
+        context.provinceEn,
+        context.provinceUr,
+      }),
       limit: stageLimit,
       stageLabel: 'StageD-province',
     );
@@ -425,7 +612,9 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
           .limit(stageLimit)
           .get();
       mergeDocs(broad.docs);
-      _logMandiQuery('broadFallback docs=${broad.docs.length} merged=${merged.length}');
+      _logMandiQuery(
+        'broadFallback docs=${broad.docs.length} merged=${merged.length}',
+      );
     }
 
     return _MandiStageFetchResult(
@@ -437,7 +626,8 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
     );
   }
 
-  Future<List<QueryDocumentSnapshot<Map<String, dynamic>>>> _queryMandiRatesByFields({
+  Future<List<QueryDocumentSnapshot<Map<String, dynamic>>>>
+  _queryMandiRatesByFields({
     required List<String> fields,
     required Set<String> values,
     required int limit,
@@ -474,7 +664,8 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
               .take(5)
               .toList(growable: false);
           final targetToken = _normalizeLocationToken(value);
-          final sameCity = matchedCityValues.isNotEmpty &&
+          final sameCity =
+              matchedCityValues.isNotEmpty &&
               matchedCityValues.every((entry) {
                 final entryToken = _normalizeLocationToken(entry);
                 if (entryToken.isEmpty || targetToken.isEmpty) return false;
@@ -525,7 +716,8 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
   Future<_MandiFetchContext> _resolveMandiFetchContext() async {
     final live = await _tryDetectLiveWeatherLocation();
     final nearestProbe = await _resolveNearestCityCandidates();
-    final citySeed = live?.$1 ??
+    final citySeed =
+        live?.$1 ??
         _firstNonEmpty(<String?>[
           _selectedCityFilter,
           (widget.userData['city'] ?? '').toString(),
@@ -544,7 +736,9 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
       cityEn,
     ]);
     final districtEn = _toCanonicalWeatherDistrict(districtSeed);
-    final districtUr = _toUrduLocationLabel(districtSeed.isEmpty ? districtEn : districtSeed);
+    final districtUr = _toUrduLocationLabel(
+      districtSeed.isEmpty ? districtEn : districtSeed,
+    );
 
     final provinceSeed = _firstNonEmpty(<String?>[
       _selectedProvinceFilter,
@@ -552,7 +746,9 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
       'Punjab',
     ]);
     final provinceEn = _toCanonicalWeatherDistrict(provinceSeed);
-    final provinceUr = _toUrduLocationLabel(provinceSeed.isEmpty ? provinceEn : provinceSeed);
+    final provinceUr = _toUrduLocationLabel(
+      provinceSeed.isEmpty ? provinceEn : provinceSeed,
+    );
 
     _logMandiDebug(
       'resolveContext liveDistrict=${live?.$1 ?? ''} citySeed=$citySeed districtSeed=$districtSeed '
@@ -564,16 +760,21 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
       cityEn: cityEn,
       cityUr: cityUr.isEmpty ? _toUrduLocationLabel(cityEn) : cityUr,
       districtEn: districtEn,
-      districtUr: districtUr.isEmpty ? _toUrduLocationLabel(districtEn) : districtUr,
+      districtUr: districtUr.isEmpty
+          ? _toUrduLocationLabel(districtEn)
+          : districtUr,
       provinceEn: provinceEn,
-      provinceUr: provinceUr.isEmpty ? _toUrduLocationLabel(provinceEn) : provinceUr,
+      provinceUr: provinceUr.isEmpty
+          ? _toUrduLocationLabel(provinceEn)
+          : provinceUr,
       nearestCityCandidatesEn: nearestProbe.$1,
       latitude: nearestProbe.$2,
       longitude: nearestProbe.$3,
     );
   }
 
-  Future<(List<String>, double?, double?)> _resolveNearestCityCandidates() async {
+  Future<(List<String>, double?, double?)>
+  _resolveNearestCityCandidates() async {
     try {
       final enabled = await Geolocator.isLocationServiceEnabled();
       if (!enabled) return (const <String>[], null, null);
@@ -610,23 +811,27 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
         limit: 6,
       );
 
-      final ranked = _knownDistricts
-          .map(
-            (item) => (
-              item.englishDistrict,
-              Geolocator.distanceBetween(
-                    position!.latitude,
-                    position.longitude,
-                    item.lat,
-                    item.lng,
-                  ) /
-                  1000,
-            ),
-          )
-          .toList(growable: false)
-        ..sort((a, b) => a.$2.compareTo(b.$2));
+      final ranked =
+          _knownDistricts
+              .map(
+                (item) => (
+                  item.englishDistrict,
+                  Geolocator.distanceBetween(
+                        position!.latitude,
+                        position.longitude,
+                        item.lat,
+                        item.lng,
+                      ) /
+                      1000,
+                ),
+              )
+              .toList(growable: false)
+            ..sort((a, b) => a.$2.compareTo(b.$2));
 
-      final nearestDistance = ranked.map((entry) => entry.$1).take(6).toList(growable: false);
+      final nearestDistance = ranked
+          .map((entry) => entry.$1)
+          .take(6)
+          .toList(growable: false);
       final merged = <String>[...topPriority, ...nearestDistance];
       final seen = <String>{};
       final nearest = <String>[];
@@ -713,8 +918,9 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
           final parsed = DateTime.tryParse(raw);
           if (parsed != null) return parsed.toUtc();
 
-          final slash = RegExp(r'^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$')
-              .firstMatch(raw);
+          final slash = RegExp(
+            r'^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$',
+          ).firstMatch(raw);
           if (slash != null) {
             final day = int.tryParse(slash.group(1) ?? '');
             final month = int.tryParse(slash.group(2) ?? '');
@@ -777,13 +983,16 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
         return s == t || s.contains(t) || t.contains(s);
       }
 
-      if (locationMatches(city, cityTarget) || locationMatches(district, cityTarget)) {
+      if (locationMatches(city, cityTarget) ||
+          locationMatches(district, cityTarget)) {
         return 1;
       }
-      if (locationMatches(city, liveDistrict) || locationMatches(district, liveDistrict)) {
+      if (locationMatches(city, liveDistrict) ||
+          locationMatches(district, liveDistrict)) {
         return 2;
       }
-      if (locationMatches(district, districtTarget) || locationMatches(city, districtTarget)) {
+      if (locationMatches(district, districtTarget) ||
+          locationMatches(city, districtTarget)) {
         return 3;
       }
       if (locationMatches(province, provinceTarget)) {
@@ -813,7 +1022,10 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
     }
 
     double confidenceScoreFrom(Map<String, dynamic> map) {
-      final value = number(map, const <String>['confidenceScore', 'confidence']);
+      final value = number(map, const <String>[
+        'confidenceScore',
+        'confidence',
+      ]);
       if (value.isFinite && value >= 0 && value <= 1) return value;
       return 0;
     }
@@ -834,9 +1046,151 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
       return map['acceptedBySystem'] == true || map['acceptedByAdmin'] == true;
     }
 
+    String sourceFamilyFrom(Map<String, dynamic> map) {
+      final source = text(map, const <String>[
+        'source',
+        'sourceId',
+        'sourceType',
+        'ingestionSource',
+      ]).toLowerCase();
+      if (source.contains('fscpd') ||
+          source.contains('food department punjab') ||
+          source.contains('punjab fscpd')) {
+        return 'punjab_fscpd';
+      }
+      if (source.contains('amis')) return 'punjab_amis';
+      if (source.contains('lahore_official_market_rates') ||
+          (source.contains('lahore') && source.contains('official'))) {
+        return 'lahore_official';
+      }
+      if (source.contains('karachi_official_price_lists') ||
+          ((source.contains('karachi') || source.contains('sindh')) &&
+              source.contains('official'))) {
+        return 'karachi_sindh_official';
+      }
+      if (source.contains('pbs') || source.contains('spi')) return 'pbs_spi';
+      return 'unknown';
+    }
+
+    int sourcePriorityRankFrom(
+      Map<String, dynamic> map, {
+      required bool isOfficial,
+      required String verification,
+      required String contributorType,
+      required double confidence,
+      required bool acceptedBySystem,
+      required String review,
+    }) {
+      final family = sourceFamilyFrom(map);
+      if (family == 'punjab_fscpd') return 1;
+      if (family == 'punjab_amis') return 2;
+      if (family == 'lahore_official') return 3;
+      if (family == 'karachi_sindh_official') return 4;
+      if (family == 'pbs_spi') return 5;
+
+      final trustedContributor =
+          contributorType == 'verified_mandi_reporter' ||
+          contributorType == 'verified_commission_agent' ||
+          contributorType == 'verified_dealer' ||
+          contributorType == 'trusted_local_contributor';
+      final verifiedOfficial =
+          isOfficial &&
+          (verification == 'official verified' ||
+              verification == 'official_verified' ||
+              verification == 'cross-checked' ||
+              verification == 'cross_checked');
+      if (verifiedOfficial) return 4;
+      if (trustedContributor &&
+          acceptedBySystem &&
+          review == 'accepted' &&
+          confidence >= 0.82) {
+        return 6;
+      }
+      return 99;
+    }
+
+    bool isHomeCommodityAllowlisted(String commodityKey) {
+      final normalized = MandiHomePresenter.normalizeCommodityKey(commodityKey);
+      return MandiHomePresenter.isAllowlistedCommodity(normalized);
+    }
+
+    bool hasCleanLocalizedCommodityLabel(String localizedLabel) {
+      final value = localizedLabel.trim();
+      if (value.isEmpty) return false;
+      if (value == 'اجناس' || value.toLowerCase() == 'commodity') return false;
+      return true;
+    }
+
+    bool isUnitAllowedForHomeCommodity({
+      required String commodityKey,
+      required String normalizedUnit,
+      required String unitRaw,
+    }) {
+      final normalizedCommodity =
+          MandiHomePresenter.normalizeCommodityKey(commodityKey);
+      final unitKeyFromRaw = MandiHomePresenter.normalizeHomeUnitKey(unitRaw);
+      if (unitKeyFromRaw.isNotEmpty) {
+        return MandiHomePresenter.isAllowedUnitForCommodity(
+          normalizedCommodity,
+          unitKeyFromRaw,
+        );
+      }
+
+      final unit = normalizedUnit.trim();
+      String fallbackUnitKey = '';
+      if (unit == 'درجن') fallbackUnitKey = 'per_dozen';
+      if (unit == 'ٹری') fallbackUnitKey = 'per_tray';
+      if (unit == 'کریٹ' || unit == 'پیٹی') fallbackUnitKey = 'per_crate';
+      if (unit == 'کلو') fallbackUnitKey = 'per_kg';
+      if (unit == '40 کلو') fallbackUnitKey = 'per_40kg';
+      if (unit == '50 کلو') fallbackUnitKey = 'per_50kg';
+      if (unit == '100 کلو') fallbackUnitKey = 'per_100kg';
+      if (fallbackUnitKey.isEmpty) return false;
+
+      return MandiHomePresenter.isAllowedUnitForCommodity(
+        normalizedCommodity,
+        fallbackUnitKey,
+      );
+    }
+
+    void logHomeReject({required String reason, required String commodityKey}) {
+      debugPrint('[MandiHome] home_reject_reason=$reason commodity=$commodityKey');
+    }
+
+    bool hasCriticalUnitViolation(Map<String, dynamic> map) {
+      final flagsRaw = map['flags'];
+      if (flagsRaw is List) {
+        for (final entry in flagsRaw) {
+          final flag = entry.toString().trim().toLowerCase();
+          if (flag == 'unit_violation' ||
+              flag == 'critical_unit_violation' ||
+              flag == 'mixed_unit_violation') {
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    bool hasMixedUnitSignals(String rawUnit, String normalizedUnit) {
+      final source = '$rawUnit $normalizedUnit'.toLowerCase();
+      final hasKg = source.contains('kg') || source.contains('کلو');
+      final hasDozen = source.contains('dozen') || source.contains('درجن');
+      final hasPiece = source.contains('piece') || source.contains('عدد');
+      final has40kg = source.contains('40kg') || source.contains('40 کلو');
+      final has100kg = source.contains('100kg') || source.contains('100 کلو');
+      if (hasKg && hasDozen) return true;
+      if (hasPiece && hasKg) return true;
+      if (has40kg && has100kg) return true;
+      return false;
+    }
+
     bool isOfficialRecord(Map<String, dynamic> map) {
       final contributorType = contributorTypeFrom(map);
-      final sourceType = text(map, const <String>['sourceType', 'ingestionSource']).toLowerCase();
+      final sourceType = text(map, const <String>[
+        'sourceType',
+        'ingestionSource',
+      ]).toLowerCase();
       if (contributorType.isEmpty || contributorType == 'official') return true;
       return sourceType == 'official_aggregator' ||
           sourceType == 'official_market_committee' ||
@@ -852,30 +1206,37 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
         final map = doc.data();
         if (!isOfficialRecord(map)) continue;
         final verification = verificationStatusFrom(map);
-        if (verification != 'official verified' && verification != 'cross-checked') {
+        if (verification != 'official verified' &&
+            verification != 'cross-checked') {
           continue;
         }
         final conf = confidenceScoreFrom(map);
         if (conf < 0.7) continue;
 
-        final crop = _toUrduCommodityLabel(text(map, const <String>[
-          'commodityName',
-          'commodityNameUr',
-          'cropType',
-          'cropName',
-          'itemName',
-          'product',
-        ]));
+        final crop = _toUrduCommodityLabel(
+          text(map, const <String>[
+            'commodityName',
+            'commodityNameUr',
+            'cropType',
+            'cropName',
+            'itemName',
+            'product',
+          ]),
+        );
         final candidateCommodityKey = _normalizeCommodityKey(crop);
-        final location = _cleanTickerLocation(_toUrduLocationLabel(text(map, const <String>[
-          'mandiName',
-          'marketName',
-          'market',
-          'district',
-          'city',
-          'tehsil',
-          'province',
-        ])));
+        final location = _cleanTickerLocation(
+          _toUrduLocationLabel(
+            text(map, const <String>[
+              'mandiName',
+              'marketName',
+              'market',
+              'district',
+              'city',
+              'tehsil',
+              'province',
+            ]),
+          ),
+        );
         final candidateLocationKey = _normalizeLocationToken(location);
         if (candidateCommodityKey == commodityKey &&
             candidateLocationKey.isNotEmpty &&
@@ -921,6 +1282,34 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
         'product',
       ]);
       final crop = _toUrduCommodityLabel(cropRaw);
+      final commodityKey = _normalizeCommodityKey(crop);
+      final canonicalCommodityKey = _canonicalHomeCommodityKey(
+        cropRaw.isNotEmpty ? cropRaw : crop,
+      );
+      final corePriorityRank = _homeCommodityPriorityRankFromRaw(
+        canonicalCommodityKey,
+      );
+      debugPrint(
+        '[MandiHome] core_commodity_candidate=$canonicalCommodityKey',
+      );
+      debugPrint('[MandiHome] core_priority_rank=$corePriorityRank');
+      final allowlistHit = isHomeCommodityAllowlisted(commodityKey);
+      debugPrint('[MandiHome] home_allowlist_hit=$allowlistHit commodity=$commodityKey');
+      if (!allowlistHit) {
+        logHomeReject(reason: 'allowlist_miss', commodityKey: commodityKey);
+        stats.nonRenderableReject++;
+        stats.rejectedItems++;
+        continue;
+      }
+      if (!hasCleanLocalizedCommodityLabel(crop)) {
+        logHomeReject(
+          reason: 'unclean_localized_label',
+          commodityKey: commodityKey,
+        );
+        stats.nonRenderableReject++;
+        stats.rejectedItems++;
+        continue;
+      }
       final categoryRaw = text(data, const <String>[
         'categoryName',
         'categoryId',
@@ -928,6 +1317,7 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
         'mandiType',
       ]);
       if (crop.trim().isEmpty) {
+        logHomeReject(reason: 'missing_commodity', commodityKey: commodityKey);
         stats.missingCommodityReject++;
         stats.rejectedItems++;
         continue;
@@ -940,7 +1330,10 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
         'market',
       ]);
       final province = text(data, const <String>['province']);
-      if (district.trim().isEmpty && mandiName.trim().isEmpty && province.trim().isEmpty) {
+      if (district.trim().isEmpty &&
+          mandiName.trim().isEmpty &&
+          province.trim().isEmpty) {
+        logHomeReject(reason: 'missing_location', commodityKey: commodityKey);
         stats.missingCityReject++;
         stats.rejectedItems++;
         continue;
@@ -953,11 +1346,13 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
         'price',
       ]);
       if (price <= 0) {
+        logHomeReject(reason: 'invalid_price', commodityKey: commodityKey);
         stats.invalidPriceReject++;
         stats.rejectedItems++;
         continue;
       }
       if (price < 5 || price > 5000000) {
+        logHomeReject(reason: 'outlier_price', commodityKey: commodityKey);
         stats.outlierReject++;
         stats.rejectedItems++;
         continue;
@@ -965,8 +1360,12 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
       stats.parsedValidItems++;
 
       final mandiLabel = _cleanTickerLocation(_toUrduLocationLabel(mandiName));
-      final districtLabel = _cleanTickerLocation(_toUrduLocationLabel(district));
-      final provinceLabel = _cleanTickerLocation(_toUrduLocationLabel(province));
+      final districtLabel = _cleanTickerLocation(
+        _toUrduLocationLabel(district),
+      );
+      final provinceLabel = _cleanTickerLocation(
+        _toUrduLocationLabel(province),
+      );
       final location = mandiLabel.isNotEmpty
           ? mandiLabel
           : (districtLabel.isNotEmpty
@@ -976,12 +1375,12 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
       final tier = locationTier(data);
       final freshness = freshnessScore(data);
       if (freshness <= 0) {
+        logHomeReject(reason: 'stale_row', commodityKey: commodityKey);
         stats.freshnessReject++;
         stats.rejectedItems++;
         continue;
       }
 
-      final commodityKey = _normalizeCommodityKey(crop);
       final normalizedCategoryKey = _normalizeSubcategoryKey(
         subcategoryRaw: categoryRaw,
         commodityRaw: cropRaw,
@@ -991,7 +1390,59 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
         commodityRaw: cropRaw,
       );
       if (subcategoryKey.isEmpty) {
+        logHomeReject(reason: 'empty_subcategory', commodityKey: commodityKey);
         stats.emptySubcategoryReject++;
+        stats.rejectedItems++;
+        continue;
+      }
+
+      final unitRaw = text(data, const <String>[
+        'unit',
+        'rateUnit',
+        'priceUnit',
+        'unitType',
+      ]);
+      final normalizedUnit = _normalizeRateUnitUrdu(unitRaw, cropRaw);
+      if (normalizedUnit.trim().isEmpty ||
+          hasCriticalUnitViolation(data) ||
+          hasMixedUnitSignals(unitRaw, normalizedUnit)) {
+        logHomeReject(reason: 'unit_violation', commodityKey: commodityKey);
+        stats.comparabilityReject++;
+        stats.rejectedItems++;
+        continue;
+      }
+      final unitAllowed = isUnitAllowedForHomeCommodity(
+        commodityKey: commodityKey,
+        normalizedUnit: normalizedUnit,
+        unitRaw: unitRaw,
+      );
+      if (!unitAllowed) {
+        logHomeReject(
+          reason: 'commodity_unit_mismatch',
+          commodityKey: commodityKey,
+        );
+        stats.comparabilityReject++;
+        stats.rejectedItems++;
+        continue;
+      }
+
+      final updatedAt = date(data, const <String>[
+        'rateDate',
+        'rate_date',
+        'updatedAt',
+        'updated_at',
+        'timestamp',
+        'scrapedAt',
+        'scraped_at',
+        'createdAt',
+      ]);
+      final verification = verificationStatusFrom(data);
+      final review = reviewStatusFrom(data);
+      final confidence = confidenceScoreFrom(data);
+      final acceptedBySystem = acceptedBySystemFrom(data);
+      if (confidence < 0.72) {
+        logHomeReject(reason: 'low_confidence', commodityKey: commodityKey);
+        stats.trustedSourceReject++;
         stats.rejectedItems++;
         continue;
       }
@@ -999,10 +1450,6 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
       final contributorType = contributorTypeFrom(data);
       final isOfficial = isOfficialRecord(data);
       if (!isOfficial) {
-        final verification = verificationStatusFrom(data);
-        final review = reviewStatusFrom(data);
-        final confidence = confidenceScoreFrom(data);
-        final acceptedBySystem = acceptedBySystemFrom(data);
         final locationKey = _normalizeLocationToken(location);
         final hasStrongOfficial = hasStrongOfficialEquivalent(
           commodityKey: commodityKey,
@@ -1010,25 +1457,66 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
           allDocs: docs,
         );
 
-        final passesBase = acceptedBySystem &&
+        final passesBase =
+            acceptedBySystem &&
             review != 'rejected' &&
             review != 'needs_review' &&
             verification != 'needs review' &&
             confidence >= 0.72;
-        final passesWithOfficialPresent = !hasStrongOfficial || confidence >= 0.82;
-        final trustedContributor = contributorType == 'verified_mandi_reporter' ||
+        final passesWithOfficialPresent =
+            !hasStrongOfficial || confidence >= 0.82;
+        final trustedContributor =
+            contributorType == 'verified_mandi_reporter' ||
             contributorType == 'verified_commission_agent' ||
             contributorType == 'verified_dealer' ||
             contributorType == 'trusted_local_contributor';
 
         if (!trustedContributor || !passesBase || !passesWithOfficialPresent) {
+          logHomeReject(reason: 'untrusted_source', commodityKey: commodityKey);
           stats.trustedSourceReject++;
           stats.rejectedItems++;
           continue;
         }
       }
 
-      final score = (10 - tier) * 100 + freshness;
+      final sourcePriorityRank = MandiHomePresenter.sourcePriorityFromRaw(
+        sourceId: text(data, const <String>['sourceId']),
+        sourceType: text(data, const <String>['sourceType', 'ingestionSource']),
+        source: text(data, const <String>['source']),
+      );
+      final contributorAwareRank = sourcePriorityRankFrom(
+        data,
+        isOfficial: isOfficial,
+        verification: verification,
+        contributorType: contributorType,
+        confidence: confidence,
+        acceptedBySystem: acceptedBySystem,
+        review: review,
+      );
+      final effectiveSourceRank = sourcePriorityRank <= 4
+          ? sourcePriorityRank
+          : contributorAwareRank;
+      if (effectiveSourceRank > 6) {
+        logHomeReject(
+          reason: 'source_priority_not_allowed',
+          commodityKey: commodityKey,
+        );
+        stats.trustedSourceReject++;
+        stats.rejectedItems++;
+        continue;
+      }
+      if (effectiveSourceRank == 5) {
+        logHomeReject(reason: 'pbs_spi_trend_only', commodityKey: commodityKey);
+        stats.trustedSourceReject++;
+        stats.rejectedItems++;
+        continue;
+      }
+
+      final score =
+          (7 - effectiveSourceRank).clamp(0, 6) * 100000 +
+          (10 - tier).clamp(0, 9) * 1000 +
+          freshness * 10 +
+          (confidence * 10).round();
       if (candidateAuditLines.length < 20) {
         final sourceId = text(data, const <String>['sourceId']);
         final sourceType = text(data, const <String>[
@@ -1044,6 +1532,9 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
           'sourceId=${sourceId.isEmpty ? '-' : sourceId} '
           'sourceType=${sourceType.isEmpty ? '-' : sourceType} '
           'city=${cityRaw.isEmpty ? '-' : cityRaw} '
+          'sourcePriorityRank=$effectiveSourceRank '
+          'sourceSelected=${sourceFamilyFrom(data)} '
+          'confidence=${confidence.toStringAsFixed(2)} '
           'normalizedCategoryKey=${normalizedCategoryKey.isEmpty ? '-' : normalizedCategoryKey} '
           'normalizedSubcategoryKey=${subcategoryKey.isEmpty ? '-' : subcategoryKey}',
         );
@@ -1057,31 +1548,71 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
             trendSymbol: trendFrom(data),
             subcategoryKey: subcategoryKey,
             subcategoryLabel: subcategoryRaw,
+            unit: normalizedUnit,
+            sourceSelected: sourceFamilyFrom(data),
           ),
           score: score,
           commodityKey: commodityKey,
+          canonicalCommodityKey: canonicalCommodityKey,
+          corePriorityRank: corePriorityRank,
           subcategoryKey: subcategoryKey,
           tier: tier,
+          sourcePriorityRank: effectiveSourceRank,
+          freshnessScore: freshness,
+          confidenceScore: confidence,
+          updatedAt: updatedAt,
         ),
       );
     }
 
     stats.postQualityFilterItems = candidates.length;
     if (candidateAuditLines.isNotEmpty) {
-      _logMandiDebug('[MANDI_SUBCATEGORY_AUDIT_BEGIN] total=${candidateAuditLines.length}');
+      _logMandiDebug(
+        '[MANDI_SUBCATEGORY_AUDIT_BEGIN] total=${candidateAuditLines.length}',
+      );
       for (final line in candidateAuditLines) {
         _logMandiDebug('[MANDI_SUBCATEGORY_AUDIT] $line');
       }
       _logMandiDebug('[MANDI_SUBCATEGORY_AUDIT_END]');
     }
-    candidates.sort((a, b) => b.score.compareTo(a.score));
+    candidates.sort((a, b) {
+      final priorityCompare =
+          a.corePriorityRank.compareTo(b.corePriorityRank);
+      if (priorityCompare != 0) return priorityCompare;
+
+      final sourceCompare = a.sourcePriorityRank.compareTo(b.sourcePriorityRank);
+      if (sourceCompare != 0) return sourceCompare;
+
+      final tierCompare = a.tier.compareTo(b.tier);
+      if (tierCompare != 0) return tierCompare;
+
+      final freshnessCompare = b.freshnessScore.compareTo(a.freshnessScore);
+      if (freshnessCompare != 0) return freshnessCompare;
+
+      final confidenceCompare = b.confidenceScore.compareTo(a.confidenceScore);
+      if (confidenceCompare != 0) return confidenceCompare;
+
+      final aUpdated = a.updatedAt?.millisecondsSinceEpoch ?? 0;
+      final bUpdated = b.updatedAt?.millisecondsSinceEpoch ?? 0;
+      final updatedCompare = bUpdated.compareTo(aUpdated);
+      if (updatedCompare != 0) return updatedCompare;
+
+      final scoreCompare = b.score.compareTo(a.score);
+      if (scoreCompare != 0) return scoreCompare;
+
+      final commodityCompare = a.commodityKey.compareTo(b.commodityKey);
+      if (commodityCompare != 0) return commodityCompare;
+
+      return a.subcategoryKey.compareTo(b.subcategoryKey);
+    });
     stats.finalTickerCandidates = candidates.length;
 
     final deduped = <_TickerCandidate>[];
     final dedupeKeySet = <String>{};
     for (final candidate in candidates) {
+      final priceBucket = (candidate.item.price / 50).round();
       final key =
-          '${candidate.commodityKey}|${candidate.subcategoryKey}|${_normalizeLocationToken(candidate.item.location)}';
+          '${candidate.commodityKey}|${_normalizeLocationToken(candidate.item.location)}|${candidate.item.unit}|$priceBucket';
       if (!dedupeKeySet.add(key)) {
         stats.duplicateReject++;
         continue;
@@ -1090,68 +1621,285 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
     }
     stats.postDedupItems = deduped.length;
 
-    final nearby = deduped.where((candidate) => candidate.tier <= 2).toList(growable: false);
-    final broader = deduped.where((candidate) => candidate.tier > 2).toList(growable: false);
-    stats.postCityFirstItems = nearby.length;
+    final coreBucket = deduped
+      .where((candidate) => candidate.corePriorityRank == 1)
+      .toList(growable: false);
+    final secondaryBucket = deduped
+      .where((candidate) => candidate.corePriorityRank == 2)
+      .toList(growable: false);
+    final tertiaryBucket = deduped
+      .where((candidate) => candidate.corePriorityRank == 3)
+      .toList(growable: false);
+    final overflowBucket = deduped
+      .where((candidate) => candidate.corePriorityRank > 3)
+      .toList(growable: false);
+
+    final coreNearby = coreBucket
+      .where((candidate) => candidate.tier <= 2)
+      .toList(growable: false);
+    final coreBroader = coreBucket
+      .where((candidate) => candidate.tier > 2)
+      .toList(growable: false);
+    final secondaryNearby = secondaryBucket
+      .where((candidate) => candidate.tier <= 2)
+      .toList(growable: false);
+    final secondaryBroader = secondaryBucket
+      .where((candidate) => candidate.tier > 2)
+      .toList(growable: false);
+    final tertiaryNearby = tertiaryBucket
+      .where((candidate) => candidate.tier <= 2)
+      .toList(growable: false);
+    final tertiaryBroader = tertiaryBucket
+      .where((candidate) => candidate.tier > 2)
+      .toList(growable: false);
+    final overflowNearby = overflowBucket
+      .where((candidate) => candidate.tier <= 2)
+      .toList(growable: false);
+    final overflowBroader = overflowBucket
+      .where((candidate) => candidate.tier > 2)
+      .toList(growable: false);
+
+    final compositionOrdered = <_TickerCandidate>[
+      ...coreNearby,
+      ...coreBroader,
+      ...secondaryNearby,
+      ...secondaryBroader,
+      ...tertiaryNearby,
+      ...tertiaryBroader,
+      ...overflowNearby,
+      ...overflowBroader,
+    ];
+    stats.postCityFirstItems = compositionOrdered
+      .where((candidate) => candidate.tier <= 2)
+      .length;
 
     final picked = <_MandiTickerItem>[];
-    final usedSubcategories = <String>{};
+    // Commodity-level caps for ticker diversity.
+    final commodityCount = <String, int>{};
     final usedKeys = <String>{};
+    const tickerCommodityCap = MandiHomePresenter.tickerCommodityCap;
+    const tickerSingleCommodityHardCap = 3;
+    var overflowUsed = false;
+    var overflowReason = 'not_needed';
+    var fallbackMessageUsed = false;
+    var coreSelectedCount = 0;
 
-    void pickDiversified(List<_TickerCandidate> list) {
+    // First pass: one item per unique commodity (hardest diversity).
+    void pickOncePerCommodity(Iterable<_TickerCandidate> list) {
       for (final candidate in list) {
         if (picked.length >= 12) break;
-        if (candidate.subcategoryKey.isEmpty ||
-            usedSubcategories.contains(candidate.subcategoryKey)) {
+        if (candidate.subcategoryKey.isEmpty) continue;
+      final commodity = candidate.canonicalCommodityKey;
+      if (commodity.isEmpty) continue;
+        if ((commodityCount[commodity] ?? 0) >= 1) {
+          debugPrint(
+            '[MandiHome] diversity_skip_reason=ticker_commodity_cap_pass1 commodity=$commodity',
+          );
           continue;
         }
+        final priceBucket = (candidate.item.price / 50).round();
         final key =
-          '${candidate.commodityKey}|${candidate.subcategoryKey}|${_normalizeLocationToken(candidate.item.location)}';
+            '$commodity|${_normalizeLocationToken(candidate.item.location)}|${candidate.item.unit}|$priceBucket';
         if (usedKeys.contains(key)) continue;
-
-        usedSubcategories.add(candidate.subcategoryKey);
+        commodityCount[commodity] = (commodityCount[commodity] ?? 0) + 1;
         usedKeys.add(key);
         picked.add(candidate.item);
+        final isCoreSelected = candidate.corePriorityRank == 1;
+        if (isCoreSelected) {
+          coreSelectedCount++;
+        }
+        debugPrint('[MandiHome] core_commodity_selected=$isCoreSelected');
+        debugPrint(
+          '[MandiHome] diversity_selected=true pass=1 commodity=$commodity '
+          'total_distinct_commodities=${commodityCount.keys.length}',
+        );
       }
     }
 
-    // Preserve city-first preference, then broaden only to fill the utility gap.
-    pickDiversified(nearby);
-    pickDiversified(broader);
+    // Pool composition order:
+    // 1) core + trusted + valid + fresh, 2) secondary, 3) overflow.
+    pickOncePerCommodity(compositionOrdered);
     stats.postSubcategoryDiversificationItems = picked.length;
+    debugPrint(
+      '[MandiHome] final_home_ticker_diversity_count=${commodityCount.keys.length}',
+    );
 
-    void fillRemaining(List<_TickerCandidate> list) {
+    // Second pass: allow up to tickerCommodityCap per commodity.
+    void fillWithCap(Iterable<_TickerCandidate> list) {
       for (final candidate in list) {
         if (picked.length >= 12) break;
         if (candidate.subcategoryKey.isEmpty) {
           stats.emptySubcategoryReject++;
           continue;
         }
+        final commodity = candidate.canonicalCommodityKey;
+        if (commodity.isEmpty) continue;
+        if ((commodityCount[commodity] ?? 0) >= tickerCommodityCap) {
+          debugPrint(
+            '[MandiHome] diversity_skip_reason=ticker_commodity_cap_pass2 commodity=$commodity',
+          );
+          continue;
+        }
+        final priceBucket = (candidate.item.price / 50).round();
         final key =
-            '${candidate.commodityKey}|${candidate.subcategoryKey}|${_normalizeLocationToken(candidate.item.location)}';
+            '$commodity|${_normalizeLocationToken(candidate.item.location)}|${candidate.item.unit}|$priceBucket';
         if (usedKeys.contains(key)) continue;
-
+        commodityCount[commodity] = (commodityCount[commodity] ?? 0) + 1;
         usedKeys.add(key);
         picked.add(candidate.item);
+        final isCoreSelected = candidate.corePriorityRank == 1;
+        if (isCoreSelected) {
+          coreSelectedCount++;
+        }
+        debugPrint('[MandiHome] core_commodity_selected=$isCoreSelected');
       }
     }
 
-    fillRemaining(nearby);
-    fillRemaining(broader);
+    fillWithCap(compositionOrdered);
 
-    if (picked.length <= 1 && deduped.length > 1) {
-      for (final candidate in deduped) {
-        if (picked.length >= 4) break;
+    // Third pass: limited overflow only if still too sparse after core+secondary.
+    if (picked.length < 6 && compositionOrdered.length > picked.length) {
+      overflowUsed = true;
+      overflowReason = 'insufficient_core_secondary_candidates';
+      for (final candidate in compositionOrdered) {
+        if (picked.length >= 6) break;
+        if (candidate.subcategoryKey.isEmpty) continue;
+        final commodity = candidate.canonicalCommodityKey;
+        if (commodity.isEmpty) continue;
+        final distinctCommodities = commodityCount.keys.length;
+        final currentCount = commodityCount[commodity] ?? 0;
+        final maxCap = distinctCommodities <= 1
+            ? tickerSingleCommodityHardCap
+            : tickerCommodityCap;
+        if (currentCount >= maxCap) {
+          overflowReason = 'single_commodity_guard';
+          debugPrint(
+            '[MandiHome] overflow_reason=$overflowReason commodity=$commodity',
+          );
+          continue;
+        }
+        final priceBucket = (candidate.item.price / 50).round();
         final key =
-            '${candidate.commodityKey}|${candidate.subcategoryKey}|${_normalizeLocationToken(candidate.item.location)}';
-        if (usedKeys.add(key)) {
-          picked.add(candidate.item);
+            '$commodity|${_normalizeLocationToken(candidate.item.location)}|${candidate.item.unit}|$priceBucket';
+        if (!usedKeys.add(key)) continue;
+        commodityCount[commodity] = currentCount + 1;
+        picked.add(candidate.item);
+        final isCoreSelected = candidate.corePriorityRank == 1;
+        if (isCoreSelected) {
+          coreSelectedCount++;
+        }
+        debugPrint('[MandiHome] core_commodity_selected=$isCoreSelected');
+      }
+    }
+
+    final hasWheatCandidate = compositionOrdered.any(
+      (candidate) => candidate.canonicalCommodityKey == 'wheat',
+    );
+    final hasWheatSelected = picked.any(
+      (item) => _canonicalHomeCommodityKey(item.crop) == 'wheat',
+    );
+    if (hasWheatCandidate && !hasWheatSelected) {
+      _TickerCandidate? wheatCandidate;
+      for (final candidate in compositionOrdered) {
+        if (candidate.canonicalCommodityKey == 'wheat' &&
+            candidate.subcategoryKey.isNotEmpty) {
+          wheatCandidate = candidate;
+          break;
+        }
+      }
+      if (wheatCandidate != null) {
+        final wheatPriceBucket = (wheatCandidate.item.price / 50).round();
+        final wheatDedupeKey =
+            'wheat|${_normalizeLocationToken(wheatCandidate.item.location)}|${wheatCandidate.item.unit}|$wheatPriceBucket';
+
+        if (picked.length < 12 && !usedKeys.contains(wheatDedupeKey)) {
+          usedKeys.add(wheatDedupeKey);
+          commodityCount['wheat'] = (commodityCount['wheat'] ?? 0) + 1;
+          picked.add(wheatCandidate.item);
+          debugPrint('[MandiHome] wheat_injection=ticker_append');
+        } else {
+          var replaceIndex = -1;
+          var replaceRank = -1;
+          for (var i = 0; i < picked.length; i++) {
+            final item = picked[i];
+            final key = _canonicalHomeCommodityKey(item.crop);
+            if (key == 'wheat') continue;
+            final rank = _homeCommodityPriorityRankFromRaw(item.crop);
+            if (rank > replaceRank) {
+              replaceRank = rank;
+              replaceIndex = i;
+            }
+          }
+          if (replaceIndex >= 0) {
+            final removed = picked[replaceIndex];
+            final removedKey = _canonicalHomeCommodityKey(removed.crop);
+            if (removedKey.isNotEmpty) {
+              final current = commodityCount[removedKey] ?? 0;
+              if (current <= 1) {
+                commodityCount.remove(removedKey);
+              } else {
+                commodityCount[removedKey] = current - 1;
+              }
+            }
+            commodityCount['wheat'] = (commodityCount['wheat'] ?? 0) + 1;
+            usedKeys.add(wheatDedupeKey);
+            picked[replaceIndex] = wheatCandidate.item;
+            debugPrint(
+              '[MandiHome] wheat_injection=ticker_replace replaced_rank=$replaceRank',
+            );
+          }
         }
       }
     }
 
+    coreSelectedCount = picked
+        .where((item) => _homeCommodityPriorityRankFromRaw(item.crop) == 1)
+        .length;
+
+    // Add safe Urdu fallback messages when core rows are missing.
+    const fallbackMessages = <String>[
+      'گندم کے تازہ ریٹس زیرِ تصدیق ہیں',
+      'چاول کے سرکاری ریٹس اپڈیٹ ہو رہے ہیں',
+      'برائلر کے ریٹس جلد دستیاب ہوں گے',
+    ];
+    if (coreSelectedCount == 0 && picked.length < 6) {
+      for (final message in fallbackMessages) {
+        if (picked.length >= 6) break;
+        picked.add(
+          _MandiTickerItem(
+            crop: message,
+            location: '',
+            price: 0,
+            trendSymbol: '•',
+            subcategoryKey: 'fallback_message',
+            subcategoryLabel: 'fallback_message',
+            unit: '',
+            sourceSelected: 'home_core_fallback',
+            isFallbackMessage: true,
+            fallbackMessage: message,
+          ),
+        );
+        fallbackMessageUsed = true;
+        debugPrint('[MandiHome] fallback_message_used=true message=$message');
+      }
+    }
+
+    coreSelectedCount = picked
+        .where((item) => _homeCommodityPriorityRankFromRaw(item.crop) == 1)
+        .length;
+
+    debugPrint('[MandiHome] overflow_used=$overflowUsed');
+    debugPrint('[MandiHome] overflow_reason=$overflowReason');
+    debugPrint('[MandiHome] fallback_message_used=$fallbackMessageUsed');
+    debugPrint('[MandiHome] final_home_ticker_core_count=$coreSelectedCount');
+
     stats.parsedItems = candidates.length;
     stats.finalTickerItems = picked.length;
+    for (final item in picked.take(12)) {
+      debugPrint(
+        '[MandiPulse] source_selected=${item.sourceSelected.isEmpty ? '-' : item.sourceSelected}',
+      );
+    }
     return _MandiParseResult(items: picked, stats: stats);
   }
 
@@ -1159,49 +1907,88 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
     required String subcategoryRaw,
     required String commodityRaw,
   }) {
-    final source = '${subcategoryRaw.trim()} ${commodityRaw.trim()}'.toLowerCase();
+    final source = '${subcategoryRaw.trim()} ${commodityRaw.trim()}'
+        .toLowerCase();
     if (source.trim().isEmpty) return '';
 
-    if (source.contains('vegetable') || source.contains('سبزی') ||
-        source.contains('onion') || source.contains('tomato') ||
-        source.contains('potato') || source.contains('brinjal') ||
-        source.contains('okra') || source.contains('cabbage') ||
-        source.contains('carrot') || source.contains('cauliflower')) {
+    if (source.contains('vegetable') ||
+        source.contains('سبزی') ||
+        source.contains('onion') ||
+        source.contains('tomato') ||
+        source.contains('potato') ||
+        source.contains('brinjal') ||
+        source.contains('okra') ||
+        source.contains('cabbage') ||
+        source.contains('carrot') ||
+        source.contains('cauliflower')) {
       return 'vegetables';
     }
-    if (source.contains('fruit') || source.contains('پھل') ||
-        source.contains('apple') || source.contains('banana') ||
-        source.contains('mango') || source.contains('orange') ||
-        source.contains('guava') || source.contains('dates')) {
+    if (source.contains('fruit') ||
+        source.contains('پھل') ||
+        source.contains('apple') ||
+        source.contains('banana') ||
+        source.contains('mango') ||
+        source.contains('orange') ||
+        source.contains('guava') ||
+        source.contains('dates')) {
       return 'fruits';
     }
-    if (source.contains('pulse') || source.contains('dal') || source.contains('دال') ||
-        source.contains('lentil') || source.contains('gram') || source.contains('moong') ||
-        source.contains('masoor') || source.contains('mash') || source.contains('chana')) {
+    if (source.contains('pulse') ||
+        source.contains('dal') ||
+        source.contains('دال') ||
+        source.contains('lentil') ||
+        source.contains('gram') ||
+        source.contains('moong') ||
+        source.contains('masoor') ||
+        source.contains('mash') ||
+        source.contains('chana')) {
       return 'pulses';
     }
     if (source.contains('seed') || source.contains('بیج')) {
       return 'seeds';
     }
-    if (source.contains('spice') || source.contains('مصالح') || source.contains('chilli') ||
-        source.contains('pepper') || source.contains('turmeric') || source.contains('haldi')) {
+    if (source.contains('spice') ||
+        source.contains('مصالح') ||
+        source.contains('chilli') ||
+        source.contains('pepper') ||
+        source.contains('turmeric') ||
+        source.contains('haldi')) {
       return 'spices';
     }
-    if (source.contains('milk') || source.contains('dairy') || source.contains('دودھ') ||
-        source.contains('ghee') || source.contains('butter') || source.contains('cream')) {
+    if (source.contains('milk') ||
+        source.contains('dairy') ||
+        source.contains('دودھ') ||
+        source.contains('ghee') ||
+        source.contains('butter') ||
+        source.contains('cream')) {
       return 'dairy';
     }
-    if (source.contains('livestock') || source.contains('مویشی') || source.contains('animal') ||
-        source.contains('cattle') || source.contains('goat') || source.contains('sheep') ||
-        source.contains('bakra') || source.contains('cow') || source.contains('buffalo')) {
+    if (source.contains('livestock') ||
+        source.contains('مویشی') ||
+        source.contains('animal') ||
+        source.contains('cattle') ||
+        source.contains('goat') ||
+        source.contains('sheep') ||
+        source.contains('bakra') ||
+        source.contains('cow') ||
+        source.contains('buffalo')) {
       return 'livestock';
     }
-    if (source.contains('crop') || source.contains('grain') ||
-        source.contains('wheat') || source.contains('گندم') ||
-        source.contains('rice') || source.contains('paddy') || source.contains('چاول') ||
-        source.contains('corn') || source.contains('maize') || source.contains('مکئی') ||
-        source.contains('cotton') || source.contains('sugarcane') ||
-        source.contains('barley') || source.contains('jowar') || source.contains('bajra')) {
+    if (source.contains('crop') ||
+        source.contains('grain') ||
+        source.contains('wheat') ||
+        source.contains('گندم') ||
+        source.contains('rice') ||
+        source.contains('paddy') ||
+        source.contains('چاول') ||
+        source.contains('corn') ||
+        source.contains('maize') ||
+        source.contains('مکئی') ||
+        source.contains('cotton') ||
+        source.contains('sugarcane') ||
+        source.contains('barley') ||
+        source.contains('jowar') ||
+        source.contains('bajra')) {
       return 'crops';
     }
 
@@ -1538,7 +2325,7 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
   }
 
   String _cleanTickerLocation(String raw) {
-    final value = _toUrduLocationLabel(raw).trim();
+    final value = getLocalizedCityName(raw, MandiDisplayLanguage.urdu).trim();
     if (value.isEmpty) return '';
     final lower = value.toLowerCase();
     if (lower == 'pakistan' || lower == 'all pakistan' || lower == 'pk') {
@@ -1567,18 +2354,84 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
     final value = raw.trim();
     if (value.isEmpty) return '';
     if (_isLikelyUrdu(value)) return value;
+    final String? urduInParens = RegExp(
+      r'\(([\u0600-\u06FF\s]+)\)',
+    ).firstMatch(value)?.group(1)?.trim();
+    if ((urduInParens ?? '').isNotEmpty &&
+        urduInParens != 'درجن' &&
+        urduInParens != 'کلو') {
+      return urduInParens!;
+    }
+
+    final normalized = value
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (_englishToUrduCommodity.containsKey(normalized)) {
+      return _englishToUrduCommodity[normalized]!;
+    }
+    if (normalized.contains('banana') && normalized.contains('dozen')) {
+      return 'کیلا (درجن)';
+    }
+    if (normalized.contains('capsicum') || normalized.contains('shimla')) {
+      return 'شملہ مرچ';
+    }
+    if ((normalized.contains('gram') && normalized.contains('black')) ||
+        normalized.contains('black gram')) {
+      return 'کالا چنا';
+    }
+    if (normalized.contains('potato') && normalized.contains('fresh')) {
+      return 'آلو';
+    }
+    if (normalized.contains('garlic') && normalized.contains('china')) {
+      return 'لہسن چائنہ';
+    }
+    if (normalized.contains('moong')) return 'مونگ';
+    if (normalized.contains('coriander')) return 'دھنیا';
+    if (normalized.contains('tomato')) return 'ٹماٹر';
+    if (normalized.contains('potato') && !normalized.contains('fresh')) return 'آلو';
+    if (normalized.contains('onion')) return 'پیاز';
 
     final lower = value.toLowerCase();
-    if (_englishToUrduCommodity.containsKey(lower)) {
-      return _englishToUrduCommodity[lower]!;
-    }
     if (lower.contains('wheat')) return 'گندم';
+    if (lower.contains('gandum')) return 'گندم';
     if (lower.contains('rice') || lower.contains('paddy')) return 'چاول';
+    if (lower.contains('chawal')) return 'چاول';
     if (lower.contains('corn') || lower.contains('maize')) return 'مکئی';
+    if (lower.contains('broiler') || lower.contains('chicken')) {
+      return 'برائلر';
+    }
     if (lower.contains('mango')) return 'آم';
+    if (lower.contains('banana') || lower.contains('kela') || lower.contains('kaila')) {
+      return 'کیلا';
+    }
+    if (lower.contains('egg') || lower.contains('anda') || lower.contains('anday')) {
+      return 'انڈے';
+    }
+    if (lower.contains('aalu') || lower.contains('alu')) return 'آلو';
+    if (lower.contains('pyaz')) return 'پیاز';
+    if (lower.contains('tamatar') || lower.contains('tomatar')) return 'ٹماٹر';
+    if (lower.contains('shimla mirch')) return 'شملہ مرچ';
+    if (lower.contains('apple')) return 'سیب';
+    if (lower.contains('carrot')) return 'گاجر';
+    if (lower.contains('radish') || lower.contains('muli')) return 'مولی';
+    if (lower.contains('turnip')) return 'شلجم';
+    if (lower.contains('cauliflower')) return 'پھول گوبھی';
+    if (lower.contains('cabbage')) return 'بند گوبھی';
+    if (lower.contains('spinach')) return 'پالک';
+    if (lower.contains('peas')) return 'مٹر';
+    if (lower.contains('ginger')) return 'ادرک';
+    if (lower.contains('turmeric')) return 'ہلدی';
+    if (lower.contains('chili') || lower.contains('chilli')) return 'مرچ';
+    if (lower.contains('brinjal') || lower.contains('eggplant')) return 'بینگن';
     if (lower.contains('cotton')) return 'کپاس';
+    if (lower.contains('sugarcane') || lower.contains('ganna')) return 'گنا';
     if (lower == 'dap') return 'ڈی اے پی';
-    return value;
+    if (lower.contains('urea')) return 'یوریا';
+    
+    // Hard ban on raw English names in user-facing mandi widgets.
+    return 'اجناس';
   }
 
   String _normalizeCommodityKey(String input) {
@@ -1587,6 +2440,38 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
         .toLowerCase()
         .replaceAll(RegExp(r'[^a-z0-9\u0600-\u06FF]+'), ' ')
         .replaceAll(RegExp(r'\s+'), ' ');
+  }
+
+  String _canonicalHomeCommodityKey(String raw) {
+    if (raw.trim().isEmpty) return '';
+    return MandiHomePresenter.normalizeCommodityKey(raw);
+  }
+
+  int _homeCommodityPriorityRankFromRaw(String raw) {
+    final key = _canonicalHomeCommodityKey(raw);
+    switch (key) {
+      case 'wheat':
+      case 'rice':
+        return 1;
+      case 'broiler_chicken':
+      case 'potato':
+      case 'onion':
+      case 'tomato':
+        return 2;
+      case 'banana':
+      case 'eggs':
+        return 3;
+      case 'capsicum':
+      case 'garlic':
+      case 'ginger':
+        return 4;
+      default:
+        return 4;
+    }
+  }
+
+  bool _isCoreHomeCommodityRaw(String raw) {
+    return _homeCommodityPriorityRankFromRaw(raw) == 1;
   }
 
   bool _isLikelyUrdu(String input) {
@@ -1614,17 +2499,29 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    const darkGreen = AppColors.background;
+    const darkGreen = Color(0xFF0B2F26);
+    final bool bakraMandiEnabled = SeasonalBakraMandiConfig.isEnabled(
+      _bakraRuntimeEnabled,
+    );
+    debugPrint('[BakraToggle] final_visible=$bakraMandiEnabled');
 
     return Scaffold(
       backgroundColor: darkGreen,
-      floatingActionButton: CustomerSupportFab(
-        userName: (widget.userData['name'] ?? '').toString(),
-        mini: true,
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          AarhatAssistantFab(userData: widget.userData),
+          const SizedBox(height: 10),
+          CustomerSupportFab(
+            userName: (widget.userData['name'] ?? '').toString(),
+            mini: true,
+          ),
+        ],
       ),
       appBar: CustomAppBar(
         centerTitle: true,
-        backgroundColor: Colors.transparent,
+        backgroundColor: const Color(0xFF0E3B2E),
+        foregroundColor: const Color(0xFFF7FBF8),
         titleWidget: const AppLogo(height: 30),
         actions: [
           IconButton(
@@ -1666,38 +2563,44 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
               color: AppColors.accentGold,
             ),
           ),
-          CustomerSupportIconAction(
-            userName: (widget.userData['name'] ?? '').toString(),
-          ),
         ],
       ),
       body: Column(
         children: [
           Container(
             decoration: BoxDecoration(
-              color: AppColors.softGlassTintedSurface,
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: <Color>[
+                  const Color(0xFF145A41).withValues(alpha: 0.48),
+                  const Color(0xFF0E3B2E).withValues(alpha: 0.34),
+                ],
+              ),
               border: Border(
-                bottom: BorderSide(color: AppColors.softGlassBorder),
+                bottom: BorderSide(
+                  color: const Color(0xFFFFFFFF).withValues(alpha: 0.12),
+                ),
               ),
             ),
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+            padding: const EdgeInsets.fromLTRB(16, 7, 16, 9),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   'فوری تلاش کریں، بہترین آفر دیکھیں',
                   style: TextStyle(
-                    color: AppColors.secondaryText,
-                    fontSize: 12,
+                    color: const Color(0xFFD7E8DD),
+                    fontSize: 11.8,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 5),
                 _buildSearchBar(),
-                const SizedBox(height: 6),
+                const SizedBox(height: 5),
                 _buildTopMandiTicker(),
-                if (SeasonalBakraMandiConfig.isEnabled) ...[
-                  const SizedBox(height: 8),
+                if (bakraMandiEnabled) ...[
+                  const SizedBox(height: 10),
                   _buildBakraMandiEntryCard(),
                 ],
               ],
@@ -1763,6 +2666,12 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
                 });
                 unawaited(_refreshWeatherAdvisoryOnly());
               },
+              selectedHomeCategoryId: _selectedHomeCategoryId,
+              onSelectHomeCategoryId: (String? categoryId) {
+                setState(() {
+                  _selectedHomeCategoryId = categoryId;
+                });
+              },
               isSeller:
                   (widget.userData['role'] ??
                           widget.userData['userRole'] ??
@@ -1781,7 +2690,7 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
   Widget _buildBakraMandiEntryCard() {
     Future<void> openEntry([String? animalType]) async {
       await _analyticsService.logEvent(
-        event: 'bakra_home_card_tap',
+        event: 'bakra_mandi_home_card_open',
         data: <String, dynamic>{
           'surface': 'buyer_home',
           'animalType': animalType ?? 'all',
@@ -1794,118 +2703,248 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
       );
     }
 
-    Widget animalChip(String type, String label) {
-      return Expanded(
-        child: OutlinedButton(
-          style: OutlinedButton.styleFrom(
-            side: BorderSide(color: Colors.white.withValues(alpha: 0.4)),
-            foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(vertical: 8),
-          ),
-          onPressed: () => openEntry(type),
-          child: Text(
-            label,
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
-          ),
-        ),
-      );
-    }
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final bool compact = constraints.maxWidth < 360;
+        final double ctaHeight = compact ? 36 : 40;
+        final double miniCardAspectRatio = compact ? 1.42 : 1.48;
+        final double miniLabelFontSize = compact ? 9.2 : 9.7;
+        final EdgeInsets miniLabelPadding = EdgeInsets.fromLTRB(
+          compact ? 8 : 9,
+          compact ? 16 : 18,
+          compact ? 8 : 9,
+          compact ? 7 : 8,
+        );
 
-    return Container(
-      height: 170,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        gradient: const LinearGradient(
-          colors: <Color>[Color(0xFF194B30), Color(0xFF24563A)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        border: Border.all(color: AppColors.softGlassBorder),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'عید بکرا منڈی',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 18),
-          ),
-          const Text(
-            'Eid Bakra Mandi',
-            style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w600, fontSize: 12),
-          ),
-          const SizedBox(height: 6),
-          const Text(
-            'قربانی کے جانور خریدیں یا فروخت کریں',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 12),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              animalChip('bakray', 'بکرے / Bakray'),
-              const SizedBox(width: 6),
-              animalChip('gaye', 'گائے / Gaye'),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              animalChip('dumba', 'دنبہ / Dumba'),
-              const SizedBox(width: 6),
-              animalChip('oont', 'اونٹ / Oont'),
-            ],
-          ),
-          const Spacer(),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              style: FilledButton.styleFrom(
-                backgroundColor: AppColors.accentGold,
-                foregroundColor: AppColors.ctaTextDark,
-              ),
-              onPressed: () => openEntry(),
-              icon: const Icon(Icons.visibility_rounded, size: 18),
-              label: const Text('جانور دیکھیں / Explore Animals'),
+        return Container(
+          padding: EdgeInsets.fromLTRB(10, compact ? 9 : 10, 10, 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            gradient: const LinearGradient(
+              colors: <Color>[Color(0xFF194B30), Color(0xFF24563A)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
             ),
+            border: Border.all(color: AppColors.softGlassBorder),
           ),
-        ],
-      ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'عید بکرا منڈی',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                  fontSize: compact ? 16.5 : 17.5,
+                ),
+              ),
+              Text(
+                'Eid Bakra Mandi',
+                style: TextStyle(
+                  color: Colors.white70,
+                  fontWeight: FontWeight.w600,
+                  fontSize: compact ? 11 : 11.8,
+                ),
+              ),
+              SizedBox(height: compact ? 4 : 5),
+              Text(
+                'قربانی کے جانور خریدیں یا فروخت کریں',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                  fontSize: compact ? 11.2 : 11.8,
+                ),
+              ),
+              SizedBox(height: compact ? 6 : 7),
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: _bakraMiniCardItems.length,
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  mainAxisSpacing: 6,
+                  crossAxisSpacing: 6,
+                  childAspectRatio: miniCardAspectRatio,
+                ),
+                itemBuilder: (context, index) {
+                  final item = _bakraMiniCardItems[index];
+                  return Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.14),
+                      ),
+                      boxShadow: const <BoxShadow>[
+                        BoxShadow(
+                          color: Color(0x19000000),
+                          blurRadius: 8,
+                          offset: Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(14),
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          onTap: () => openEntry(item.type),
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              Positioned.fill(
+                                child: Image.asset(
+                                  item.assetPath,
+                                  fit: item.imageFit,
+                                  alignment: item.imageAlignment,
+                                  errorBuilder: (context, error, stackTrace) =>
+                                      Container(
+                                        decoration: BoxDecoration(
+                                          gradient: LinearGradient(
+                                            begin: Alignment.topCenter,
+                                            end: Alignment.bottomCenter,
+                                            colors: <Color>[
+                                              Colors.white.withValues(
+                                                alpha: 0.16,
+                                              ),
+                                              Colors.white.withValues(
+                                                alpha: 0.05,
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        alignment: Alignment.center,
+                                        child: Icon(
+                                          item.fallbackIcon,
+                                          color: Colors.white54,
+                                          size: 28,
+                                        ),
+                                      ),
+                                ),
+                              ),
+                              Positioned.fill(
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      begin: Alignment.topCenter,
+                                      end: Alignment.bottomCenter,
+                                      colors: <Color>[
+                                        Colors.black.withValues(alpha: 0.03),
+                                        Colors.black.withValues(alpha: 0.00),
+                                        Colors.black.withValues(alpha: 0.26),
+                                        Colors.black.withValues(alpha: 0.64),
+                                      ],
+                                      stops: const <double>[0, 0.38, 0.68, 1],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              Positioned(
+                                left: 0,
+                                right: 0,
+                                bottom: 0,
+                                child: Container(
+                                  padding: miniLabelPadding,
+                                  alignment: Alignment.bottomCenter,
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      begin: Alignment.topCenter,
+                                      end: Alignment.bottomCenter,
+                                      colors: <Color>[
+                                        Colors.black.withValues(alpha: 0.08),
+                                        Colors.black.withValues(alpha: 0.24),
+                                      ],
+                                    ),
+                                  ),
+                                  child: Text(
+                                    item.label,
+                                    textAlign: TextAlign.center,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: miniLabelFontSize + 1,
+                                      fontWeight: FontWeight.w700,
+                                      height: 1.1,
+                                      letterSpacing: 0.3,
+                                      shadows: const <Shadow>[
+                                        Shadow(
+                                          color: Color(0x80000000),
+                                          blurRadius: 6,
+                                          offset: Offset(0, 1),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+              SizedBox(height: compact ? 8 : 9),
+              SizedBox(
+                width: double.infinity,
+                height: ctaHeight,
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.accentGold,
+                    foregroundColor: AppColors.ctaTextDark,
+                    padding: EdgeInsets.zero,
+                  ),
+                  onPressed: () => openEntry(),
+                  icon: Icon(Icons.visibility_rounded, size: compact ? 16 : 18),
+                  label: Text(
+                    'جانور دیکھیں / Explore Animals',
+                    style: TextStyle(fontSize: compact ? 12 : 12.8),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
   Widget _buildSearchBar() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
       decoration: BoxDecoration(
-        color: AppColors.softGlassTintedSurface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.softGlassBorder),
+        color: const Color(0xFF145A41).withValues(alpha: 0.34),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: const Color(0xFFFFFFFF).withValues(alpha: 0.14),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0x29000000),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Row(
         children: [
-          const Icon(
-            Icons.search_rounded,
-            color: AppColors.accentGold,
-            size: 19,
-          ),
+          const Icon(Icons.search_rounded, color: Color(0xFFE4C46A), size: 19),
           const SizedBox(width: 8),
           Expanded(
             child: TextField(
               onChanged: (value) =>
                   setState(() => _searchQuery = value.trim().toLowerCase()),
               style: const TextStyle(
-                color: AppColors.primaryText,
-                fontSize: 13,
+                color: Color(0xFFF7FBF8),
+                fontSize: 13.2,
                 fontWeight: FontWeight.w600,
               ),
               decoration: const InputDecoration(
                 hintText:
                     'Search crops, district, or mandi / فصل، ضلع یا منڈی تلاش کریں',
-                hintStyle: TextStyle(
-                  color: AppColors.secondaryText,
-                  fontSize: 11.8,
-                ),
+                hintStyle: TextStyle(color: Color(0xFFD7E8DD), fontSize: 12),
                 border: InputBorder.none,
                 isDense: true,
                 contentPadding: EdgeInsets.zero,
@@ -1917,25 +2956,23 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
             onTap: _openAdvancedFilters,
             borderRadius: BorderRadius.circular(8),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
-                color: AppColors.softGlassSurface,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: AppColors.softGlassBorder),
+                color: const Color(0xFF0E3B2E).withValues(alpha: 0.58),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: const Color(0xFFFFFFFF).withValues(alpha: 0.12),
+                ),
               ),
               child: const Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(
-                    Icons.tune_rounded,
-                    color: AppColors.accentGold,
-                    size: 16,
-                  ),
+                  Icon(Icons.tune_rounded, color: Color(0xFFE4C46A), size: 16),
                   SizedBox(width: 4),
                   Text(
                     'Filters / فلٹرز',
                     style: TextStyle(
-                      color: AppColors.accentGold,
+                      color: Color(0xFFE4C46A),
                       fontSize: 11.5,
                       fontWeight: FontWeight.w700,
                     ),
@@ -1951,27 +2988,29 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
 
   // ignore: unused_element
   Widget _buildTopMandiTicker() {
-    final String tickerText = _liveMandiTickerItems.isEmpty
+    final tickerLines = _liveMandiTickerItems
+        .map((item) => _formatTickerItemText(item))
+        .where((line) => line.isNotEmpty)
+        .toList(growable: false);
+    final String tickerText = tickerLines.isEmpty
         ? (_mandiTickerInfoText ?? 'تازہ منڈی ریٹ لوڈ ہو رہے ہیں۔')
-        : _liveMandiTickerItems
-              .map((item) => _formatTickerItemText(item))
-              .join('   •   ');
+        : tickerLines.join('   ◦   ');
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            const Color(0xFFD4AF37).withValues(alpha: 0.14),
-            AppColors.primaryText.withValues(alpha: 0.03),
+            const Color(0xFFC9A646).withValues(alpha: 0.17),
+            const Color(0xFF145A41).withValues(alpha: 0.36),
           ],
           begin: Alignment.centerLeft,
           end: Alignment.centerRight,
         ),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: const Color(0xFFE8C766).withValues(alpha: 0.28),
+          color: const Color(0xFFFFFFFF).withValues(alpha: 0.12),
         ),
       ),
       child: Row(
@@ -1979,13 +3018,13 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
           const Icon(
             Icons.graphic_eq_rounded,
             size: 13,
-            color: Color(0xFFE8C766),
+            color: Color(0xFFE4C46A),
           ),
           const SizedBox(width: 5),
           const Text(
             'لائیو منڈی ٹکر',
             style: TextStyle(
-              color: Color(0xFFEFD88A),
+              color: Color(0xFFEAF6EE),
               fontSize: 10.8,
               fontWeight: FontWeight.w700,
             ),
@@ -2001,8 +3040,8 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
                 maxLines: 1,
                 textDirection: TextDirection.ltr,
                 style: const TextStyle(
-                  color: AppColors.primaryText,
-                  fontSize: 10.9,
+                  color: Color(0xFFF7FBF8),
+                  fontSize: 11,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -2014,14 +3053,80 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
   }
 
   String _formatTickerItemText(_MandiTickerItem item) {
-    final crop = _toUrduCommodityLabel(item.crop).trim().isEmpty
-        ? 'اجناس'
-        : _toUrduCommodityLabel(item.crop).trim();
+    if (item.isFallbackMessage) {
+      final message = item.fallbackMessage.trim();
+      if (message.isNotEmpty) {
+        debugPrint('[MandiHome] fallback_message_used=true');
+        debugPrint('[MandiHome] home_visible_ticker_line=$message');
+        return message;
+      }
+      return '';
+    }
+
     final location = _cleanTickerLocation(item.location).isEmpty
         ? _tickerFallbackLocalityLabel()
         : _cleanTickerLocation(item.location);
-    final trend = item.trendSymbol.trim().isEmpty ? '•' : item.trendSymbol;
-      return '$crop | $location | ${item.price.toStringAsFixed(0)} روپے $trend';
+    final row = MandiHomePresenter.buildDisplayRow(
+      commodityRaw: item.crop,
+      city: location,
+      district: '',
+      province: '',
+      unitRaw: item.unit,
+      price: item.price,
+      sourceSelected: item.sourceSelected,
+      confidence: 1,
+      renderPath: MandiHomeRenderPath.ticker,
+    );
+    if (!row.isRenderable) {
+      return '';
+    }
+    debugPrint('[MandiHome] home_visible_ticker_line=${row.fullTickerLine}');
+    return row.fullTickerLine;
+  }
+
+  /// Converts a raw unit string (e.g. 'per 100kg', 'maund', 'dozen') to a
+  /// short Urdu display label. Crop-name overrides take priority.
+  static String _normalizeRateUnitUrdu(String unitRaw, String cropRaw) {
+    final c = cropRaw.trim().toLowerCase();
+    // Crop-based overrides: banana is always per dozen regardless of stored unit
+    // Crop-based overrides take priority, but respect explicit unit signals
+    if (c.contains('banana') || c.contains('کیلا')) {
+      final u = unitRaw.trim().toLowerCase();
+      if (u.contains('crate') || u.contains('کریٹ')) return 'کریٹ';
+      if (u.contains('peti') || u.contains('پیٹی')) return 'پیٹی';
+      return 'درجن';
+    }
+    if (c.contains('egg') || c.contains('eggs') || c.contains('انڈا')) {
+      final u = unitRaw.trim().toLowerCase();
+      if (u.contains('tray') || u.contains('ٹری')) return 'ٹری';
+      return 'درجن';
+    }
+    if (c.contains('broiler') || c.contains('chicken') || c.contains('برائلر')) {
+      return 'کلو';
+    }
+    if (c.contains('lemon') || c.contains('لیموں') || c.contains('nimbu')) {
+      return 'درجن';
+    }
+
+    final u = unitRaw.trim().toLowerCase();
+    if (u.contains('piece') || u == 'pc' || u == 'pcs') return 'عدد';
+    if (u.contains('100') && u.contains('kg')) return '100 کلو';
+    if (u.contains('40') && u.contains('kg')) return '40 کلو';
+    if (u.contains('maund') || u.contains('mond') || u.contains('mann')) {
+      return '40 کلو';
+    }
+    if (u.contains('50') && u.contains('kg')) return '50 کلو';
+    if (u.contains('dozen') || u.contains('doz')) return 'درجن';
+    if (u.contains('tray') || u.contains('ٹرے') || u.contains('ٹری')) {
+      return 'ٹری';
+    }
+    if (u.contains('crate') || u.contains('peti') || u.contains('petty')) {
+      return 'کریٹ';
+    }
+    if (u == 'kg' || u == 'per kg' || u == 'perkg') return 'کلو';
+    if (u.contains('kg')) return 'کلو';
+    // Default: AMIS prices are per 100kg
+    return '100 کلو';
   }
 
   String _tickerFallbackLocalityLabel() {
@@ -2032,16 +3137,16 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
       _selectedProvinceFilter,
     ]);
     if (selected.isNotEmpty) {
-      return 'منتخب مقام: ${_toUrduLocationLabel(selected)}';
+      return _toUrduLocationLabel(selected);
     }
 
     final buyerDistrict = _toUrduLocationLabel(
       (widget.userData['district'] ?? '').toString(),
     ).trim();
     if (buyerDistrict.isNotEmpty) {
-      return 'موجودہ ضلع: $buyerDistrict';
+      return buyerDistrict;
     }
-    return 'مقامی ریٹ';
+    return 'پاکستان';
   }
 
   static const Map<String, String> _englishToUrduCommodity = <String, String>{
@@ -2051,8 +3156,75 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
     'corn': 'مکئی',
     'maize': 'مکئی',
     'mango': 'آم',
+    'banana': 'کیلا',
+    'banana dozen': 'کیلا (درجن)',
+    'banana dozenes': 'کیلا (درجن)',
+    'banana dozen pack': 'کیلا (درجن)',
+    'banana dozen price': 'کیلا (درجن)',
+    'banana dozn': 'کیلا (درجن)',
+    'banana(dozen)': 'کیلا (درجن)',
+    'apple': 'سیب',
+    'orange': 'مالٹا',
+    'guava': 'امرود',
+    'grape': 'انگور',
+    'grapes': 'انگور',
+    'watermelon': 'تربوز',
+    'melon': 'خربوزہ',
+    'pomegranate': 'انار',
+    'date': 'کھجور',
+    'dates': 'کھجور',
+    'tomato': 'ٹماٹر',
+    'potato': 'آلو',
+    'potato fresh': 'آلو',
+    'onion': 'پیاز',
+    'garlic': 'لہسن',
+    'garlic china': 'لہسن چائنہ',
+    'garlic chinese': 'لہسن چائنہ',
+    'capsicum': 'شملہ مرچ',
+    'capsicum shimla mirch': 'شملہ مرچ',
+    'coriander': 'دھنیا',
+    'chili': 'مرچ',
+    'chilli': 'مرچ',
+    'green chili': 'ہری مرچ',
+    'red chili': 'لال مرچ',
+    'carrot': 'گاجر',
+    'radish': 'مولی',
+    'turnip': 'شلجم',
+    'peas': 'مٹر',
+    'ginger': 'ادرک',
+    'turmeric': 'ہلدی',
+    'brinjal': 'بینگن',
+    'eggplant': 'بینگن',
+    'spinach': 'پالک',
+    'cauliflower': 'پھول گوبھی',
+    'cabbage': 'بند گوبھی',
+    'bitter gourd': 'کریلا',
+    'bottle gourd': 'لوکی',
+    'cucumber': 'کھیرا',
+    'pumpkin': 'سردا',
+    'beetroot': 'چقندر',
+    'bean': 'لوبیا',
+    'beans': 'لوبیا',
+    'gram black': 'کالا چنا',
+    'black gram': 'کالا چنا',
+    'moong': 'مونگ',
+    'moong bean': 'مونگ',
+    'lentil': 'مسور',
+    'masoor': 'مسور',
+    'chickpea': 'چنا',
+    'chana': 'چنا',
+    'lentils': 'دالیں',
+    'urid': 'اڑد',
+    'urad': 'اڑد',
+    'toor': 'توڑ',
+    'turdal': 'توڑ',
     'cotton': 'کپاس',
+    'sugarcane': 'گنا',
+    'tobacco': 'تمباکو',
     'dap': 'ڈی اے پی',
+    'urea': 'یوریا',
+    'potash': 'پوٹاش',
+    'fertilizer': 'کھاد',
   };
 
   static const Map<String, String> _englishToUrduLocation = <String, String>{
@@ -2149,6 +3321,7 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
       final provinceUrduByEn = <String, String>{};
       final districtUrduByEn = <String, String>{};
       final tehsilUrduByEn = <String, String>{};
+      final cityUrduByEn = <String, String>{};
 
       for (final provinceItem in provincesRaw) {
         if (provinceItem is! Map) continue;
@@ -2182,10 +3355,27 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
                 final tehsilUr = (tehsil['name_ur'] ?? '').toString().trim();
                 tehsils.add(tehsilEn);
                 tehsilUrduByEn[tehsilEn] = tehsilUr;
-                // Keep city behavior aligned with Add Listing fallback: city list mirrors selected tehsil.
-                citiesByDistrictTehsil['$districtEn|$tehsilEn'] = <String>[
-                  tehsilEn,
-                ];
+                final List<String> cityNames = <String>[];
+                final dynamic rawCities = tehsil['cities'];
+                if (rawCities is List) {
+                  for (final dynamic cityItem in rawCities) {
+                    if (cityItem is! Map) continue;
+                    final Map<String, dynamic> city =
+                        cityItem.cast<String, dynamic>();
+                    final String cityEn =
+                        (city['name_en'] ?? '').toString().trim();
+                    if (cityEn.isEmpty) continue;
+                    final String cityUr =
+                        (city['name_ur'] ?? '').toString().trim();
+                    cityNames.add(cityEn);
+                    cityUrduByEn[cityEn] = cityUr;
+                  }
+                }
+                if (cityNames.isEmpty) {
+                  cityNames.add(tehsilEn);
+                  cityUrduByEn[tehsilEn] = tehsilUr;
+                }
+                citiesByDistrictTehsil['$districtEn|$tehsilEn'] = cityNames;
               }
             }
             tehsils.sort();
@@ -2218,6 +3408,9 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
         _tehsilUrduByEn
           ..clear()
           ..addAll(tehsilUrduByEn);
+        _cityUrduByEn
+          ..clear()
+          ..addAll(cityUrduByEn);
         _isFilterLocationAssetReady = true;
       });
     } catch (_) {
@@ -2329,6 +3522,7 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
         : MarketHierarchy.subcategoryDisplayFromProduct(readable);
   }
 
+  // ignore: unused_element
   void _clearAllFilters() {
     setState(() {
       _selectedSubcategoryId = null;
@@ -2349,11 +3543,23 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
   }
 
   String _homeCategoryLabel(MandiType type) {
-    return _homeCategoryLabels[type] ?? type.label;
+    for (final item in _homeCategories) {
+      if (item.type == type && item.id != 'poultry') {
+        return item.label;
+      }
+    }
+    return type.label;
   }
 
   String get selectedCategoryLabel {
     if (_selectedCategory == null) return '';
+    if (_selectedHomeCategoryId != null) {
+      for (final item in _homeCategories) {
+        if (item.id == _selectedHomeCategoryId) {
+          return item.label;
+        }
+      }
+    }
     return _homeCategoryLabel(_selectedCategory!);
   }
 
@@ -2400,21 +3606,19 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(
                   horizontal: 10,
-                  vertical: 8,
+                  vertical: 7,
                 ),
                 decoration: BoxDecoration(
-                  color: AppColors.primaryText.withValues(alpha: 0.05),
+                  color: AppColors.cardSurface,
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: AppColors.primaryText.withValues(alpha: 0.12),
-                  ),
+                  border: Border.all(color: AppColors.softGlassBorder),
                 ),
                 child: Text(
                   title,
                   style: const TextStyle(
-                    color: Color(0xFFE8C766),
-                    fontSize: 12,
+                    color: AppColors.primaryText,
                     fontWeight: FontWeight.w700,
+                    fontSize: 12,
                   ),
                 ),
               );
@@ -2425,36 +3629,25 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
                 labelText: label,
                 labelStyle: const TextStyle(color: AppColors.secondaryText),
                 filled: true,
-                fillColor: AppColors.primaryText.withValues(alpha: 0.06),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 12,
-                ),
+                fillColor: AppColors.cardSurface,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide(
-                    color: AppColors.primaryText.withValues(alpha: 0.18),
-                  ),
+                  borderSide: const BorderSide(color: AppColors.divider),
                 ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide(
-                    color: AppColors.primaryText.withValues(alpha: 0.18),
-                  ),
+                  borderSide: const BorderSide(color: AppColors.divider),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(
-                    color: Color(0xFFE8C766),
-                    width: 1.2,
-                  ),
+                  borderSide: const BorderSide(color: AppColors.accentGold),
                 ),
               );
             }
 
             List<DropdownMenuItem<String?>> locationMenuItems(
               List<String> values,
-              Map<String, String> urduMap,
+              Map<String, String> urduLookup,
             ) {
               return <DropdownMenuItem<String?>>[
                 const DropdownMenuItem<String?>(
@@ -2464,7 +3657,7 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
                 ...values.map(
                   (value) => DropdownMenuItem<String?>(
                     value: value,
-                    child: Text(_bilingualLocationLabel(value, urduMap)),
+                    child: Text(_bilingualLocationLabel(value, urduLookup)),
                   ),
                 ),
               ];
@@ -2740,7 +3933,7 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
                                         child: Text(
                                           _bilingualLocationLabel(
                                             value,
-                                            _tehsilUrduByEn,
+                                            _cityUrduByEn,
                                           ),
                                         ),
                                       ),
@@ -2875,32 +4068,52 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
                                 child: ElevatedButton(
                                   onPressed: () {
                                     FocusScope.of(context).unfocus();
-                                    setState(() {
-                                      _selectedCategory = tempCategory;
-                                      _selectedSubcategoryId = tempSubcategory;
-                                      _selectedProvinceFilter = tempProvince;
-                                      _selectedDistrictFilter = tempDistrict;
-                                      _selectedTehsilFilter = tempTehsil;
-                                      _selectedCityFilter = tempCity;
-                                      _selectedSaleType = tempSaleType;
-                                      _selectedSort = tempSort;
-                                      _minPriceFilter = double.tryParse(
-                                        minController.text.trim(),
-                                      );
-                                      _maxPriceFilter = double.tryParse(
-                                        maxController.text.trim(),
-                                      );
-                                      _minQuantityFilter = double.tryParse(
-                                        minQtyController.text.trim(),
-                                      );
-                                      _maxQuantityFilter = double.tryParse(
-                                        maxQtyController.text.trim(),
-                                      );
-                                      _verifiedOnly = tempVerifiedOnly;
-                                      _qurbaniOnly = tempQurbaniOnly;
-                                    });
-                                    unawaited(_refreshWeatherAdvisoryOnly());
+                                    // Capture text-field values while the
+                                    // controllers are still guaranteed live.
+                                    final parsedMinPrice = double.tryParse(
+                                      minController.text.trim(),
+                                    );
+                                    final parsedMaxPrice = double.tryParse(
+                                      maxController.text.trim(),
+                                    );
+                                    final parsedMinQty = double.tryParse(
+                                      minQtyController.text.trim(),
+                                    );
+                                    final parsedMaxQty = double.tryParse(
+                                      maxQtyController.text.trim(),
+                                    );
+                                    // IMPORTANT: pop the bottom-sheet BEFORE
+                                    // calling setState on the parent widget.
+                                    // Calling setState first marks the parent
+                                    // dirty while the sheet's InheritedElement
+                                    // dependents are still registered; when the
+                                    // overlay tears down those elements in the
+                                    // same frame it fires the Flutter assertion
+                                    // '_dependents.isEmpty': is not true.
                                     Navigator.of(context).pop();
+                                    if (mounted) {
+                                      setState(() {
+                                        _selectedCategory = tempCategory;
+                                        _selectedHomeCategoryId = null;
+                                        _selectedSubcategoryId =
+                                            tempSubcategory;
+                                        _selectedProvinceFilter = tempProvince;
+                                        _selectedDistrictFilter = tempDistrict;
+                                        _selectedTehsilFilter = tempTehsil;
+                                        _selectedCityFilter = tempCity;
+                                        _selectedSaleType = tempSaleType;
+                                        _selectedSort = tempSort;
+                                        _minPriceFilter = parsedMinPrice;
+                                        _maxPriceFilter = parsedMaxPrice;
+                                        _minQuantityFilter = parsedMinQty;
+                                        _maxQuantityFilter = parsedMaxQty;
+                                        _verifiedOnly = tempVerifiedOnly;
+                                        _qurbaniOnly = tempQurbaniOnly;
+                                      });
+                                      unawaited(
+                                        _refreshWeatherAdvisoryOnly(),
+                                      );
+                                    }
                                   },
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: AppColors.accentGold,
@@ -2997,7 +4210,10 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
           ),
           content: Text(
             message,
-            style: const TextStyle(color: AppColors.secondaryText, height: 1.25),
+            style: const TextStyle(
+              color: AppColors.secondaryText,
+              height: 1.25,
+            ),
           ),
           actions: [
             TextButton(
@@ -3036,35 +4252,104 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
     if (source.isEmpty) return const <_MandiTickerItem>[];
 
     final chosen = <_MandiTickerItem>[];
-    final subcategoryKeys = <String>{};
+    // Max 1 per commodity for snapshot diversity (snapshotCommodityCap).
+    final commodityCount = <String, int>{};
+    const snapshotCap = MandiHomePresenter.snapshotCommodityCap;
+    const snapshotHardRepeatCap = 2;
     final dedupeKeys = <String>{};
 
+    // First pass: one item per unique commodity.
     for (final item in source) {
       if (chosen.length >= 4) break;
-      final subcategory = item.subcategoryKey.trim().toLowerCase();
-      if (subcategory.isEmpty || subcategoryKeys.contains(subcategory)) continue;
+      if (item.isFallbackMessage) continue;
+      if (item.subcategoryKey.trim().isEmpty) continue;
       final commodity = _normalizeCommodityKey(item.crop);
       if (commodity.isEmpty) continue;
+      if ((commodityCount[commodity] ?? 0) >= snapshotCap) {
+        debugPrint(
+          '[MandiHome] diversity_skip_reason=snapshot_commodity_cap commodity=$commodity',
+        );
+        continue;
+      }
       final dedupe =
-          '$commodity|$subcategory|${_normalizeLocationToken(item.location)}';
+          '$commodity|${item.subcategoryKey.trim().toLowerCase()}|${_normalizeLocationToken(item.location)}';
       if (dedupeKeys.contains(dedupe)) continue;
 
-      subcategoryKeys.add(subcategory);
+      commodityCount[commodity] = (commodityCount[commodity] ?? 0) + 1;
       dedupeKeys.add(dedupe);
       chosen.add(item);
     }
 
+    // Second pass: fill remaining space if diversity pass left too few items.
     for (final item in source) {
-      if (chosen.length >= 4) break;
+      if (chosen.length >= 2) break;
+      if (item.isFallbackMessage) continue;
       final commodity = _normalizeCommodityKey(item.crop);
       if (commodity.isEmpty) continue;
+      if ((commodityCount[commodity] ?? 0) >= snapshotHardRepeatCap) {
+        debugPrint(
+          '[MandiHome] diversity_skip_reason=snapshot_hard_repeat_cap commodity=$commodity',
+        );
+        continue;
+      }
       final dedupe =
           '$commodity|${item.subcategoryKey.trim().toLowerCase()}|${_normalizeLocationToken(item.location)}';
       if (dedupeKeys.contains(dedupe)) continue;
       dedupeKeys.add(dedupe);
+      commodityCount[commodity] = (commodityCount[commodity] ?? 0) + 1;
       chosen.add(item);
     }
 
+    final hasWheatInSource = source.any(
+      (item) => !item.isFallbackMessage && _canonicalHomeCommodityKey(item.crop) == 'wheat',
+    );
+    final hasWheatInChosen = chosen.any(
+      (item) => _canonicalHomeCommodityKey(item.crop) == 'wheat',
+    );
+    if (hasWheatInSource && !hasWheatInChosen) {
+      _MandiTickerItem? wheatItem;
+      for (final item in source) {
+        if (item.isFallbackMessage) continue;
+        if (_canonicalHomeCommodityKey(item.crop) == 'wheat') {
+          wheatItem = item;
+          break;
+        }
+      }
+      if (wheatItem != null) {
+        if (chosen.length < 4) {
+          chosen.add(wheatItem);
+          debugPrint('[MandiHome] wheat_injection=snapshot_append');
+        } else {
+          var replaceIndex = -1;
+          var replaceRank = -1;
+          for (var i = 0; i < chosen.length; i++) {
+            final item = chosen[i];
+            final canonical = _canonicalHomeCommodityKey(item.crop);
+            if (canonical == 'wheat') continue;
+            final rank = _homeCommodityPriorityRankFromRaw(item.crop);
+            if (rank > replaceRank) {
+              replaceRank = rank;
+              replaceIndex = i;
+            }
+          }
+          if (replaceIndex >= 0) {
+            chosen[replaceIndex] = wheatItem;
+            debugPrint(
+              '[MandiHome] wheat_injection=snapshot_replace replaced_rank=$replaceRank',
+            );
+          }
+        }
+      }
+    }
+
+    final snapshotCoreCount = chosen
+        .where((item) => _isCoreHomeCommodityRaw(item.crop))
+        .length;
+
+    debugPrint(
+      '[MandiHome] final_home_snapshot_diversity_count=${commodityCount.keys.length}',
+    );
+    debugPrint('[MandiHome] final_home_snapshot_core_count=$snapshotCoreCount');
     return chosen;
   }
 
@@ -3080,7 +4365,9 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
     final snapshotItems = _buildNearbyMandiSnapshotItemsForDebug(
       parseResult.items,
     );
-    _logMandiQuery('LahoreProbe totalDocs=${docs.length} aliasValues=${values.join('|')}');
+    _logMandiQuery(
+      'LahoreProbe totalDocs=${docs.length} aliasValues=${values.join('|')}',
+    );
     _logMandiParse(
       'LahoreProbe parsedRecords=${parseResult.stats.parsedItems} rejectedRecords=${parseResult.stats.rejectedItems} '
       'finalTickerRendered=${parseResult.items.length}',
@@ -3117,8 +4404,24 @@ class _HomeIntelligenceHub extends StatelessWidget {
     required this.onSeeAllNearby,
     required this.selectedCategory,
     required this.onSelectCategory,
+    required this.selectedHomeCategoryId,
+    required this.onSelectHomeCategoryId,
     this.isSeller = false,
   });
+
+  static const Color _bgGreenDeep = Color(0xFF0B2F26);
+  static const Color _bgGreenBase = Color(0xFF0E3B2E);
+  static const Color _bgGreenMid = Color(0xFF145A41);
+  static const Color _bgGreenLift = Color(0xFF1C6B4A);
+  static const Color _accentGreen = Color(0xFF2A8A63);
+
+  static const Color _goldBase = Color(0xFFC9A646);
+  static const Color _goldLight = Color(0xFFE4C46A);
+  static const Color _goldDeep = Color(0xFFA3832A);
+
+  static const Color _textPrimary = Color(0xFFF7FBF8);
+  static const Color _textSoft = Color(0xFFEAF6EE);
+  static const Color _textMuted = Color(0xFFD7E8DD);
 
   final List<QueryDocumentSnapshot<Map<String, dynamic>>> listings;
   final String buyerProvince;
@@ -3143,6 +4446,8 @@ class _HomeIntelligenceHub extends StatelessWidget {
   final VoidCallback onSeeAllNearby;
   final MandiType? selectedCategory;
   final ValueChanged<MandiType> onSelectCategory;
+  final String? selectedHomeCategoryId;
+  final ValueChanged<String?> onSelectHomeCategoryId;
   final bool isSeller;
 
   @override
@@ -3286,6 +4591,50 @@ class _HomeIntelligenceHub extends StatelessWidget {
         ),
         const SizedBox(height: 14),
         _sectionCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _sectionHeader(
+                title: 'Categories / زمرہ جات',
+                subtitle: 'Quick mandi shortcuts / فوری منڈی شارٹ کٹس',
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                height: 102,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  physics: const BouncingScrollPhysics(),
+                  itemCount: _homeCategories.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 10),
+                  itemBuilder: (context, index) {
+                    final item = _homeCategories[index];
+                    final bool isSelected = item.type == MandiType.livestock
+                        ? selectedCategory == MandiType.livestock &&
+                              (selectedHomeCategoryId == null
+                                  ? item.id == 'livestock'
+                                  : selectedHomeCategoryId == item.id)
+                        : selectedCategory == item.type;
+                    return SizedBox(
+                      width: 104,
+                      child: _categoryGridTile(
+                        imageAssetPath: item.assetPath,
+                        icon: item.fallbackIcon,
+                        label: item.label,
+                        selected: isSelected,
+                        onTap: () {
+                          onSelectCategory(item.type);
+                          onSelectHomeCategoryId(item.id);
+                        },
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        _sectionCard(
           child: Container(
             width: double.infinity,
             padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
@@ -3294,14 +4643,12 @@ class _HomeIntelligenceHub extends StatelessWidget {
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
                 colors: [
-                  const Color(0xFF3D2E00).withValues(alpha: 0.55),
-                  const Color(0xFF1E1A00).withValues(alpha: 0.50),
+                  _bgGreenMid.withValues(alpha: 0.48),
+                  _bgGreenBase.withValues(alpha: 0.58),
                 ],
               ),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: AppColors.accentGold.withValues(alpha: 0.42),
-              ),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: _goldBase.withValues(alpha: 0.34)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -3470,42 +4817,6 @@ class _HomeIntelligenceHub extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _sectionHeader(
-                title: 'Categories / زمرہ جات',
-                subtitle: 'Browse by mandi type / منڈی کی زمرہ بندی',
-              ),
-              const SizedBox(height: 8),
-              GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: _homeCategoryOrder.length,
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 3,
-                  mainAxisSpacing: 8,
-                  crossAxisSpacing: 8,
-                  childAspectRatio: 0.96,
-                ),
-                itemBuilder: (context, index) {
-                  final type = _homeCategoryOrder[index];
-                  if (type == null) {
-                    return const SizedBox.shrink();
-                  }
-                  return _categoryGridTile(
-                    icon: _categoryIcon(type),
-                    label: _homeCategoryLabels[type] ?? type.label,
-                    selected: selectedCategory == type,
-                    onTap: () => onSelectCategory(type),
-                  );
-                },
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 14),
-        _sectionCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _sectionHeader(
                 title: 'Trending Today / آج کا ٹرینڈ',
                 subtitle: 'Fast moving commodities\nتیزی سے چلنے والی اجناس',
               ),
@@ -3595,10 +4906,10 @@ class _HomeIntelligenceHub extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Container(
-              width: 3,
-              height: 16,
+              width: 3.5,
+              height: 17,
               decoration: BoxDecoration(
-                color: AppColors.accentGold.withValues(alpha: 0.80),
+                color: _goldBase.withValues(alpha: 0.88),
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -3607,9 +4918,9 @@ class _HomeIntelligenceHub extends StatelessWidget {
               child: Text(
                 title,
                 style: const TextStyle(
-                  color: AppColors.primaryText,
+                  color: _textPrimary,
                   fontWeight: FontWeight.w800,
-                  fontSize: 14.5,
+                  fontSize: 14.6,
                   letterSpacing: 0.1,
                 ),
               ),
@@ -3624,9 +4935,9 @@ class _HomeIntelligenceHub extends StatelessWidget {
               maxLines: 3,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
-                color: AppColors.secondaryText,
-                fontSize: 11,
-                height: 1.25,
+                color: _textMuted,
+                fontSize: 11.3,
+                height: 1.28,
               ),
             ),
           ),
@@ -3663,16 +4974,24 @@ class _HomeIntelligenceHub extends StatelessWidget {
   Widget _sectionCard({required Widget child}) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(13),
       decoration: BoxDecoration(
-        color: AppColors.cardSurface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.secondarySurface),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: <Color>[
+            _bgGreenMid.withValues(alpha: 0.34),
+            _bgGreenBase.withValues(alpha: 0.52),
+            _bgGreenDeep.withValues(alpha: 0.62),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: _textPrimary.withValues(alpha: 0.12)),
         boxShadow: [
           BoxShadow(
-            color: AppColors.shadowDark.withValues(alpha: 0.18),
-            blurRadius: 6,
-            offset: const Offset(0, 2),
+            color: const Color(0x29000000),
+            blurRadius: 12,
+            offset: const Offset(0, 5),
           ),
         ],
       ),
@@ -3692,7 +5011,9 @@ class _HomeIntelligenceHub extends StatelessWidget {
     for (final item in source) {
       if (chosen.length >= 4) break;
       final subcategory = item.subcategoryKey.trim().toLowerCase();
-      if (subcategory.isEmpty || subcategoryKeys.contains(subcategory)) continue;
+      if (subcategory.isEmpty || subcategoryKeys.contains(subcategory)) {
+        continue;
+      }
       final commodity = _normalizeCommodityKey(item.crop);
       if (commodity.isEmpty) continue;
       final dedupe = '$commodity|${_normalizeLocationToken(item.location)}';
@@ -3711,6 +5032,47 @@ class _HomeIntelligenceHub extends StatelessWidget {
       if (dedupeKeys.contains(dedupe)) continue;
       dedupeKeys.add(dedupe);
       chosen.add(item);
+    }
+
+    final hasWheatInSource = source.any(
+      (item) => _canonicalHomeCommodityKey(item.crop) == 'wheat',
+    );
+    final hasWheatInChosen = chosen.any(
+      (item) => _canonicalHomeCommodityKey(item.crop) == 'wheat',
+    );
+    if (hasWheatInSource && !hasWheatInChosen) {
+      _MandiTickerItem? wheatItem;
+      for (final item in source) {
+        if (_canonicalHomeCommodityKey(item.crop) == 'wheat') {
+          wheatItem = item;
+          break;
+        }
+      }
+      if (wheatItem != null) {
+        if (chosen.length < 4) {
+          chosen.add(wheatItem);
+          debugPrint('[MANDI_RENDER] wheat_injection=snapshot_append');
+        } else {
+          var replaceIndex = -1;
+          var replaceRank = -1;
+          for (var i = 0; i < chosen.length; i++) {
+            final item = chosen[i];
+            final canonical = _canonicalHomeCommodityKey(item.crop);
+            if (canonical == 'wheat') continue;
+            final rank = _homeCommodityPriorityRankFromRaw(item.crop);
+            if (rank > replaceRank) {
+              replaceRank = rank;
+              replaceIndex = i;
+            }
+          }
+          if (replaceIndex >= 0) {
+            chosen[replaceIndex] = wheatItem;
+            debugPrint(
+              '[MANDI_RENDER] wheat_injection=snapshot_replace replaced_rank=$replaceRank',
+            );
+          }
+        }
+      }
     }
 
     debugPrint(
@@ -3735,7 +5097,7 @@ class _HomeIntelligenceHub extends StatelessWidget {
       children: [
         _sectionHeader(
           title: 'Nearby Mandi Snapshot / آپ کی قریبی منڈی',
-          subtitle: 'مختصر مقامی ریٹس اور رہنمائی',
+          subtitle: 'منتخب مقامی ریٹس کا خلاصہ',
           trailing: TextButton(
             onPressed: () {
               Navigator.of(context).push(
@@ -3752,94 +5114,126 @@ class _HomeIntelligenceHub extends StatelessWidget {
             child: const Text('See All / سب دیکھیں'),
           ),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 8),
         Text(
           'قریبی سیاق: $locationLabel',
           style: const TextStyle(
-            color: AppColors.primaryText,
-            fontSize: 11.6,
+            color: AppColors.secondaryText,
+            fontSize: 11.2,
             fontWeight: FontWeight.w700,
           ),
         ),
         if ((mandiSnapshotFallbackNote ?? '').trim().isNotEmpty)
           Padding(
-            padding: EdgeInsets.only(top: 3),
+            padding: const EdgeInsets.only(top: 4),
             child: Text(
               mandiSnapshotFallbackNote!.trim(),
               style: const TextStyle(
                 color: AppColors.secondaryText,
-                fontSize: 10.6,
+                fontSize: 10.8,
                 height: 1.2,
               ),
             ),
           ),
-        const SizedBox(height: 7),
+        const SizedBox(height: 10),
         if (snapshotItems.isEmpty)
           Text(
             mandiTickerInfoText ?? 'اس وقت قریبی منڈی کا خلاصہ دستیاب نہیں۔',
             style: const TextStyle(
               color: AppColors.secondaryText,
-              fontSize: 11,
+              fontSize: 11.2,
               height: 1.25,
             ),
           )
         else
           Wrap(
-            spacing: 7,
-            runSpacing: 7,
+            spacing: 10,
+            runSpacing: 10,
             children: snapshotItems
-                .map(
-                  (item) => Container(
+                .map((item) {
+                  final label = _chipLabel(item);
+                  if (label.isEmpty) return null;
+                  return Container(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 11,
-                      vertical: 7,
+                      horizontal: 13,
+                      vertical: 9,
                     ),
                     decoration: BoxDecoration(
-                      color: AppColors.softGlassSurface,
-                      borderRadius: BorderRadius.circular(12),
+                      // Use a solid dark-green surface so light text is visible
+                      color: const Color(0xFF1A5540),
+                      borderRadius: BorderRadius.circular(14),
                       border: Border.all(
-                        color: AppColors.softGlassBorder,
-                        width: 0.9,
+                        color: const Color(0xFFE4C46A).withValues(alpha: 0.32),
+                        width: 0.8,
                       ),
                     ),
                     child: Text(
-                      '${_toUrduCommodityLabel(item.crop)} • ${_cleanTickerLocation(item.location)} • ${item.price.toStringAsFixed(0)} روپے ${item.trendSymbol}',
+                      label,
                       style: const TextStyle(
-                        color: AppColors.primaryText,
-                        fontSize: 10.8,
+                        color: Color(0xFFF7F3E8),
+                        fontSize: 11.2,
                         fontWeight: FontWeight.w600,
+                        height: 1.3,
                       ),
                     ),
-                  ),
-                )
+                  );
+                })
+                .where((widget) => widget != null)
+                .cast<Widget>()
                 .toList(growable: false),
           ),
-        const SizedBox(height: 7),
+        const SizedBox(height: 10),
         Text(
           guidance,
           style: const TextStyle(
             color: AppColors.secondaryText,
-            fontSize: 11,
-            height: 1.25,
+            fontSize: 11.2,
+            height: 1.35,
           ),
         ),
       ],
     );
   }
 
+  /// Builds the compact chip label: commodity • city • price روپے / unit
+  String _chipLabel(_MandiTickerItem item) {
+    final row = MandiHomePresenter.buildDisplayRow(
+      commodityRaw: item.crop,
+      city: item.location,
+      district: '',
+      province: '',
+      unitRaw: item.unit,
+      price: item.price,
+      sourceSelected: item.sourceSelected,
+      confidence: 1,
+      renderPath: MandiHomeRenderPath.snapshot,
+    );
+    if (!row.isRenderable) {
+      return '';
+    }
+    debugPrint('[MandiHome] home_visible_snapshot_line=${row.fullSnapshotLine}');
+    return row.fullSnapshotLine;
+  }
+
   String _snapshotContextLabel() {
     final city = _firstNonEmpty(<String?>[selectedCity, buyerCity]);
-    if (city.isNotEmpty) return _toUrduLocationLabel(city);
+    if (city.isNotEmpty) {
+      return getLocalizedCityName(city, MandiDisplayLanguage.urdu);
+    }
 
     final district = _firstNonEmpty(<String?>[
       selectedDistrict,
       selectedTehsil,
       buyerDistrict,
     ]);
-    if (district.isNotEmpty) return _toUrduLocationLabel(district);
+    if (district.isNotEmpty) {
+      return getLocalizedCityName(district, MandiDisplayLanguage.urdu);
+    }
 
     final province = _firstNonEmpty(<String?>[selectedProvince, buyerProvince]);
-    if (province.isNotEmpty) return _toUrduLocationLabel(province);
+    if (province.isNotEmpty) {
+      return getLocalizedCityName(province, MandiDisplayLanguage.urdu);
+    }
     return 'پنجاب';
   }
 
@@ -3848,19 +5242,9 @@ class _HomeIntelligenceHub extends StatelessWidget {
     required List<_MandiTickerItem> items,
   }) {
     if (items.isEmpty) {
-      return '$locationLabel میں اس وقت مکمل مقامی ریٹس محدود ہیں۔ مزید تفصیل کے لیے سب دیکھیں کھولیں۔';
+      return '$locationLabel کے نمایاں ریٹس اس وقت محدود ہیں۔ مکمل تفصیل کے لیے سب دیکھیں۔';
     }
-
-    final topCrops = items
-        .take(2)
-        .map((item) => _toUrduCommodityLabel(item.crop).trim())
-        .where((label) => label.isNotEmpty)
-        .toList(growable: false);
-    final cropText = topCrops.join(' اور ');
-    if (cropText.isEmpty) {
-      return '$locationLabel میں آج مختلف اجناس کے ریٹس نمایاں ہیں۔ مکمل تفصیل کے لیے سب دیکھیں کھولیں۔';
-    }
-    return '$locationLabel میں آج $cropText کے ریٹس نمایاں ہیں۔ خرید و فروخت سے پہلے مکمل ریٹس دیکھیں۔';
+    return '$locationLabel کے منتخب ریٹس اوپر موجود ہیں۔ لین دین سے پہلے مکمل تفصیل ضرور دیکھیں۔';
   }
 
   String _firstNonEmpty(List<String?> values) {
@@ -4148,125 +5532,141 @@ class _HomeIntelligenceHub extends StatelessWidget {
     );
   }
 
-  IconData _categoryIcon(MandiType type) {
-    switch (type) {
-      case MandiType.crops:
-        return Icons.grass_rounded;
-      case MandiType.fruit:
-        return Icons.apple_rounded;
-      case MandiType.vegetables:
-        return Icons.eco_rounded;
-      case MandiType.flowers:
-        return Icons.local_florist_rounded;
-      case MandiType.livestock:
-        return Icons.pets_rounded;
-      case MandiType.milk:
-        return Icons.water_drop_rounded;
-      case MandiType.seeds:
-        return Icons.grain_rounded;
-      case MandiType.fertilizer:
-        return Icons.science_rounded;
-      case MandiType.machinery:
-        return Icons.agriculture_rounded;
-      case MandiType.tools:
-        return Icons.build_rounded;
-      case MandiType.dryFruits:
-        return Icons.nature_rounded;
-      case MandiType.spices:
-        return Icons.spa_rounded;
-    }
-  }
-
   Widget _categoryGridTile({
+    required String imageAssetPath,
     required IconData icon,
     required String label,
     required bool selected,
     VoidCallback? onTap,
   }) {
-    // Split bilingual 'English / اردو' label into two lines
-    final slashIdx = label.indexOf(' / ');
-    final englishPart = slashIdx > -1 ? label.substring(0, slashIdx) : label;
-    final urduPart = slashIdx > -1 ? label.substring(slashIdx + 3) : '';
+    final bool isLongLabel =
+        label.length >= 22 ||
+        label.contains('Milk & Dairy') ||
+        label.contains('Dry Fruits');
+    final bool isVeryLongLabel = label.length >= 26;
+    final double labelFontSize = isLongLabel ? 9.8 : 10.8;
 
     final tile = Container(
-      padding: const EdgeInsets.fromLTRB(5, 9, 5, 7),
       decoration: BoxDecoration(
         gradient: selected
             ? LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
                 colors: [
-                  AppColors.accentGold.withValues(alpha: 0.22),
-                  AppColors.accentGold.withValues(alpha: 0.09),
+                  AppColors.accentGold.withValues(alpha: 0.18),
+                  AppColors.accentGold.withValues(alpha: 0.07),
                 ],
               )
             : null,
         color: selected ? null : AppColors.cardSurface,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color: selected
-              ? AppColors.accentGold.withValues(alpha: 0.55)
-              : AppColors.secondarySurface.withValues(alpha: 0.75),
-          width: selected ? 1.2 : 0.8,
+              ? AppColors.accentGold.withValues(alpha: 0.30)
+              : AppColors.secondarySurface.withValues(alpha: 0.38),
+          width: selected ? 0.9 : 0.65,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: selected ? 0.14 : 0.07),
-            blurRadius: selected ? 5 : 3,
-            offset: const Offset(0, 1),
+            color: Colors.black.withValues(alpha: selected ? 0.10 : 0.08),
+            blurRadius: selected ? 8 : 8,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-              color: AppColors.accentGold.withValues(
-                alpha: selected ? 0.22 : 0.11,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Image.asset(
+                    imageAssetPath,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) {
+                      return Container(
+                        color: AppColors.accentGold.withValues(
+                          alpha: selected ? 0.18 : 0.08,
+                        ),
+                        alignment: Alignment.center,
+                        child: Icon(
+                          icon,
+                          size: 34,
+                          color: selected
+                              ? AppColors.accentGold
+                              : AppColors.accentGold.withValues(alpha: 0.82),
+                        ),
+                      );
+                    },
+                  ),
+                  Positioned.fill(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Colors.transparent,
+                            Colors.black.withValues(
+                              alpha: selected ? 0.04 : 0.02,
+                            ),
+                            Colors.black.withValues(
+                              alpha: selected ? 0.14 : 0.10,
+                            ),
+                          ],
+                          stops: const <double>[0, 0.62, 1],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
-              borderRadius: BorderRadius.circular(9),
             ),
-            child: Icon(
-              icon,
-              size: 19,
-              color: selected
-                  ? AppColors.accentGold
-                  : AppColors.accentGold.withValues(alpha: 0.85),
-            ),
-          ),
-          const SizedBox(height: 5),
-          Text(
-            englishPart,
-            textAlign: TextAlign.center,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: selected ? AppColors.accentGold : AppColors.primaryText,
-              fontSize: 9.8,
-              fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
-              height: 1.2,
-            ),
-          ),
-          if (urduPart.isNotEmpty)
-            Text(
-              urduPart,
-              textAlign: TextAlign.center,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: selected
-                    ? AppColors.accentGold.withValues(alpha: 0.85)
-                    : AppColors.secondaryText,
-                fontSize: 9.2,
-                fontWeight: FontWeight.w500,
-                height: 1.2,
+            Container(
+              height: isVeryLongLabel ? 46 : 42,
+              padding: const EdgeInsets.fromLTRB(8, 2, 8, 2),
+              decoration: BoxDecoration(
+                gradient: selected
+                    ? LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          AppColors.accentGold.withValues(alpha: 0.07),
+                          AppColors.accentGold.withValues(alpha: 0.12),
+                        ],
+                      )
+                    : LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          AppColors.cardSurface,
+                          AppColors.cardSurface.withValues(alpha: 0.96),
+                        ],
+                      ),
+              ),
+              child: Center(
+                child: Text(
+                  label,
+                  maxLines: isVeryLongLabel ? 2 : 1,
+                  textAlign: TextAlign.center,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: selected
+                        ? AppColors.accentGold
+                        : AppColors.primaryText,
+                    fontSize: labelFontSize,
+                    fontWeight: FontWeight.w700,
+                    height: 1.08,
+                    letterSpacing: 0.12,
+                  ),
+                ),
               ),
             ),
-        ],
+          ],
+        ),
       ),
     );
 
@@ -4274,7 +5674,7 @@ class _HomeIntelligenceHub extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
         onTap: onTap,
         child: tile,
       ),
@@ -5601,6 +7001,34 @@ class _HomeIntelligenceHub extends StatelessWidget {
     return normalized;
   }
 
+  String _canonicalHomeCommodityKey(String raw) {
+    if (raw.trim().isEmpty) return '';
+    return MandiHomePresenter.normalizeCommodityKey(raw);
+  }
+
+  int _homeCommodityPriorityRankFromRaw(String raw) {
+    final key = _canonicalHomeCommodityKey(raw);
+    switch (key) {
+      case 'wheat':
+      case 'rice':
+        return 1;
+      case 'broiler_chicken':
+      case 'potato':
+      case 'onion':
+      case 'tomato':
+        return 2;
+      case 'banana':
+      case 'eggs':
+        return 3;
+      case 'capsicum':
+      case 'garlic':
+      case 'ginger':
+        return 4;
+      default:
+        return 4;
+    }
+  }
+
   String _mergeCommodityLabel(String? existing, String incoming) {
     final incomingLabel = _toUrduCommodityLabel(incoming).trim();
     if (incomingLabel.isEmpty) return existing ?? '';
@@ -5658,18 +7086,69 @@ class _HomeIntelligenceHub extends StatelessWidget {
     final value = raw.trim();
     if (value.isEmpty) return '';
     if (RegExp(r'[\u0600-\u06FF]').hasMatch(value)) return value;
+    final String? urduInParens = RegExp(
+      r'\(([\u0600-\u06FF\s]+)\)',
+    ).firstMatch(value)?.group(1)?.trim();
+    if ((urduInParens ?? '').isNotEmpty &&
+        urduInParens != 'درجن' &&
+        urduInParens != 'کلو') {
+      return urduInParens!;
+    }
+
+    final normalized = value
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (_englishToUrduCommodity.containsKey(normalized)) {
+      return _englishToUrduCommodity[normalized]!;
+    }
+    if (normalized.contains('banana') && normalized.contains('dozen')) {
+      return 'کیلا (درجن)';
+    }
+    if (normalized.contains('capsicum') || normalized.contains('shimla')) {
+      return 'شملہ مرچ';
+    }
+    if ((normalized.contains('gram') && normalized.contains('black')) ||
+        normalized.contains('black gram')) {
+      return 'کالا چنا';
+    }
+    if (normalized.contains('potato') && normalized.contains('fresh')) {
+      return 'آلو';
+    }
+    if (normalized.contains('garlic') && normalized.contains('china')) {
+      return 'لہسن چائنہ';
+    }
+    if (normalized.contains('moong')) return 'مونگ';
+    if (normalized.contains('coriander')) return 'دھنیا';
+    if (normalized.contains('tomato')) return 'ٹماٹر';
+    if (normalized.contains('onion')) return 'پیاز';
+    if (normalized.contains('potato')) return 'آلو';
 
     final lower = value.toLowerCase();
-    if (_englishToUrduCommodity.containsKey(lower)) {
-      return _englishToUrduCommodity[lower]!;
-    }
     if (lower.contains('wheat')) return 'گندم';
+    if (lower.contains('gandum')) return 'گندم';
     if (lower.contains('rice') || lower.contains('paddy')) return 'چاول';
+    if (lower.contains('chawal')) return 'چاول';
     if (lower.contains('corn') || lower.contains('maize')) return 'مکئی';
+    if (lower.contains('broiler') || lower.contains('chicken')) {
+      return 'برائلر';
+    }
     if (lower.contains('mango')) return 'آم';
+    if (lower.contains('banana') || lower.contains('kela') || lower.contains('kaila')) {
+      return 'کیلا';
+    }
+    if (lower.contains('egg') || lower.contains('eggs') || lower.contains('anda') || lower.contains('anday')) {
+      return 'انڈے';
+    }
+    if (lower.contains('aalu') || lower.contains('aloo') || lower.contains('alu')) return 'آلو';
+    if (lower.contains('pyaz') || lower.contains('piaz')) return 'پیاز';
+    if (lower.contains('tamatar') || lower.contains('tomatar')) return 'ٹماٹر';
+    if (lower.contains('shimla mirch')) return 'شملہ مرچ';
     if (lower.contains('cotton')) return 'کپاس';
     if (lower == 'dap') return 'ڈی اے پی';
-    return value;
+    if (lower.contains('urea')) return 'یوریا';
+    return 'اجناس';
   }
 
   String _toUrduLocationLabel(String raw) {
@@ -5680,26 +7159,54 @@ class _HomeIntelligenceHub extends StatelessWidget {
     return _englishToUrduLocation[lower] ?? value;
   }
 
-  String _cleanTickerLocation(String raw) {
-    final value = _toUrduLocationLabel(raw).trim();
-    if (value.isEmpty) return '';
-    final lower = value.toLowerCase();
-    if (lower == 'pakistan' || lower == 'all pakistan' || lower == 'pk') {
-      return '';
-    }
-    if (value == 'پاکستان' || value == 'پورا پاکستان') return '';
-    return value;
-  }
-
   static const Map<String, String> _englishToUrduCommodity = <String, String>{
     'wheat': 'گندم',
+    'gandum': 'گندم',
     'rice': 'چاول',
+    'chawal': 'چاول',
     'paddy': 'چاول',
     'corn': 'مکئی',
     'maize': 'مکئی',
     'mango': 'آم',
+    'banana': 'کیلا',
+    'kela': 'کیلا',
+    'kaila': 'کیلا',
+    'banana dozen': 'کیلا (درجن)',
+    'banana dozenes': 'کیلا (درجن)',
+    'banana dozen pack': 'کیلا (درجن)',
+    'banana dozen price': 'کیلا (درجن)',
+    'banana dozn': 'کیلا (درجن)',
+    'banana(dozen)': 'کیلا (درجن)',
+    'egg': 'انڈے',
+    'eggs': 'انڈے',
+    'anda': 'انڈے',
+    'anday': 'انڈے',
+    'broiler': 'برائلر',
+    'broiler chicken': 'برائلر',
+    'chicken': 'برائلر',
+    'capsicum': 'شملہ مرچ',
+    'shimla mirch': 'شملہ مرچ',
+    'capsicum shimla mirch': 'شملہ مرچ',
+    'tomato': 'ٹماٹر',
+    'tamatar': 'ٹماٹر',
+    'tomatar': 'ٹماٹر',
+    'onion': 'پیاز',
+    'pyaz': 'پیاز',
+    'piaz': 'پیاز',
+    'gram black': 'کالا چنا',
+    'black gram': 'کالا چنا',
+    'potato': 'آلو',
+    'aalu': 'آلو',
+    'aloo': 'آلو',
+    'alu': 'آلو',
+    'potato fresh': 'آلو',
+    'garlic': 'لہسن',
+    'garlic china': 'لہسن چائنہ',
+    'garlic chinese': 'لہسن چائنہ',
+    'moong': 'مونگ',
     'cotton': 'کپاس',
     'dap': 'ڈی اے پی',
+    'urea': 'یوریا',
   };
 
   static const Map<String, String> _englishToUrduLocation = <String, String>{
@@ -5943,6 +7450,10 @@ class _MandiTickerItem {
     required this.trendSymbol,
     required this.subcategoryKey,
     required this.subcategoryLabel,
+    this.unit = '',
+    this.sourceSelected = '',
+    this.isFallbackMessage = false,
+    this.fallbackMessage = '',
   });
 
   final String crop;
@@ -5951,6 +7462,11 @@ class _MandiTickerItem {
   final String trendSymbol;
   final String subcategoryKey;
   final String subcategoryLabel;
+  /// Urdu-friendly display unit, e.g. '100 کلو', 'درجن', 'کلو'
+  final String unit;
+  final String sourceSelected;
+  final bool isFallbackMessage;
+  final String fallbackMessage;
 }
 
 class _TickerCandidate {
@@ -5958,15 +7474,27 @@ class _TickerCandidate {
     required this.item,
     required this.score,
     required this.commodityKey,
+    required this.canonicalCommodityKey,
+    required this.corePriorityRank,
     required this.subcategoryKey,
     required this.tier,
+    required this.sourcePriorityRank,
+    required this.freshnessScore,
+    required this.confidenceScore,
+    required this.updatedAt,
   });
 
   final _MandiTickerItem item;
   final int score;
   final String commodityKey;
+  final String canonicalCommodityKey;
+  final int corePriorityRank;
   final String subcategoryKey;
   final int tier;
+  final int sourcePriorityRank;
+  final int freshnessScore;
+  final double confidenceScore;
+  final DateTime? updatedAt;
 }
 
 class _PulseRow {
@@ -6046,6 +7574,8 @@ class _BuyerListingsSection extends StatelessWidget {
     required this.onSeeAllAuctions,
     required this.onSeeAllNearby,
     required this.onSelectCategory,
+    required this.selectedHomeCategoryId,
+    required this.onSelectHomeCategoryId,
     this.isSeller = false,
   });
 
@@ -6084,17 +7614,20 @@ class _BuyerListingsSection extends StatelessWidget {
   final VoidCallback onSeeAllAuctions;
   final VoidCallback onSeeAllNearby;
   final ValueChanged<MandiType> onSelectCategory;
+  final String? selectedHomeCategoryId;
+  final ValueChanged<String?> onSelectHomeCategoryId;
   final bool isSeller;
-  static const double _bottomContentInset = 110;
 
   @override
   Widget build(BuildContext context) {
     const goldColor = AppColors.accentGold;
+    final double bottomContentInset =
+        MediaQuery.paddingOf(context).bottom + 148;
     final listingStream = stream;
     if (listingStream == null) {
       return ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, _bottomContentInset),
+        padding: EdgeInsets.fromLTRB(16, 10, 16, bottomContentInset),
         children: [
           _HomeIntelligenceHub(
             listings: const <QueryDocumentSnapshot<Map<String, dynamic>>>[],
@@ -6120,6 +7653,8 @@ class _BuyerListingsSection extends StatelessWidget {
             onSeeAllNearby: onSeeAllNearby,
             selectedCategory: selectedCategory,
             onSelectCategory: onSelectCategory,
+            selectedHomeCategoryId: selectedHomeCategoryId,
+            onSelectHomeCategoryId: onSelectHomeCategoryId,
             isSeller: isSeller,
           ),
           const SizedBox(height: 24),
@@ -6317,12 +7852,7 @@ class _BuyerListingsSection extends StatelessWidget {
                 if (sortedDocs.isEmpty) {
                   return ListView(
                     physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.fromLTRB(
-                      16,
-                      10,
-                      16,
-                      _bottomContentInset,
-                    ),
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
                     children: [
                       _HomeIntelligenceHub(
                         listings: docs,
@@ -6342,16 +7872,19 @@ class _BuyerListingsSection extends StatelessWidget {
                         mandiTickerItems: mandiTickerItems,
                         mandiTickerInfoText: mandiTickerInfoText,
                         mandiSnapshotContextLabelUr:
-                          mandiSnapshotContextLabelUr,
+                            mandiSnapshotContextLabelUr,
                         mandiSnapshotFallbackNote: mandiSnapshotFallbackNote,
                         onBid: onBid,
                         onSeeAllAuctions: onSeeAllAuctions,
                         onSeeAllNearby: onSeeAllNearby,
                         selectedCategory: selectedCategory,
                         onSelectCategory: onSelectCategory,
+                        selectedHomeCategoryId: selectedHomeCategoryId,
+                        onSelectHomeCategoryId: onSelectHomeCategoryId,
                         isSeller: isSeller,
                       ),
                       const SizedBox(height: 24),
+                      SizedBox(height: bottomContentInset),
                       const Center(
                         child: Text(
                           'No listings match your search and filters / تلاش اور فلٹر کے مطابق لسٹنگ موجود نہیں',
@@ -6377,40 +7910,40 @@ class _BuyerListingsSection extends StatelessWidget {
                   child: ListView.builder(
                     physics: const AlwaysScrollableScrollPhysics(),
                     cacheExtent: 650,
-                    padding: const EdgeInsets.fromLTRB(
-                      16,
-                      10,
-                      16,
-                      _bottomContentInset,
-                    ),
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
                     itemCount: 1,
                     itemBuilder: (context, index) {
-                      return _HomeIntelligenceHub(
-                        listings: docs,
-                        buyerProvince: buyerProvince,
-                        buyerDistrict: buyerDistrict,
-                        buyerVillage: buyerVillage,
-                        buyerCity: buyerCity,
-                        recentlyViewedEntries: recentEntries,
-                        selectedProvince: selectedProvince,
-                        selectedDistrict: selectedDistrict,
-                        selectedTehsil: selectedTehsil,
-                        selectedCity: selectedCity,
-                        weatherData: weatherData,
-                        isWeatherLoading: isWeatherLoading,
-                        weatherFailed: weatherFailed,
-                        advisoryText: advisoryText,
-                        mandiTickerItems: mandiTickerItems,
-                        mandiTickerInfoText: mandiTickerInfoText,
-                        mandiSnapshotContextLabelUr:
-                          mandiSnapshotContextLabelUr,
-                        mandiSnapshotFallbackNote: mandiSnapshotFallbackNote,
-                        onBid: onBid,
-                        onSeeAllAuctions: onSeeAllAuctions,
-                        onSeeAllNearby: onSeeAllNearby,
-                        selectedCategory: selectedCategory,
-                        onSelectCategory: onSelectCategory,
-                        isSeller: isSeller,
+                      return Padding(
+                        padding: EdgeInsets.only(bottom: bottomContentInset),
+                        child: _HomeIntelligenceHub(
+                          listings: docs,
+                          buyerProvince: buyerProvince,
+                          buyerDistrict: buyerDistrict,
+                          buyerVillage: buyerVillage,
+                          buyerCity: buyerCity,
+                          recentlyViewedEntries: recentEntries,
+                          selectedProvince: selectedProvince,
+                          selectedDistrict: selectedDistrict,
+                          selectedTehsil: selectedTehsil,
+                          selectedCity: selectedCity,
+                          weatherData: weatherData,
+                          isWeatherLoading: isWeatherLoading,
+                          weatherFailed: weatherFailed,
+                          advisoryText: advisoryText,
+                          mandiTickerItems: mandiTickerItems,
+                          mandiTickerInfoText: mandiTickerInfoText,
+                          mandiSnapshotContextLabelUr:
+                              mandiSnapshotContextLabelUr,
+                          mandiSnapshotFallbackNote: mandiSnapshotFallbackNote,
+                          onBid: onBid,
+                          onSeeAllAuctions: onSeeAllAuctions,
+                          onSeeAllNearby: onSeeAllNearby,
+                          selectedCategory: selectedCategory,
+                          onSelectCategory: onSelectCategory,
+                          selectedHomeCategoryId: selectedHomeCategoryId,
+                          onSelectHomeCategoryId: onSelectHomeCategoryId,
+                          isSeller: isSeller,
+                        ),
                       );
                     },
                   ),
