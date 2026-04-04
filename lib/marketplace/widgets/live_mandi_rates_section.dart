@@ -12,6 +12,8 @@ import '../services/gemini_rate_enhancement_service.dart';
 import '../services/mandi_rate_location_service.dart';
 import '../services/mandi_rate_prioritization_service.dart';
 import '../services/mandi_rate_sync_manager.dart';
+import '../services/mandi_home_presenter.dart';
+import '../utils/mandi_display_utils.dart';
 import 'mandi_rate_horizontal_card_list.dart';
 import 'mandi_rates_ticker.dart';
 
@@ -50,6 +52,9 @@ class _LiveMandiRatesSectionState extends State<LiveMandiRatesSection> {
   bool _hasSuppressedNonLiveData = false;
   bool _isNationalFallbackActive = false;
 
+  static const Set<String> _homeCommodityAllowlist =
+      MandiHomePresenter.homeCommodityAllowlist;
+
   @override
   void initState() {
     super.initState();
@@ -69,6 +74,12 @@ class _LiveMandiRatesSectionState extends State<LiveMandiRatesSection> {
         sourceRates = locationScoped;
       }
 
+      // Display layer guard: show only user-city commodities.
+      sourceRates = MandiHomePresenter.filterRatesByUserCity(
+        rates: sourceRates,
+        userCity: loc.city,
+      );
+
       debugPrint(
         '[MANDI_QUERY] LiveSection: stateRates=${state.rates.length} '
         'locationScoped=${locationScoped.length} sourceRatesUsed=${sourceRates.length} '
@@ -78,20 +89,17 @@ class _LiveMandiRatesSectionState extends State<LiveMandiRatesSection> {
 
       final fetchTrace = _repository.lastFetchTrace;
       final fetchedDocs = fetchTrace?.fetchedDocs ?? sourceRates.length;
-      final parsedValidItems = fetchTrace?.parsedValidItems ?? sourceRates.length;
+      final parsedValidItems =
+          fetchTrace?.parsedValidItems ?? sourceRates.length;
       final fetchPostDedup = fetchTrace?.postDedupItems ?? sourceRates.length;
 
-      var ranked = sourceRates.where(_isRenderableForHome).toList(growable: false);
+      var ranked = _buildControlledHomeRates(sourceRates);
       final postQualityFilter = ranked.length;
 
       debugPrint(
         '[MANDI_REJECT] LiveSection: rawCandidates=${sourceRates.length} '
         'afterRenderableFilter=${ranked.length} '
-        'rejected=${sourceRates.length - ranked.length} '
-        'rejectionBreakdown: notTrusted=${sourceRates.where((r) => !r.isTrustedSource).length} '
-        'isStale=${sourceRates.where((r) => r.isStale).length} '
-        'missingName=${sourceRates.where((r) => r.commodityName.trim().isEmpty || r.mandiName.trim().isEmpty).length} '
-        'zeroPrice=${sourceRates.where((r) => getTrustedDisplayPrice(r) <= 0).length}',
+        'rejected=${sourceRates.length - ranked.length}',
       );
 
       ranked = _ranker.rank(rates: ranked, location: loc);
@@ -118,8 +126,57 @@ class _LiveMandiRatesSectionState extends State<LiveMandiRatesSection> {
         targetCount: 16,
       );
       final postSubcategoryDiversification = diversifiedHome.length;
-      final enhanced = await _enhancer.enhanceBatch(diversifiedHome, maxItems: 8);
-      final split = _splitTickerAndCards(enhanced);
+      var enhanced = await _enhancer.enhanceBatch(diversifiedHome, maxItems: 8);
+      final split = _ensureRequiredWheatVisibility(
+        _splitTickerAndCards(enhanced),
+        pool: enhanced,
+        location: loc,
+      );
+
+      if (split.ticker.isNotEmpty) {
+        final probe = split.ticker.first;
+        final cityRaw = [
+          probe.city,
+          probe.district,
+          probe.province,
+        ].map((e) => e.trim()).where((e) => e.isNotEmpty).join(' | ');
+        final commodityRaw = probe.commodityNameUr.trim().isNotEmpty
+            ? probe.commodityNameUr
+            : probe.commodityName;
+        final unitRaw = probe.unit;
+        final probeRow = MandiHomePresenter.buildDisplayRow(
+          commodityRaw: probe.commodityName,
+          urduName: '${probe.metadata['urduName'] ?? ''}'.trim().isNotEmpty
+              ? '${probe.metadata['urduName']}'.trim()
+              : null,
+          commodityNameUr: probe.commodityNameUr.trim().isNotEmpty
+              ? probe.commodityNameUr
+              : null,
+          city: probe.city,
+          district: probe.district,
+          province: probe.province,
+          unitRaw: unitRaw,
+          price: getTrustedDisplayPrice(probe),
+          sourceSelected:
+              '${probe.sourceId}|${probe.sourceType}|${probe.source}',
+          confidence: probe.confidenceScore,
+          renderPath: MandiHomeRenderPath.ticker,
+        );
+        debugPrint('[MandiPulseUI] ticker_city_raw=$cityRaw');
+        debugPrint(
+          '[MandiPulseUI] ticker_city_localized=${probeRow.cityDisplay}',
+        );
+        debugPrint('[MandiPulseUI] ticker_commodity_raw=$commodityRaw');
+        debugPrint(
+          '[MandiPulseUI] ticker_commodity_localized=${probeRow.commodityDisplay}',
+        );
+        debugPrint('[MandiPulseUI] ticker_unit_raw=$unitRaw');
+        debugPrint(
+          '[MandiPulseUI] ticker_unit_localized=${probeRow.unitDisplay}',
+        );
+        debugPrint('[MandiPulseUI] probe_renderable=${probeRow.isRenderable}');
+        debugPrint('[MandiHome] legacy_render_path_hit=false');
+      }
 
       final tierStats = _tierStats(homeOrdered, loc);
       final distinctSubcategories = homeOrdered
@@ -174,15 +231,21 @@ class _LiveMandiRatesSectionState extends State<LiveMandiRatesSection> {
         'hasSuppressedNonLive=${sourceRates.isNotEmpty && homeOrdered.isEmpty} '
         'isNationalFallback=${_hasLocationContext(loc) && !hasNearby && homeOrdered.isNotEmpty}',
       );
+      debugPrint('[MandiPulse] final_home_ticker_count=${split.ticker.length}');
+      debugPrint(
+        '[MandiPulse] final_home_snapshot_count=${split.cards.length}',
+      );
+      _logFinalHomeSurfaceProof(split);
 
       if (!mounted) return;
       setState(() {
         _location = loc;
         _tickerRates = split.ticker;
         _cardRates = split.cards;
-        _hasSuppressedNonLiveData = sourceRates.isNotEmpty && homeOrdered.isEmpty;
+        _hasSuppressedNonLiveData =
+            sourceRates.isNotEmpty && homeOrdered.isEmpty;
         _isNationalFallbackActive =
-          _hasLocationContext(loc) && !hasNearby && homeOrdered.isNotEmpty;
+            _hasLocationContext(loc) && !hasNearby && homeOrdered.isNotEmpty;
         _state = MandiRatesSyncState(
           rates: enhanced,
           isLoading: state.isLoading,
@@ -223,6 +286,13 @@ class _LiveMandiRatesSectionState extends State<LiveMandiRatesSection> {
   }
 
   bool _isRenderableForHome(LiveMandiRate item) {
+    // Hard-reject rows with unit violations or critical data quality issues.
+    if (item.rowConfidence == MandiRowConfidence.rejected) return false;
+
+    final commodity = _normalizeHomeCommodity(item);
+    if (commodity.isEmpty) return false;
+    if (!MandiHomePresenter.isAllowlistedCommodity(commodity)) return false;
+
     final hasRequiredFields =
         item.commodityName.trim().isNotEmpty &&
         item.mandiName.trim().isNotEmpty &&
@@ -235,6 +305,201 @@ class _LiveMandiRatesSectionState extends State<LiveMandiRatesSection> {
     return item.freshnessStatus == MandiFreshnessStatus.live ||
         item.freshnessStatus == MandiFreshnessStatus.recent ||
         item.freshnessStatus == MandiFreshnessStatus.aging;
+  }
+
+  List<LiveMandiRate> _buildControlledHomeRates(List<LiveMandiRate> rates) {
+    if (rates.isEmpty) return const <LiveMandiRate>[];
+
+    final commodityById = <String, String>{};
+    final unitById = <String, String>{};
+    final locById = <String, String>{};
+    final groupedUnits = <String, Set<String>>{};
+
+    for (final rate in rates) {
+      final commodity = _normalizeHomeCommodity(rate);
+      final unit = _normalizedHomeUnitKey(rate.unit);
+      final loc = _homeLocationKey(rate);
+      commodityById[rate.id] = commodity;
+      unitById[rate.id] = unit;
+      locById[rate.id] = loc;
+
+      if (commodity.isEmpty || unit.isEmpty || loc.isEmpty) {
+        continue;
+      }
+
+      final key = '$commodity|$loc';
+      groupedUnits.putIfAbsent(key, () => <String>{}).add(unit);
+    }
+
+    final mixedUnitConflicts = <String>{};
+    for (final entry in groupedUnits.entries) {
+      if (entry.value.length > 1) {
+        mixedUnitConflicts.add(entry.key);
+      }
+    }
+
+    final accepted = <LiveMandiRate>[];
+    for (final rate in rates) {
+      final commodity = commodityById[rate.id] ?? '';
+      final localizedCommodity = _homeLocalizedCommodity(rate);
+      final allowlistHit = _homeCommodityAllowlist.contains(commodity);
+
+      debugPrint('[MandiPulse] commodity_normalized=$commodity');
+      debugPrint('[MandiPulse] commodity_localized=$localizedCommodity');
+      debugPrint('[MandiPulse] home_allowlist_hit=$allowlistHit');
+
+      final reason = _homeRejectReason(
+        rate,
+        commodity: commodity,
+        localizedCommodity: localizedCommodity,
+        normalizedUnit: unitById[rate.id] ?? '',
+        locationKey: locById[rate.id] ?? '',
+        mixedUnitConflicts: mixedUnitConflicts,
+      );
+
+      if (reason != null) {
+        debugPrint('[MandiPulse] home_reject_reason=$reason');
+        continue;
+      }
+
+      accepted.add(rate);
+    }
+
+    return _selectHomePreferredSourceRows(accepted);
+  }
+
+  String? _homeRejectReason(
+    LiveMandiRate item, {
+    required String commodity,
+    required String localizedCommodity,
+    required String normalizedUnit,
+    required String locationKey,
+    required Set<String> mixedUnitConflicts,
+  }) {
+    if (commodity.isEmpty) return 'commodity_not_normalized';
+    if (!_homeCommodityAllowlist.contains(commodity))
+      return 'commodity_not_allowlisted';
+    if (localizedCommodity.isEmpty || localizedCommodity == 'اجناس') {
+      return 'missing_clean_localized_label';
+    }
+
+    final englishLabel = getLocalizedCommodityName(
+      item.commodityName,
+      MandiDisplayLanguage.english,
+    );
+    if (englishLabel == 'Commodity') return 'missing_clean_english_label';
+
+    final sourcePriority = _homeSourcePriority(item);
+    if (sourcePriority >= 90) return 'untrusted_source';
+    if (sourcePriority == 5) return 'pbs_spi_trend_only';
+
+    if (normalizedUnit.isEmpty) return 'invalid_unit';
+    if (!_isAllowedUnitForHomeCommodity(commodity, normalizedUnit)) {
+      return 'commodity_unit_mismatch';
+    }
+
+    final conflictKey = '$commodity|$locationKey';
+    if (locationKey.isNotEmpty && mixedUnitConflicts.contains(conflictKey)) {
+      return 'mixed_unit_conflict';
+    }
+
+    if (!_isRenderableForHome(item)) return 'not_renderable_for_home';
+    if (item.isRejectedContribution) return 'rejected_row';
+    if (item.rowConfidence == MandiRowConfidence.rejected)
+      return 'rejected_row_confidence';
+    if (item.confidenceScore < 0.72) return 'insufficient_confidence';
+    if (!item.isTickerPriceEligible) return 'not_ticker_price_eligible';
+
+    return null;
+  }
+
+  List<LiveMandiRate> _selectHomePreferredSourceRows(List<LiveMandiRate> rows) {
+    final grouped = <String, LiveMandiRate>{};
+
+    for (final row in rows) {
+      final commodity = _normalizeHomeCommodity(row);
+      final unit = _normalizedHomeUnitKey(row.unit);
+      final location = _homeLocationKey(row);
+      if (commodity.isEmpty || unit.isEmpty || location.isEmpty) {
+        continue;
+      }
+
+      final key = '$commodity|$location|$unit';
+      final existing = grouped[key];
+      if (existing == null || _preferHomeSource(row, existing)) {
+        grouped[key] = row;
+      }
+    }
+
+    for (final selected in grouped.values) {
+      debugPrint(
+        '[MandiPulse] source_selected=${selected.sourceId}|${selected.sourceType}|${selected.source}',
+      );
+    }
+
+    return grouped.values.toList(growable: false);
+  }
+
+  bool _preferHomeSource(LiveMandiRate incoming, LiveMandiRate existing) {
+    final sourceCompare = _homeSourcePriority(
+      incoming,
+    ).compareTo(_homeSourcePriority(existing));
+    if (sourceCompare != 0) return sourceCompare < 0;
+
+    final incomingFresh = _freshnessWeight(incoming);
+    final existingFresh = _freshnessWeight(existing);
+    if (incomingFresh != existingFresh) return incomingFresh > existingFresh;
+
+    if (incoming.confidenceScore != existing.confidenceScore) {
+      return incoming.confidenceScore > existing.confidenceScore;
+    }
+
+    return incoming.lastUpdated.isAfter(existing.lastUpdated);
+  }
+
+  String _homeLocalizedCommodity(LiveMandiRate rate) {
+    final commodity = _normalizeHomeCommodity(rate);
+    if (commodity.isEmpty) return '';
+    return MandiHomePresenter.commodityDisplayUrdu(commodity);
+  }
+
+  String _normalizeHomeCommodity(LiveMandiRate item) {
+    final candidates = <String>[
+      '${item.metadata['urduName'] ?? ''}',
+      item.commodityName,
+      item.commodityNameUr,
+      item.subCategoryName,
+      item.subCategoryId,
+      item.commodityRefId,
+    ];
+    for (final candidate in candidates) {
+      final key = MandiHomePresenter.normalizeCommodityKey(candidate);
+      if (key.isNotEmpty && MandiHomePresenter.isAllowlistedCommodity(key)) {
+        return key;
+      }
+    }
+    return '';
+  }
+
+  String _homeLocationKey(LiveMandiRate item) {
+    final city = _norm(item.city);
+    final district = _norm(item.district);
+    final province = _norm(item.province);
+    if (city.isNotEmpty) return city;
+    if (district.isNotEmpty) return district;
+    return province;
+  }
+
+  int _homeSourcePriority(LiveMandiRate item) {
+    return MandiHomePresenter.sourcePriorityFromRate(item);
+  }
+
+  String _normalizedHomeUnitKey(String value) {
+    return MandiHomePresenter.normalizeHomeUnitKey(value);
+  }
+
+  bool _isAllowedUnitForHomeCommodity(String commodity, String unit) {
+    return MandiHomePresenter.isAllowedUnitForCommodity(commodity, unit);
   }
 
   List<LiveMandiRate> _prioritizeFreshness(List<LiveMandiRate> items) {
@@ -738,20 +1003,339 @@ class _LiveMandiRatesSectionState extends State<LiveMandiRatesSection> {
     final ticker = _diversifyForTicker(rates, maxItems: tickerCap);
     final tickerIds = ticker.map((item) => item.id).toSet();
 
-    final cards = rates
+    final remaining = rates
         .where((item) => !tickerIds.contains(item.id))
         .toList(growable: false);
 
+    // Apply snapshot commodity diversity: max snapshotCommodityCap per commodity.
+    final snapshotCap = MandiHomePresenter.snapshotCommodityCap;
+    final snapshotCommodityCount = <String, int>{};
+    final snapshotCommodityLocalitySeen = <String>{};
+    final cards = <LiveMandiRate>[];
+    final pool = remaining.isNotEmpty
+        ? remaining
+        : rates
+              .skip(math.min(ticker.length, rates.length))
+              .toList(growable: false);
+
+    // Sort snapshot candidates by priority, freshness.
+    final sortedPool = List<LiveMandiRate>.from(pool)
+      ..sort((a, b) {
+        final aPri = _commodityPriorityScore(a);
+        final bPri = _commodityPriorityScore(b);
+        if (aPri != bPri) return aPri.compareTo(bPri);
+        final freshCmp = _freshnessWeight(b).compareTo(_freshnessWeight(a));
+        if (freshCmp != 0) return freshCmp;
+        return b.lastUpdated.compareTo(a.lastUpdated);
+      });
+
+    for (final item in sortedPool) {
+      if (cards.length >= 8) break;
+      final commodity = _normalizeHomeCommodity(item);
+      final locality = _homeLocationKey(item);
+      final commodityLocalityKey = '$commodity|$locality';
+      if (commodity.isNotEmpty &&
+          locality.isNotEmpty &&
+          snapshotCommodityLocalitySeen.contains(commodityLocalityKey)) {
+        continue;
+      }
+      final count = snapshotCommodityCount[commodity] ?? 0;
+      if (commodity.isNotEmpty && count >= snapshotCap) {
+        debugPrint(
+          '[MandiHome] diversity_skip_reason=snapshot_commodity_cap '
+          'commodity=$commodity',
+        );
+        continue;
+      }
+      cards.add(item);
+      if (commodity.isNotEmpty) {
+        snapshotCommodityCount[commodity] = count + 1;
+        if (locality.isNotEmpty) {
+          snapshotCommodityLocalitySeen.add(commodityLocalityKey);
+        }
+      }
+    }
+
+    // If diversity filter left cards empty, fall back to first available.
     if (cards.isEmpty) {
-      final start = math.min(ticker.length, rates.length);
-      final fallbackCards = rates.skip(start).take(8).toList(growable: false);
-      return _TickerCardsSplit(ticker: ticker, cards: fallbackCards);
+      cards.addAll(sortedPool.take(8));
+    }
+
+    debugPrint(
+      '[MandiHome] final_home_snapshot_diversity_count='
+      '${snapshotCommodityCount.keys.length}',
+    );
+
+    final forcedTicker = MandiHomePresenter.forceWheatLeadInDisplayList(
+      ticker,
+      maxItems: 12,
+      requireTickerEligibility: true,
+    );
+    final forcedCards = MandiHomePresenter.forceWheatLeadInDisplayList(
+      cards.take(8).toList(growable: false),
+      maxItems: 8,
+    );
+
+    return _TickerCardsSplit(ticker: forcedTicker, cards: forcedCards);
+  }
+
+  _TickerCardsSplit _ensureRequiredWheatVisibility(
+    _TickerCardsSplit split, {
+    required List<LiveMandiRate> pool,
+    required MandiLocationContext location,
+  }) {
+    final wheatPool = pool.where(_isWheatCommodity).toList(growable: false);
+    if (wheatPool.isEmpty) {
+      return split;
+    }
+
+    final rankedWheat = _rankWheatForVisibility(wheatPool, location);
+    var ticker = List<LiveMandiRate>.from(split.ticker);
+    var cards = List<LiveMandiRate>.from(split.cards);
+
+    final tickerHasWheat = ticker.any(_isVisibleTickerWheat);
+    if (!tickerHasWheat) {
+      LiveMandiRate? tickerCandidate;
+      for (final item in rankedWheat) {
+        if (_isVisibleTickerWheat(item)) {
+          tickerCandidate = item;
+          break;
+        }
+      }
+      if (tickerCandidate != null) {
+        final selected = tickerCandidate;
+        final existing = ticker.indexWhere((row) => row.id == selected.id);
+        if (existing >= 0) {
+          final moved = ticker.removeAt(existing);
+          ticker.insert(0, moved);
+        } else {
+          if (ticker.length >= 12) {
+            final removable = ticker.lastIndexWhere(
+              (row) => !_isWheatCommodity(row),
+            );
+            if (removable >= 0) {
+              ticker.removeAt(removable);
+            } else {
+              ticker.removeLast();
+            }
+          }
+          ticker.insert(0, selected);
+        }
+      }
+    }
+
+    // Hard-lock rule: if any renderable ticker wheat exists, it must lead.
+    final visibleTickerWheat = rankedWheat
+        .where(_isVisibleTickerWheat)
+        .toList(growable: false);
+    if (visibleTickerWheat.isNotEmpty) {
+      final lead = MandiHomePresenter.pickBestWheatLeadCandidate(
+        visibleTickerWheat,
+        requireTickerEligibility: true,
+      );
+      if (lead != null) {
+        final existing = ticker.indexWhere((row) => row.id == lead.id);
+        if (existing >= 0) {
+          final moved = ticker.removeAt(existing);
+          ticker.insert(0, moved);
+        } else {
+          if (ticker.length >= 12) {
+            final removable = ticker.lastIndexWhere(
+              (row) => !_isWheatCommodity(row),
+            );
+            if (removable >= 0) {
+              ticker.removeAt(removable);
+            } else {
+              ticker.removeLast();
+            }
+          }
+          ticker.insert(0, lead);
+        }
+      }
+    }
+
+    final snapshotHasWheat = cards.any(_isVisibleSnapshotWheat);
+    if (!snapshotHasWheat) {
+      LiveMandiRate? snapshotCandidate;
+      for (final item in rankedWheat) {
+        if (_isVisibleSnapshotWheat(item)) {
+          snapshotCandidate = item;
+          break;
+        }
+      }
+      if (snapshotCandidate != null) {
+        final selected = snapshotCandidate;
+        final existing = cards.indexWhere((row) => row.id == selected.id);
+        if (existing >= 0) {
+          final moved = cards.removeAt(existing);
+          cards.insert(0, moved);
+        } else {
+          if (cards.length >= 8) {
+            final removable = cards.lastIndexWhere(
+              (row) => !_isWheatCommodity(row),
+            );
+            if (removable >= 0) {
+              cards.removeAt(removable);
+            } else {
+              cards.removeLast();
+            }
+          }
+          cards.insert(0, selected);
+        }
+      }
+    }
+
+    // Mirror the same lead guarantee for snapshot/cards surface.
+    final visibleSnapshotWheat = rankedWheat
+        .where(_isVisibleSnapshotWheat)
+        .toList(growable: false);
+    if (visibleSnapshotWheat.isNotEmpty) {
+      final lead = MandiHomePresenter.pickBestWheatLeadCandidate(
+        visibleSnapshotWheat,
+      );
+      if (lead != null) {
+        final existing = cards.indexWhere((row) => row.id == lead.id);
+        if (existing >= 0) {
+          final moved = cards.removeAt(existing);
+          cards.insert(0, moved);
+        } else {
+          if (cards.length >= 8) {
+            final removable = cards.lastIndexWhere(
+              (row) => !_isWheatCommodity(row),
+            );
+            if (removable >= 0) {
+              cards.removeAt(removable);
+            } else {
+              cards.removeLast();
+            }
+          }
+          cards.insert(0, lead);
+        }
+      }
     }
 
     return _TickerCardsSplit(
-      ticker: ticker,
+      ticker: ticker.take(12).toList(growable: false),
       cards: cards.take(8).toList(growable: false),
     );
+  }
+
+  List<LiveMandiRate> _rankWheatForVisibility(
+    List<LiveMandiRate> wheat,
+    MandiLocationContext location,
+  ) {
+    if (wheat.length <= 1) return wheat;
+    final nearestDistricts = _nearestDistricts(location);
+    final ranked = List<LiveMandiRate>.from(wheat)
+      ..sort((a, b) {
+        final tierA = _locationTier(a, location, nearestDistricts);
+        final tierB = _locationTier(b, location, nearestDistricts);
+        if (tierA != tierB) return tierA.compareTo(tierB);
+        final freshCmp = _freshnessWeight(b).compareTo(_freshnessWeight(a));
+        if (freshCmp != 0) return freshCmp;
+        final confidenceCmp = b.confidenceScore.compareTo(a.confidenceScore);
+        if (confidenceCmp != 0) return confidenceCmp;
+        final sourceCmp = _homeSourcePriority(
+          a,
+        ).compareTo(_homeSourcePriority(b));
+        if (sourceCmp != 0) return sourceCmp;
+        return b.lastUpdated.compareTo(a.lastUpdated);
+      });
+    return ranked;
+  }
+
+  bool _isWheatCommodity(LiveMandiRate rate) {
+    return _normalizeHomeCommodity(rate) == 'wheat';
+  }
+
+  bool _isVisibleTickerWheat(LiveMandiRate rate) {
+    if (!_isWheatCommodity(rate)) return false;
+    if (!rate.isTickerPriceEligible) return false;
+    return _isRenderableForPath(rate, MandiHomeRenderPath.ticker);
+  }
+
+  bool _isVisibleSnapshotWheat(LiveMandiRate rate) {
+    if (!_isWheatCommodity(rate)) return false;
+    return _isRenderableForPath(rate, MandiHomeRenderPath.card);
+  }
+
+  bool _isRenderableForPath(LiveMandiRate rate, MandiHomeRenderPath path) {
+    final commodityKey = _normalizeHomeCommodity(rate);
+    if (!MandiHomePresenter.isAllowlistedCommodity(commodityKey)) {
+      return false;
+    }
+    final row = MandiHomePresenter.buildDisplayRow(
+      commodityRaw: rate.commodityName,
+      urduName: '${rate.metadata['urduName'] ?? ''}'.trim().isNotEmpty
+          ? '${rate.metadata['urduName']}'.trim()
+          : null,
+      commodityNameUr: rate.commodityNameUr.trim().isNotEmpty
+          ? rate.commodityNameUr
+          : null,
+      city: rate.city,
+      district: rate.district,
+      province: rate.province,
+      unitRaw: rate.unit,
+      price: getTrustedDisplayPrice(rate),
+      sourceSelected: '${rate.sourceId}|${rate.sourceType}|${rate.source}',
+      confidence: rate.confidenceScore,
+      renderPath: path,
+    );
+    return row.isRenderable;
+  }
+
+  String _proofRowSummary(LiveMandiRate rate, MandiHomeRenderPath path) {
+    final commodityKey = _normalizeHomeCommodity(rate);
+    if (!MandiHomePresenter.isAllowlistedCommodity(commodityKey)) {
+      return 'non_allowlisted_row';
+    }
+    final row = MandiHomePresenter.buildDisplayRow(
+      commodityRaw: rate.commodityName,
+      urduName: '${rate.metadata['urduName'] ?? ''}'.trim().isNotEmpty
+          ? '${rate.metadata['urduName']}'.trim()
+          : null,
+      commodityNameUr: rate.commodityNameUr.trim().isNotEmpty
+          ? rate.commodityNameUr
+          : null,
+      city: rate.city,
+      district: rate.district,
+      province: rate.province,
+      unitRaw: rate.unit,
+      price: getTrustedDisplayPrice(rate),
+      sourceSelected: '${rate.sourceId}|${rate.sourceType}|${rate.source}',
+      confidence: rate.confidenceScore,
+      renderPath: path,
+    );
+    if (!row.isRenderable) {
+      return 'non_renderable_row';
+    }
+    return path == MandiHomeRenderPath.ticker
+        ? row.fullTickerLine
+        : row.fullSnapshotLine;
+  }
+
+  void _logFinalHomeSurfaceProof(_TickerCardsSplit split) {
+    final tickerPreview = split.ticker.take(6).toList(growable: false);
+    for (var i = 0; i < tickerPreview.length; i++) {
+      final row = tickerPreview[i];
+      final summary = _proofRowSummary(row, MandiHomeRenderPath.ticker);
+      debugPrint('[MandiProof] final_visible_home_ticker_row=$summary');
+      if (_isVisibleTickerWheat(row)) {
+        debugPrint(
+          '[MandiProof] wheat_visible_rank=${i + 1} surface=home_ticker',
+        );
+      }
+    }
+
+    final snapshotPreview = split.cards.take(6).toList(growable: false);
+    for (var i = 0; i < snapshotPreview.length; i++) {
+      final row = snapshotPreview[i];
+      final summary = _proofRowSummary(row, MandiHomeRenderPath.card);
+      debugPrint('[MandiProof] final_visible_snapshot_row=$summary');
+      if (_isVisibleSnapshotWheat(row)) {
+        debugPrint('[MandiProof] wheat_visible_rank=${i + 1} surface=snapshot');
+      }
+    }
   }
 
   List<LiveMandiRate> _diversifyForTicker(
@@ -760,80 +1344,85 @@ class _LiveMandiRatesSectionState extends State<LiveMandiRatesSection> {
   }) {
     if (rates.isEmpty) return const <LiveMandiRate>[];
 
-    final grouped = <String, List<LiveMandiRate>>{};
-    for (final rate in rates) {
-      final key = [
-        _norm(
-          rate.categoryName.isNotEmpty ? rate.categoryName : rate.categoryId,
-        ),
-        _norm(
-          rate.subCategoryName.isNotEmpty
-              ? rate.subCategoryName
-              : rate.subCategoryId,
-        ),
-      ].join('|');
-      grouped.putIfAbsent(key, () => <LiveMandiRate>[]).add(rate);
-    }
-
-    for (final entry in grouped.entries) {
-      entry.value.sort((a, b) {
+    // Sort by commodity priority, then nearby, freshness, recency.
+    final sorted = List<LiveMandiRate>.from(rates)
+      ..sort((a, b) {
+        final aPri = _commodityPriorityScore(a);
+        final bPri = _commodityPriorityScore(b);
+        if (aPri != bPri) return aPri.compareTo(bPri);
         if (a.isNearby != b.isNearby) return a.isNearby ? -1 : 1;
         final freshness = _freshnessWeight(b).compareTo(_freshnessWeight(a));
         if (freshness != 0) return freshness;
         return b.lastUpdated.compareTo(a.lastUpdated);
       });
-    }
 
     final result = <LiveMandiRate>[];
-    final usedCommodityCitySubcategory = <String>{};
-    final usedBucketCommodity = <String>{};
+    final commodityCount = <String, int>{};
+    final seenCommodityCityPairs = <String>{};
+    final tickerCap = MandiHomePresenter.tickerCommodityCap;
 
-    // Pass 1: one strong representative per category/subcategory bucket.
-    for (final entry in grouped.entries) {
+    // Pass 1: one row per unique commodity — maximize spread.
+    final usedCommodities = <String>{};
+    for (final item in sorted) {
       if (result.length >= maxItems) break;
-      for (final item in entry.value) {
-        final commodityCitySubcategory =
-            '${_norm(item.commodityName)}|${_norm(item.city)}|${_subcategoryKey(item)}';
-        final bucketCommodity = '${entry.key}|${_norm(item.commodityName)}';
-        if (usedCommodityCitySubcategory.contains(commodityCitySubcategory) ||
-            usedBucketCommodity.contains(bucketCommodity)) {
-          continue;
-        }
-        result.add(item);
-        usedCommodityCitySubcategory.add(commodityCitySubcategory);
-        usedBucketCommodity.add(bucketCommodity);
-        break;
-      }
+      final commodity = _normalizeHomeCommodity(item);
+      if (commodity.isEmpty || usedCommodities.contains(commodity)) continue;
+      final pairKey = '$commodity|${_norm(item.city)}';
+      result.add(item);
+      usedCommodities.add(commodity);
+      seenCommodityCityPairs.add(pairKey);
+      commodityCount[commodity] = 1;
+      debugPrint(
+        '[MandiHome] diversity_candidate_commodity=$commodity '
+        'diversity_selected=true pass=1',
+      );
     }
 
     if (result.length >= maxItems) {
+      debugPrint(
+        '[MandiHome] final_home_ticker_diversity_count=${commodityCount.keys.length}',
+      );
       return result.take(maxItems).toList(growable: false);
     }
 
-    // Pass 2: round-robin fill while keeping diversity and no duplicate commodity-city pairs.
-    final queues = grouped.values
-        .map((items) => List<LiveMandiRate>.from(items))
-        .toList();
-    var progressed = true;
-    while (result.length < maxItems && progressed) {
-      progressed = false;
-      for (final queue in queues) {
+    // Pass 2: fill remaining slots respecting per-commodity cap.
+    for (final item in sorted) {
+      if (result.length >= maxItems) break;
+      final commodity = _normalizeHomeCommodity(item);
+      if (commodity.isEmpty) continue;
+      final pairKey = '$commodity|${_norm(item.city)}';
+      if (seenCommodityCityPairs.contains(pairKey)) continue;
+      final count = commodityCount[commodity] ?? 0;
+      if (count >= tickerCap) {
+        debugPrint(
+          '[MandiHome] diversity_skip_reason=ticker_commodity_cap '
+          'commodity=$commodity count=$count',
+        );
+        continue;
+      }
+      result.add(item);
+      seenCommodityCityPairs.add(pairKey);
+      commodityCount[commodity] = count + 1;
+      debugPrint(
+        '[MandiHome] diversity_candidate_commodity=$commodity '
+        'diversity_selected=true pass=2',
+      );
+    }
+
+    // Pass 3: if still short, allow overflow.
+    if (result.length < maxItems) {
+      for (final item in sorted) {
         if (result.length >= maxItems) break;
-        while (queue.isNotEmpty) {
-          final candidate = queue.removeAt(0);
-          final commodityCitySubcategory =
-              '${_norm(candidate.commodityName)}|${_norm(candidate.city)}|${_subcategoryKey(candidate)}';
-          if (usedCommodityCitySubcategory.contains(commodityCitySubcategory)) {
-            continue;
-          }
-          result.add(candidate);
-          usedCommodityCitySubcategory.add(commodityCitySubcategory);
-          progressed = true;
-          break;
+        final pairKey = '${_normalizeHomeCommodity(item)}|${_norm(item.city)}';
+        if (seenCommodityCityPairs.add(pairKey)) {
+          result.add(item);
         }
       }
     }
 
+    debugPrint(
+      '[MandiHome] final_home_ticker_diversity_count=${commodityCount.keys.length}',
+    );
     return result.take(maxItems).toList(growable: false);
   }
 
@@ -854,56 +1443,91 @@ class _LiveMandiRatesSectionState extends State<LiveMandiRatesSection> {
         )
         .toList(growable: false);
 
-    final cityTier = scored.where((item) => item.tier == 0).toList(growable: false);
-    final nearestTier = scored
-        .where((item) => item.tier > 0 && item.tier <= 2)
-        .toList(growable: false);
-    final broadTier = scored.where((item) => item.tier > 2).toList(growable: false);
+    // Sort candidates: high-priority commodities first, then by location tier,
+    // freshness, and update recency.
+    scored.sort((a, b) {
+      final aPri = _commodityPriorityScore(a.rate);
+      final bPri = _commodityPriorityScore(b.rate);
+      if (aPri != bPri) return aPri.compareTo(bPri);
+      if (a.tier != b.tier) return a.tier.compareTo(b.tier);
+      final freshCmp = _freshnessWeight(
+        b.rate,
+      ).compareTo(_freshnessWeight(a.rate));
+      if (freshCmp != 0) return freshCmp;
+      return b.rate.lastUpdated.compareTo(a.rate.lastUpdated);
+    });
 
     final result = <LiveMandiRate>[];
     final seenIds = <String>{};
-    final seenSubcategories = <String>{};
+    final commodityCount = <String, int>{};
+    final seenCommodities = <String>{};
 
-    void addDistinctSubcategory(List<_LocationRankedRate> pool, {int? cap}) {
-      var added = 0;
-      for (final item in pool) {
-        if (result.length >= targetCount) return;
-        final subcategory = _subcategoryKey(item.rate);
-        if (seenIds.contains(item.rate.id) || seenSubcategories.contains(subcategory)) {
-          continue;
-        }
+    // Pass 1: one row per unique commodity — diversity-first.
+    for (final item in scored) {
+      if (result.length >= targetCount) break;
+      final commodity = _normalizeHomeCommodity(item.rate);
+      if (commodity.isEmpty || seenCommodities.contains(commodity)) {
+        continue;
+      }
+      if (seenIds.contains(item.rate.id)) continue;
+      result.add(item.rate);
+      seenIds.add(item.rate.id);
+      seenCommodities.add(commodity);
+      commodityCount[commodity] = 1;
+      debugPrint(
+        '[MandiHome] diversity_selected=true '
+        'commodity=$commodity '
+        'commodity_priority=${MandiHomePresenter.commodityPriority[commodity] ?? 99} '
+        'tier=${item.tier}',
+      );
+    }
+
+    // Pass 2: allow up to tickerCommodityCap per commodity with remaining slots.
+    final tickerCap = MandiHomePresenter.tickerCommodityCap;
+    for (final item in scored) {
+      if (result.length >= targetCount) break;
+      if (seenIds.contains(item.rate.id)) continue;
+      final commodity = _normalizeHomeCommodity(item.rate);
+      if (commodity.isEmpty) continue;
+      final count = commodityCount[commodity] ?? 0;
+      if (count >= tickerCap) {
+        debugPrint(
+          '[MandiHome] diversity_skip_reason=commodity_cap_reached '
+          'commodity=$commodity count=$count',
+        );
+        continue;
+      }
+      result.add(item.rate);
+      seenIds.add(item.rate.id);
+      commodityCount[commodity] = count + 1;
+    }
+
+    // Pass 3: if still short, allow overflow — never leave Home empty.
+    for (final item in scored) {
+      if (result.length >= targetCount) break;
+      if (seenIds.add(item.rate.id)) {
         result.add(item.rate);
-        seenIds.add(item.rate.id);
-        seenSubcategories.add(subcategory);
-        added += 1;
-        if (cap != null && added >= cap) return;
       }
     }
 
-    void addAny(List<_LocationRankedRate> pool) {
-      for (final item in pool) {
-        if (result.length >= targetCount) return;
-        if (seenIds.add(item.rate.id)) {
-          result.add(item.rate);
-        }
-      }
-    }
-
-    // Keep exact-city first, but if city has limited depth then force nearest fallback mix.
-    addDistinctSubcategory(cityTier);
-    final minFallbackDistinct = cityTier.length <= 1 ? 3 : 1;
-    addDistinctSubcategory(nearestTier, cap: minFallbackDistinct);
-    addDistinctSubcategory(nearestTier);
-    addDistinctSubcategory(broadTier);
-
-    if (result.length < targetCount) addAny(cityTier);
-    if (result.length < targetCount) addAny(nearestTier);
-    if (result.length < targetCount) addAny(broadTier);
+    final distinctCommodities = commodityCount.keys.length;
+    debugPrint(
+      '[MandiHome] final_home_pool_diversity_count=$distinctCommodities '
+      'pool_size=${result.length}',
+    );
 
     return result.take(targetCount).toList(growable: false);
   }
 
-  _TierStats _tierStats(List<LiveMandiRate> rates, MandiLocationContext location) {
+  int _commodityPriorityScore(LiveMandiRate rate) {
+    final commodity = _normalizeHomeCommodity(rate);
+    return MandiHomePresenter.commodityPriority[commodity] ?? 3;
+  }
+
+  _TierStats _tierStats(
+    List<LiveMandiRate> rates,
+    MandiLocationContext location,
+  ) {
     if (rates.isEmpty) return const _TierStats();
     final nearestDistricts = _nearestDistricts(location);
     var cityTier = 0;
@@ -949,6 +1573,9 @@ class _LiveMandiRatesSectionState extends State<LiveMandiRatesSection> {
     if (unit.contains('50') && unit.contains('kg')) return 'per_50kg';
     if (unit.contains('kg')) return 'per_kg';
     if (unit.contains('dozen') || unit.contains('doz')) return 'per_dozen';
+    if (unit.contains('tray')) return 'per_tray';
+    if (unit.contains('crate')) return 'per_crate';
+    if (unit.contains('peti')) return 'per_peti';
     return unit;
   }
 
@@ -989,7 +1616,7 @@ class _LiveMandiRatesSectionState extends State<LiveMandiRatesSection> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Nearby Mandi Rates / آپ کے قریب منڈی ریٹس',
+                    'آپ کے قریب منڈی ریٹس',
                     style: TextStyle(
                       color: AppColors.primaryText,
                       fontWeight: FontWeight.w800,
@@ -998,7 +1625,7 @@ class _LiveMandiRatesSectionState extends State<LiveMandiRatesSection> {
                   ),
                   SizedBox(height: 2),
                   Text(
-                    'Live market prices and trends\nلائیو مارکیٹ قیمتیں اور رجحانات',
+                    'صاف، تازہ اور تصدیق شدہ منڈی قیمتیں',
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -1023,7 +1650,7 @@ class _LiveMandiRatesSectionState extends State<LiveMandiRatesSection> {
                   ),
                 );
               },
-              child: const Text('See All / سب دیکھیں'),
+              child: const Text('سب دیکھیں'),
             ),
           ],
         ),
@@ -1031,7 +1658,7 @@ class _LiveMandiRatesSectionState extends State<LiveMandiRatesSection> {
           const Padding(
             padding: EdgeInsets.only(bottom: 6),
             child: Text(
-              'Offline fallback is active.\nآف لائن بیک اپ ڈیٹا دکھایا جا رہا ہے۔',
+              'آف لائن بیک اپ ڈیٹا دکھایا جا رہا ہے۔',
               style: TextStyle(
                 color: AppColors.secondaryText,
                 fontSize: 11,
@@ -1043,7 +1670,7 @@ class _LiveMandiRatesSectionState extends State<LiveMandiRatesSection> {
           const Padding(
             padding: EdgeInsets.only(bottom: 6),
             child: Text(
-              'Data may be stale. Pull to refresh in See All screen.\nڈیٹا پرانا ہو سکتا ہے۔ سب دیکھیں اسکرین میں ریفریش کریں۔',
+              'ڈیٹا پرانا ہو سکتا ہے۔ سب دیکھیں میں جا کر ریفریش کریں۔',
               style: TextStyle(
                 color: AppColors.urgencyRed,
                 fontSize: 10.8,
@@ -1055,7 +1682,7 @@ class _LiveMandiRatesSectionState extends State<LiveMandiRatesSection> {
           const Padding(
             padding: EdgeInsets.only(bottom: 6),
             child: Text(
-              'Latest verified mandi rates are shown below.\nتازہ تصدیق شدہ منڈی ریٹس نیچے دکھائے گئے ہیں۔',
+              'تازہ تصدیق شدہ منڈی ریٹس نیچے دکھائے گئے ہیں۔',
               style: TextStyle(
                 color: AppColors.secondaryText,
                 fontSize: 10.8,
@@ -1067,7 +1694,7 @@ class _LiveMandiRatesSectionState extends State<LiveMandiRatesSection> {
           Padding(
             padding: const EdgeInsets.only(bottom: 6),
             child: Text(
-              'Last sync: ${_relative(_state.lastSyncedAt!)} / آخری سنک: ${_relative(_state.lastSyncedAt!)}',
+              'آخری ہم آہنگی: ${_relative(_state.lastSyncedAt!)}',
               style: const TextStyle(
                 color: AppColors.secondaryText,
                 fontSize: 10.4,
@@ -1079,7 +1706,7 @@ class _LiveMandiRatesSectionState extends State<LiveMandiRatesSection> {
           const Padding(
             padding: EdgeInsets.only(bottom: 6),
             child: Text(
-              'Location permission denied. Prioritizing account or filter location.\nلوکیشن اجازت نہ ملنے پر اکاؤنٹ یا فلٹر مقام کو ترجیح دی جا رہی ہے۔',
+              'لوکیشن اجازت نہ ملنے پر اکاؤنٹ یا فلٹر مقام کو ترجیح دی جا رہی ہے۔',
               style: TextStyle(
                 color: AppColors.secondaryText,
                 fontSize: 10.8,
@@ -1091,7 +1718,7 @@ class _LiveMandiRatesSectionState extends State<LiveMandiRatesSection> {
           const Padding(
             padding: EdgeInsets.only(bottom: 6),
             child: Text(
-              'Location service is off. Showing fallback mandi context.\nلوکیشن سروس بند ہے۔ بیک اپ منڈی سیاق دکھایا جا رہا ہے۔',
+              'لوکیشن سروس بند ہے۔ بیک اپ منڈی سیاق دکھایا جا رہا ہے۔',
               style: TextStyle(
                 color: AppColors.secondaryText,
                 fontSize: 10.8,
@@ -1103,7 +1730,7 @@ class _LiveMandiRatesSectionState extends State<LiveMandiRatesSection> {
           const Padding(
             padding: EdgeInsets.only(bottom: 6),
             child: Text(
-              'No nearby mandi rates found. Showing broader market.\nقریب کی منڈی ریٹس دستیاب نہیں، وسیع مارکیٹ دکھائی جا رہی ہے۔',
+              'قریب کی منڈی ریٹس دستیاب نہیں، وسیع مارکیٹ دکھائی جا رہی ہے۔',
               style: TextStyle(
                 color: AppColors.secondaryText,
                 fontSize: 10.8,
@@ -1115,7 +1742,7 @@ class _LiveMandiRatesSectionState extends State<LiveMandiRatesSection> {
           const Padding(
             padding: EdgeInsets.only(bottom: 8),
             child: Text(
-              'Latest verified mandi rates are not available yet.\nتازہ تصدیق شدہ منڈی ریٹس ابھی دستیاب نہیں۔',
+              'تازہ تصدیق شدہ منڈی ریٹس ابھی دستیاب نہیں۔',
               style: TextStyle(
                 color: AppColors.secondaryText,
                 fontSize: 11,
@@ -1139,11 +1766,7 @@ class _LiveMandiRatesSectionState extends State<LiveMandiRatesSection> {
   }
 
   String _relative(DateTime dateTime) {
-    final diff = DateTime.now().toUtc().difference(dateTime.toUtc());
-    if (diff.inMinutes < 1) return 'just now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24) return '${diff.inHours}h ago';
-    return '${diff.inDays}d ago';
+    return getLocalizedRelativeTime(dateTime, MandiDisplayLanguage.urdu);
   }
 }
 

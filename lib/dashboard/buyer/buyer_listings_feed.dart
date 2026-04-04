@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../../routes.dart';
+import '../../services/auth_service.dart';
 import '../../theme/app_colors.dart';
 import 'buyer_models.dart';
 import 'buyer_listing_detail_screen.dart';
@@ -53,6 +54,7 @@ class _BuyerListingsFeedState extends State<BuyerListingsFeed> {
 
   Future<void> _logout() async {
     await FirebaseAuth.instance.signOut();
+    await AuthService().clearPersistedSessionUid();
     if (!mounted) return;
     Navigator.of(
       context,
@@ -157,7 +159,7 @@ class _BuyerListingsFeedState extends State<BuyerListingsFeed> {
                         .where((listing) {
                           if (_searchText.isEmpty) return true;
                           final hay =
-                              '${listing.itemName} ${listing.district} ${listing.province}'
+                              '${listing.itemName} ${listing.city} ${listing.tehsil} ${listing.district} ${listing.province} ${listing.locationLabel}'
                                   .toLowerCase();
                           return hay.contains(_searchText);
                         })

@@ -1,3 +1,29 @@
+/** Confidence level for a single ticker row after normalization + unit checks. */
+export type RowConfidence = "high" | "medium" | "low" | "rejected";
+
+/**
+ * Reliability of the originating source.
+ * - high:   official government / FSCPD / AMIS / Lahore / Karachi
+ * - medium: human verified contributor
+ * - low:    unknown / unverified contributor
+ */
+export type SourceReliabilityLevel = "high" | "medium" | "low";
+
+/**
+ * Flags that explain why a row was down-ranked or rejected.
+ * Multiple flags can be active at once.
+ */
+export type MandiRateFlag =
+  | "unit_violation"          // unit not in commodity allow-list
+  | "critical_unit_violation" // impossible combo (banana-kg, egg-kg …)
+  | "price_spike"             // price deviates >60% from comparable average
+  | "stale_source"            // freshnessStatus = stale
+  | "no_urdu_label"           // commodityNameUr missing
+  | "low_source_reliability"  // source not in high-reliability list
+  | "pbs_spi_trend_only"       // PBS SPI data — show as pulse message, not price
+  | "missing_district"        // district could not be resolved
+  | "sparse_data";            // only one source row, no corroboration
+
 export type SourceFamily =
   | "official_national_source"
   | "official_city_market_source"
@@ -105,6 +131,7 @@ export type SourceDefinition = {
   cityCoverage: string[];
   categoryCoverage: string[];
   adapterClass:
+    | "FscpdOfficialAdapter"
     | "AmisOfficialAdapter"
     | "LahoreOfficialAdapter"
     | "KarachiOfficialAdapter"
@@ -185,6 +212,20 @@ export type UnifiedMandiRate = {
   isNearby: boolean;
   isAiCleaned: boolean;
   metadata: Record<string, unknown>;
+
+  // --- Market Pulse confidence fields (populated by confidence_engine) ---
+
+  /** Confidence of this specific row for home ticker display. */
+  rowConfidence?: RowConfidence;
+
+  /** Reliability bucket of the originating source. */
+  sourceReliabilityLevel?: SourceReliabilityLevel;
+
+  /**
+   * Zero or more flags explaining why confidence was reduced / the row
+   * was rejected.  Empty array = clean row.
+   */
+  flags?: MandiRateFlag[];
 };
 
 export type SourceRunStats = {

@@ -41,16 +41,16 @@ class MarketHierarchy {
       labelUr: 'فصلیں',
     ),
     MarketCategoryOption(
-      id: 'fruit',
-      mandiType: MandiType.fruit,
-      labelEn: 'Fruits',
-      labelUr: 'پھل',
-    ),
-    MarketCategoryOption(
       id: 'vegetables',
       mandiType: MandiType.vegetables,
       labelEn: 'Vegetables',
       labelUr: 'سبزیاں',
+    ),
+    MarketCategoryOption(
+      id: 'fruit',
+      mandiType: MandiType.fruit,
+      labelEn: 'Fruits',
+      labelUr: 'پھل',
     ),
     MarketCategoryOption(
       id: 'flowers',
@@ -89,12 +89,6 @@ class MarketHierarchy {
       labelUr: 'مشینری',
     ),
     MarketCategoryOption(
-      id: 'tools',
-      mandiType: MandiType.tools,
-      labelEn: 'Tools',
-      labelUr: 'اوزار',
-    ),
-    MarketCategoryOption(
       id: 'dry_fruits',
       mandiType: MandiType.dryFruits,
       labelEn: 'Dry Fruits',
@@ -106,6 +100,88 @@ class MarketHierarchy {
       labelEn: 'Spices',
       labelUr: 'مصالحہ جات',
     ),
+    MarketCategoryOption(
+      id: 'tools',
+      mandiType: MandiType.tools,
+      labelEn: 'Tools',
+      labelUr: 'اوزار',
+    ),
+  ];
+
+  static const List<MarketCategoryOption> listingCategories =
+      <MarketCategoryOption>[
+        MarketCategoryOption(
+          id: 'crops',
+          mandiType: MandiType.crops,
+          labelEn: 'Crops',
+          labelUr: 'فصلیں',
+        ),
+        MarketCategoryOption(
+          id: 'vegetables',
+          mandiType: MandiType.vegetables,
+          labelEn: 'Vegetables',
+          labelUr: 'سبزیاں',
+        ),
+        MarketCategoryOption(
+          id: 'fruit',
+          mandiType: MandiType.fruit,
+          labelEn: 'Fruits',
+          labelUr: 'پھل',
+        ),
+        MarketCategoryOption(
+          id: 'flowers',
+          mandiType: MandiType.flowers,
+          labelEn: 'Flowers',
+          labelUr: 'پھول',
+        ),
+        MarketCategoryOption(
+          id: 'livestock',
+          mandiType: MandiType.livestock,
+          labelEn: 'Livestock',
+          labelUr: 'مویشی',
+        ),
+        MarketCategoryOption(
+          id: 'poultry',
+          mandiType: MandiType.livestock,
+          labelEn: 'Poultry',
+          labelUr: 'پولٹری',
+        ),
+        MarketCategoryOption(
+          id: 'milk',
+          mandiType: MandiType.milk,
+          labelEn: 'Milk & Dairy',
+          labelUr: 'دودھ و ڈیری',
+        ),
+        MarketCategoryOption(
+          id: 'seeds',
+          mandiType: MandiType.seeds,
+          labelEn: 'Seeds',
+          labelUr: 'بیج',
+        ),
+        MarketCategoryOption(
+          id: 'fertilizer',
+          mandiType: MandiType.fertilizer,
+          labelEn: 'Fertilizer',
+          labelUr: 'کھاد',
+        ),
+        MarketCategoryOption(
+          id: 'machinery',
+          mandiType: MandiType.machinery,
+          labelEn: 'Machinery',
+          labelUr: 'مشینری',
+        ),
+        MarketCategoryOption(
+          id: 'dry_fruits',
+          mandiType: MandiType.dryFruits,
+          labelEn: 'Dry Fruits',
+          labelUr: 'خشک میوہ جات',
+        ),
+        MarketCategoryOption(
+          id: 'spices',
+          mandiType: MandiType.spices,
+          labelEn: 'Spices',
+          labelUr: 'مصالحہ جات',
+        ),
   ];
 
   static String categoryIdForMandiType(MandiType mandiType) {
@@ -126,10 +202,46 @@ class MarketHierarchy {
     return 'Crops / فصلیں';
   }
 
+  static String listingCategoryLabelForId(String categoryId) {
+    for (final option in listingCategories) {
+      if (option.id == categoryId) {
+        return option.bilingualLabel;
+      }
+    }
+    return listingCategories.first.bilingualLabel;
+  }
+
+  static MarketCategoryOption? listingCategoryFromLabel(String selected) {
+    for (final option in listingCategories) {
+      if (option.bilingualLabel == selected) {
+        return option;
+      }
+    }
+    return null;
+  }
+
   static List<MarketSubcategoryOption> subcategoriesForMandiType(
     MandiType mandiType,
   ) {
     final items = CategoryConstants.itemsForMandiType(mandiType);
+    return items
+        .map(
+          (item) {
+            final parts = _splitBilingual(item);
+            return MarketSubcategoryOption(
+              id: _slug(item),
+              labelEn: parts.$1,
+              labelUr: parts.$2,
+            );
+          },
+        )
+        .toList(growable: false);
+  }
+
+  static List<MarketSubcategoryOption> subcategoriesForCategoryId(
+    String categoryId,
+  ) {
+    final items = CategoryConstants.itemsForCategoryId(categoryId);
     return items
         .map(
           (item) {
@@ -291,6 +403,12 @@ class PakistanLocationHierarchy {
     return <String>['$tehsilClean City', '$tehsilClean Bazar', districtClean];
   }
 
+  static String urduLabelForLocation(String locationEn) {
+    final key = locationEn.trim();
+    if (key.isEmpty) return '';
+    return _urduLocationByEnglish[key] ?? '';
+  }
+
   static const Map<String, List<String>>
   _tehsilsByDistrict = <String, List<String>>{
     'Lahore': <String>['Ravi', 'Shalimar', 'Model Town', 'Cantt'],
@@ -312,6 +430,7 @@ class PakistanLocationHierarchy {
     'Mardan': <String>['Mardan City', 'Takht Bhai', 'Katlang'],
     'Quetta': <String>['Quetta City', 'Sariab', 'Chiltan'],
     'Islamabad': <String>['Islamabad City', 'Rural Islamabad'],
+    'Kasur': <String>['Kasur', 'Pattoki', 'Chunian', 'Kot Radha Kishan'],
   };
 
   static const Map<String, List<String>> _citiesByDistrictTehsil =
@@ -334,6 +453,372 @@ class PakistanLocationHierarchy {
         'Mardan|Mardan City': <String>['Par Hoti', 'Bagh-e-Irum'],
         'Quetta|Quetta City': <String>['Jinnah Town', 'Satellite Town Quetta'],
         'Islamabad|Islamabad City': <String>['F-10', 'G-11', 'I-8'],
+        'Kasur|Pattoki': <String>['Pattoki', 'Phool Nagar', 'Habibabad'],
+        'Kasur|Kasur': <String>['Kasur City', 'Khudian Khas'],
+        'Kasur|Chunian': <String>['Chunian', 'Halla', 'Allahabad'],
+        'Kasur|Kot Radha Kishan': <String>[
+          'Kot Radha Kishan',
+          'Mustafabad',
+        ],
+      };
+
+  static const Map<String, String> _urduLocationByEnglish =
+      <String, String>{
+        // ── Provinces ────────────────────────────────────────────────────────
+        'Punjab': 'پنجاب',
+        'Sindh': 'سندھ',
+        'Balochistan': 'بلوچستان',
+        'Khyber Pakhtunkhwa': 'خیبر پختونخوا',
+        'Islamabad': 'اسلام آباد',
+        'Gilgit Baltistan': 'گلگت بلتستان',
+        'Azad Kashmir': 'آزاد کشمیر',
+
+        // ── Punjab Districts ─────────────────────────────────────────────────
+        'Attock': 'اٹک',
+        'Bahawalnagar': 'بہاولنگر',
+        'Bahawalpur': 'بہاولپور',
+        'Bhakkar': 'بھکر',
+        'Chakwal': 'چکوال',
+        'Chiniot': 'چنیوٹ',
+        'Dera Ghazi Khan': 'ڈیرہ غازی خان',
+        'Faisalabad': 'فیصل آباد',
+        'Gujranwala': 'گوجرانوالہ',
+        'Gujrat': 'گجرات',
+        'Hafizabad': 'حافظ آباد',
+        'Jhang': 'جھنگ',
+        'Jhelum': 'جہلم',
+        'Kasur': 'قصور',
+        'Khanewal': 'خانیوال',
+        'Khushab': 'خوشاب',
+        'Lahore': 'لاہور',
+        'Leiah': 'لیہ',
+        'Lodhran': 'لودھراں',
+        'Mandi Bahauddin': 'منڈی بہاؤالدین',
+        'Mianwali': 'میانوالی',
+        'Multan': 'ملتان',
+        'Muzaffargarh': 'مظفرگڑھ',
+        'Nankana Sahib': 'ننکانہ صاحب',
+        'Narowal': 'نارووال',
+        'Okara': 'اوکاڑہ',
+        'Pakpattan': 'پاکپتن',
+        'Rahim Yar Khan': 'رحیم یار خان',
+        'Rajanpur': 'راجن پور',
+        'Rawalpindi': 'راولپنڈی',
+        'Sahiwal': 'ساہیوال',
+        'Sargodha': 'سرگودھا',
+        'Sheikhupura': 'شیخوپورہ',
+        'Sialkot': 'سیالکوٹ',
+        'Toba Tek Singh': 'ٹوبہ ٹیک سنگھ',
+        'Vehari': 'وہاڑی',
+
+        // ── Punjab Tehsils ────────────────────────────────────────────────────
+        'Attock City': 'اٹک شہر',
+        'Hazro': 'حضرو',
+        'Pindi Gheb': 'پنڈی گھیب',
+        'Fateh Jang': 'فتح جنگ',
+        'Bahawalnagar City': 'بہاولنگر شہر',
+        'Chishtian': 'چشتیاں',
+        'Hasilpur': 'حاصلپور',
+        'Minchinabad': 'منچن آباد',
+        'Bahawalpur City': 'بہاولپور شہر',
+        'Ahmadpur East': 'احمد پور مشرقی',
+        'Yazman': 'یزمان',
+        'Bhakkar City': 'بھکر شہر',
+        'Kallur Kot': 'کالور کوٹ',
+        'Mankera': 'منکیرہ',
+        'Chakwal City': 'چکوال شہر',
+        'Talagang': 'تلہ گنگ',
+        'Chiniot City': 'چنیوٹ شہر',
+        'Bhawana': 'بھوانہ',
+        'DG Khan': 'ڈی جی خان',
+        'Taunsa': 'ٹونسہ',
+        'Faisalabad City': 'فیصل آباد شہر',
+        'Jaranwala': 'جڑانوالہ',
+        'Samundri': 'سمندری',
+        'Tandlianwala': 'ٹانڈلیانوالہ',
+        'Gujranwala City': 'گوجرانوالہ شہر',
+        'Kamoke': 'کاموکے',
+        'Nowshera Virkan': 'نوشہرہ ورکاں',
+        'Gujrat City': 'گجرات شہر',
+        'Kharian': 'کھاریاں',
+        'Hafizabad City': 'حافظ آباد شہر',
+        'Pindi Bhattian': 'پنڈی بھٹیاں',
+        'Jhang City': 'جھنگ شہر',
+        'Shorkot': 'شورکوٹ',
+        'Ahmadpur Sial': 'احمد پور سیال',
+        'Jhelum City': 'جہلم شہر',
+        'Sohawa': 'سوہاوہ',
+        'Pattoki': 'پتوکی',
+        'Chunian': 'چونیاں',
+        'Kot Radha Kishan': 'کوٹ رادھا کشن',
+        'Khanewal City': 'خانیوال شہر',
+        'Mian Channu': 'میاں چنوں',
+        'Kabirwala': 'کبیروالہ',
+        'Khushab City': 'خوشاب شہر',
+        'Noorpur Thal': 'نورپور تھل',
+        'Quaidabad': 'قائد آباد',
+        'Ravi': 'راوی',
+        'Shalimar': 'شالیمار',
+        'Model Town': 'ماڈل ٹاؤن',
+        'Cantt': 'چھاؤنی',
+        'Leiah City': 'لیہ شہر',
+        'Karor Lal Esan': 'کروڑ لعل عیسن',
+        'Lodhran City': 'لودھراں شہر',
+        'Kehror Pakka': 'کہرور پکا',
+        'Mandi Bahauddin City': 'منڈی بہاؤالدین شہر',
+        'Phalia': 'پھالیہ',
+        'Mianwali City': 'میانوالی شہر',
+        'Piplan': 'پی پلاں',
+        'Esa Khel': 'عیسی خیل',
+        'Multan City': 'ملتان شہر',
+        'Shujabad': 'شجاع آباد',
+        'Jalalpur Pirwala': 'جلال پور پیروالہ',
+        'Muzaffargarh City': 'مظفرگڑھ شہر',
+        'Kot Addu': 'کوٹ ادو',
+        'Ali Pur': 'علی پور',
+        'Nankana Sahib City': 'ننکانہ صاحب شہر',
+        'Sangla Hill': 'سانگلہ ہل',
+        'Narowal City': 'نارووال شہر',
+        'Shakargarh': 'شکرگڑھ',
+        'Okara City': 'اوکاڑہ شہر',
+        'Depalpur': 'دیپالپور',
+        'Renala Khurd': 'رینالہ خورد',
+        'Pakpattan City': 'پاکپتن شہر',
+        'Arifwala': 'عارف والا',
+        'Rahim Yar Khan City': 'رحیم یار خان شہر',
+        'Liaquatpur': 'لیاقت پور',
+        'Sadiqabad': 'صادق آباد',
+        'Rajanpur City': 'راجن پور شہر',
+        'Jampur': 'جام پور',
+        'Rawalpindi City': 'راولپنڈی شہر',
+        'Kahuta': 'کہوٹہ',
+        'Taxila': 'ٹیکسلا',
+        'Gujar Khan': 'گجر خان',
+        'Sahiwal City': 'ساہیوال شہر',
+        'Chichawatni': 'چیچہ وطنی',
+        'Sargodha City': 'سرگودھا شہر',
+        'Bhalwal': 'بھلوال',
+        'Sillanwali': 'سلانوالی',
+        'Sheikhupura City': 'شیخوپورہ شہر',
+        'Safdarabad': 'صفدرآباد',
+        'Ferozewala': 'فیروزوالہ',
+        'Sialkot City': 'سیالکوٹ شہر',
+        'Daska': 'ڈسکہ',
+        'Sambrial': 'سمبڑیال',
+        'Pasrur': 'پسرور',
+        'Toba Tek Singh City': 'ٹوبہ ٹیک سنگھ شہر',
+        'Gojra': 'گوجرہ',
+        'Kamalia': 'کمالیہ',
+        'Vehari City': 'وہاڑی شہر',
+        'Burewala': 'بوریوالہ',
+        'Mailsi': 'میلسی',
+
+        // ── Punjab Cities ─────────────────────────────────────────────────────
+        'Phool Nagar': 'پھول نگر',
+        'Habibabad': 'حبیب آباد',
+        'Kasur City': 'قصور شہر',
+        'Khudian Khas': 'کھڈیاں خاص',
+        'Halla': 'ہلہ',
+        'Allahabad': 'الہ آباد',
+        'Mustafabad': 'مصطفی آباد',
+        'Shahdara': 'شاہدرہ',
+        'Data Ganj Bakhsh': 'داتا گنج بخش',
+        'Mughalpura': 'مغل پورہ',
+        'Harbanspura': 'ہربنس پورہ',
+        'Kot Lakhpat': 'کوٹ لکھپت',
+        'DHA': 'ڈی ایچ اے',
+        'Lahore Cantt': 'لاہور چھاؤنی',
+        'Raja Bazar': 'راجہ بازار',
+        'Wah Cantt': 'واہ چھاؤنی',
+        'Madina Town': 'مدینہ ٹاؤن',
+        'Lyallpur Town': 'لائلپور ٹاؤن',
+        'Jaranwala City': 'جڑانوالہ شہر',
+        'Shah Rukn-e-Alam': 'شاہ رکنِ عالم',
+        'Cantt Multan': 'ملتان چھاؤنی',
+        'Satellite Town': 'سیٹلائٹ ٹاؤن',
+        'Sialkot Cantt': 'سیالکوٹ چھاؤنی',
+        'Allama Iqbal Chowk': 'علامہ اقبال چوک',
+
+        // ── Sindh Provinces / Districts ──────────────────────────────────────
+        'Karachi': 'کراچی',
+        'Karachi East': 'کراچی مشرق',
+        'Karachi South': 'کراچی جنوب',
+        'Karachi Central': 'کراچی وسط',
+        'Karachi West': 'کراچی مغرب',
+        'Karachi Malir': 'کراچی ملیر',
+        'Hyderabad': 'حیدرآباد',
+        'Sukkur': 'سکھر',
+        'Larkana': 'لاڑکانہ',
+        'Nawabshah': 'نوابشاہ',
+        'Shaheed Benazirabad': 'شہید بینظیر آباد',
+        'Mirpur Khas': 'میرپور خاص',
+        'Sanghar': 'سانگھڑ',
+        'Tando Allahyar': 'ٹنڈو اللہ یار',
+        'Tando Muhammad Khan': 'ٹنڈو محمد خان',
+        'Badin': 'بدین',
+        'Thatta': 'ٹھٹھہ',
+        'Jamshoro': 'جامشورو',
+        'Dadu': 'دادو',
+        'Naushahro Feroze': 'نوشہروفیروز',
+        'Khairpur': 'خیرپور',
+        'Shikarpur': 'شکارپور',
+        'Jacobabad': 'جیکب آباد',
+        'Kashmore': 'کشمور',
+        'Kamber Shahdadkot': 'کامبر شہداد کوٹ',
+        'Matiari': 'ماٹیاری',
+        'Umerkot': 'عمر کوٹ',
+        'Ghotki': 'گھوٹکی',
+        'Qambar Shahdadkot': 'قمبر شہداد کوٹ',
+        'Sujawal': 'سجاول',
+
+        // ── Sindh Tehsils / Cities ────────────────────────────────────────────
+        'Saddar': 'صدر',
+        'Civil Lines': 'سول لائنز',
+        'Lyari': 'لیاری',
+        'Gulshan': 'گلشن',
+        'Jamshed': 'جمشید',
+        'Ferozabad': 'فیروز آباد',
+        'Nazimabad': 'نظیم آباد',
+        'Liaquatabad': 'لیاقت آباد',
+        'North Nazimabad': 'شمالی نظیم آباد',
+        'Clifton': 'کلفٹن',
+        'Gulshan-e-Iqbal': 'گلشنِ اقبال',
+        'Johar': 'جوہر',
+        'Hirabad': 'ہیرآباد',
+        'Market Tower': 'مارکیٹ ٹاور',
+        'Latifabad': 'لطیف آباد',
+        'Qasimabad': 'قاسم آباد',
+        'Hyderabad City': 'حیدرآباد شہر',
+
+        // ── Khyber Pakhtunkhwa Districts ──────────────────────────────────────
+        'Peshawar': 'پشاور',
+        'Mardan': 'مردان',
+        'Swat': 'سوات',
+        'Dir Lower': 'ضلع دیر زیریں',
+        'Dir Upper': 'ضلع دیر بالائی',
+        'Charsadda': 'چارسدہ',
+        'Nowshera': 'نوشہرہ',
+        'Kohat': 'کوہاٹ',
+        'Buner': 'بونیر',
+        'Mansehra': 'مانسہرہ',
+        'Abbottabad': 'ایبٹ آباد',
+        'Haripur': 'ہری پور',
+        'Swabi': 'صوابی',
+        'Bannu': 'بنوں',
+        'Dera Ismail Khan': 'ڈیرہ اسماعیل خان',
+        'Tank': 'ٹانک',
+        'Lakki Marwat': 'لکی مروت',
+        'Karak': 'کرک',
+        'Hangu': 'ہنگو',
+        'Shangla': 'شانگلہ',
+        'Battagram': 'بٹگرام',
+        'Kohistan': 'کوہستان',
+        'Tor Ghar': 'تورغر',
+        'Malakand': 'مالاکنڈ',
+        'Chitral': 'چترال',
+        'Chitral Upper': 'بالائی چترال',
+        'Chitral Lower': 'زیریں چترال',
+        'Kurram': 'کرم',
+        'Orakzai': 'اورکزئی',
+        'Mohmand': 'مہمند',
+        'Bajaur': 'باجوڑ',
+        'South Waziristan': 'جنوبی وزیرستان',
+        'North Waziristan': 'شمالی وزیرستان',
+        'Khyber': 'خیبر',
+
+        // ── KPK Tehsils / Cities ──────────────────────────────────────────────
+        'Peshawar City': 'پشاور شہر',
+        'Badaber': 'بداب',
+        'Chamkani': 'چمکنی',
+        'University Town': 'یونیورسٹی ٹاؤن',
+        'Hayatabad': 'حیات آباد',
+        'Mardan City': 'مردان شہر',
+        'Takht Bhai': 'تخت بھائی',
+        'Katlang': 'کٹلانگ',
+        'Par Hoti': 'پار ہوتی',
+        'Bagh-e-Irum': 'باغِ ارم',
+
+        // ── Balochistan Districts ──────────────────────────────────────────────
+        'Quetta': 'کوئٹہ',
+        'Zhob': 'ژوب',
+        'Turbat': 'تربت',
+        'Khuzdar': 'خضدار',
+        'Sibi': 'سبی',
+        'Mastung': 'ماسٹنگ',
+        'Chaman': 'چمن',
+        'Hub': 'حب',
+        'Nushki': 'نوشکی',
+        'Panjgur': 'پنجگور',
+        'Gwadar': 'گوادر',
+        'Makran': 'مکران',
+        'Awaran': 'آواران',
+        'Kech': 'کیچ',
+        'Kalat': 'قلات',
+        'Kharan': 'خاران',
+        'Bolan': 'بولان',
+        'Jhal Magsi': 'جھل مگسی',
+        'Lasbela': 'لسبیلہ',
+        'Loralai': 'لورالائی',
+        'Musakhel': 'موسیٰ خیل',
+        'Pishin': 'پشین',
+        'Qila Abdullah': 'قلعہ عبداللہ',
+        'Qila Saifullah': 'قلعہ سیف اللہ',
+        'Sherani': 'شیرانی',
+        'Washuk': 'واشک',
+        'Ziarat': 'زیارت',
+        'Harnai': 'ہرنائی',
+        'Kohlu': 'کوہلو',
+        'Dera Bugti': 'ڈیرہ بگٹی',
+        'Nasirabad': 'نصیرآباد',
+
+        // ── Balochistan Cities ────────────────────────────────────────────────
+        'Quetta City': 'کوئٹہ شہر',
+        'Sariab': 'ساریاب',
+        'Chiltan': 'چلتن',
+        'Jinnah Town': 'جناح ٹاؤن',
+        'Satellite Town Quetta': 'سیٹلائٹ ٹاؤن کوئٹہ',
+
+        // ── Islamabad ────────────────────────────────────────────────────────
+        'Islamabad City': 'اسلام آباد شہر',
+        'Rural Islamabad': 'دیہی اسلام آباد',
+        'F-10': 'ایف دس',
+        'G-11': 'جی گیارہ',
+        'I-8': 'آئی آٹھ',
+
+        // ── Gilgit Baltistan ──────────────────────────────────────────────────
+        'Gilgit': 'گلگت',
+        'Baltistan': 'بلتستان',
+        'Skardu': 'سکردو',
+        'Hunza': 'ہنزہ',
+        'Nagar': 'نگر',
+        'Ghizer': 'غذر',
+        'Astore': 'اسٹور',
+        'Diamer': 'دیامر',
+        'Ghanche': 'غانچھے',
+        'Shigar': 'شگر',
+        'Kharmang': 'خرمنگ',
+        'Roundu': 'راؤنڈو',
+
+        // ── Azad Kashmir ──────────────────────────────────────────────────────
+        'Bagh': 'باغ',
+        'Bhimber': 'بھمبر',
+        'Jhelum Valley': 'جہلم ویلی',
+        'Haveli': 'ہویلی',
+        'Kotli': 'کوٹلی',
+        'Mirpur': 'میرپور',
+        'Muzaffarabad': 'مظفرآباد',
+        'Neelum': 'نیلم',
+        'Poonch': 'پونچھ',
+        'Sudhnati': 'سدھنوتی',
+        'Hattian': 'ہٹیاں',
+        'Leepa': 'لیپا',
+        'Dhir Kot': 'ڈھیرکوٹ',
+        'Harighel': 'ہاریگھیل',
+        'Barnala': 'برنالہ',
+        'Samahni': 'سماہنی',
+        'Chikar': 'چیکار',
+        'Khurshid Abad': 'خورشید آباد',
+        'Mumtazabad': 'ممتاز آباد',
       };
 }
 

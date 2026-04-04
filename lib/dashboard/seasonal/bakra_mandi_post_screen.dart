@@ -4,6 +4,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../../core/location_display_helper.dart';
+import '../../core/pakistan_location_service.dart';
 import '../../core/seasonal_bakra_mandi_config.dart';
 import '../../services/analytics_service.dart';
 import '../../services/marketplace_service.dart';
@@ -29,7 +31,6 @@ class _BakraMandiPostScreenState extends State<BakraMandiPostScreen> {
   final TextEditingController _ageController = TextEditingController();
   final TextEditingController _weightController = TextEditingController();
   final TextEditingController _priceController = TextEditingController();
-  final TextEditingController _cityController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _whatsAppController = TextEditingController();
@@ -40,6 +41,13 @@ class _BakraMandiPostScreenState extends State<BakraMandiPostScreen> {
   List<XFile> _images = <XFile>[];
   XFile? _video;
   bool _isSubmitting = false;
+  bool _wantsFeatured = false;
+  bool _wantsUrgent = false;
+  bool _wantsDealer = false;
+  String? _selectedProvince;
+  String? _selectedDistrict;
+  String? _selectedTehsil;
+  String? _selectedCity;
 
   @override
   void initState() {
@@ -49,6 +57,10 @@ class _BakraMandiPostScreenState extends State<BakraMandiPostScreen> {
             .toString()
             .trim();
     _whatsAppController.text = _phoneController.text;
+    PakistanLocationService.instance.loadIfNeeded().then((_) {
+      if (!mounted) return;
+      setState(() {});
+    });
   }
 
   @override
@@ -58,7 +70,6 @@ class _BakraMandiPostScreenState extends State<BakraMandiPostScreen> {
     _ageController.dispose();
     _weightController.dispose();
     _priceController.dispose();
-    _cityController.dispose();
     _descriptionController.dispose();
     _phoneController.dispose();
     _whatsAppController.dispose();
@@ -80,7 +91,7 @@ class _BakraMandiPostScreenState extends State<BakraMandiPostScreen> {
   }
 
   Future<void> _submit() async {
-    if (!SeasonalBakraMandiConfig.isEnabled ||
+    if (!SeasonalBakraMandiConfig.isEnabled() ||
         !SeasonalBakraMandiConfig.allowPosting) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('موسمی بکرا منڈی پوسٹنگ بند ہے')),
@@ -89,6 +100,19 @@ class _BakraMandiPostScreenState extends State<BakraMandiPostScreen> {
     }
 
     if (!_formKey.currentState!.validate()) return;
+    if ((_selectedProvince ?? '').trim().isEmpty ||
+        (_selectedDistrict ?? '').trim().isEmpty ||
+        (_selectedTehsil ?? '').trim().isEmpty ||
+        (_selectedCity ?? '').trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Province, district, tehsil aur city منتخب کریں / Select province, district, tehsil, and city',
+          ),
+        ),
+      );
+      return;
+    }
     if (_images.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('کم از کم ایک تصویر لازمی ہے')),
@@ -105,6 +129,25 @@ class _BakraMandiPostScreenState extends State<BakraMandiPostScreen> {
     }
 
     setState(() => _isSubmitting = true);
+
+    final String province = (_selectedProvince ?? '').trim();
+    final String district = (_selectedDistrict ?? '').trim();
+    final String tehsil = (_selectedTehsil ?? '').trim();
+    final String city = (_selectedCity ?? '').trim();
+    final String locationUr = <String>[
+      LocationDisplayHelper.urduFor(city),
+      LocationDisplayHelper.urduFor(tehsil),
+      LocationDisplayHelper.urduFor(district),
+      LocationDisplayHelper.urduFor(province),
+    ].where((String e) => e.trim().isNotEmpty).join('، ');
+    final String locationDisplay = LocationDisplayHelper.locationDisplayFromData(
+      <String, dynamic>{
+        'province': province,
+        'district': district,
+        'tehsil': tehsil,
+        'city': city,
+      },
+    );
 
     final now = DateTime.now().toUtc();
     final expiresAt = now.add(SeasonalBakraMandiConfig.listingLifetime);
@@ -124,12 +167,56 @@ class _BakraMandiPostScreenState extends State<BakraMandiPostScreen> {
       'price': double.tryParse(_priceController.text.trim()) ?? 0,
       'description': _descriptionController.text.trim(),
       'country': 'Pakistan',
-      'province': '',
-      'district': '',
-      'tehsil': '',
-      'city': _cityController.text.trim(),
-      'village': _cityController.text.trim(),
-      'location': _cityController.text.trim(),
+      'province': province,
+      'district': district,
+      'tehsil': tehsil,
+      'city': city,
+      'village': city,
+      'location': '$city, $tehsil, $district',
+      'locationUr': locationUr,
+      'locationDisplay': locationDisplay,
+      'locationNodes': <String, dynamic>{
+        'province': <String, String>{
+          'name_en': province,
+          'name_ur': LocationDisplayHelper.urduFor(province),
+        },
+        'district': <String, String>{
+          'name_en': district,
+          'name_ur': LocationDisplayHelper.urduFor(district),
+        },
+        'tehsil': <String, String>{
+          'name_en': tehsil,
+          'name_ur': LocationDisplayHelper.urduFor(tehsil),
+        },
+        'city': <String, String>{
+          'name_en': city,
+          'name_ur': LocationDisplayHelper.urduFor(city),
+        },
+      },
+      'locationData': <String, dynamic>{
+        'country': 'Pakistan',
+        'province': province,
+        'district': district,
+        'tehsil': tehsil,
+        'city': city,
+        'village': city,
+        'provinceObj': <String, String>{
+          'name_en': province,
+          'name_ur': LocationDisplayHelper.urduFor(province),
+        },
+        'districtObj': <String, String>{
+          'name_en': district,
+          'name_ur': LocationDisplayHelper.urduFor(district),
+        },
+        'tehsilObj': <String, String>{
+          'name_en': tehsil,
+          'name_ur': LocationDisplayHelper.urduFor(tehsil),
+        },
+        'cityObj': <String, String>{
+          'name_en': city,
+          'name_ur': LocationDisplayHelper.urduFor(city),
+        },
+      },
       'saleType': 'fixed',
       'featured': false,
       'featuredAuction': false,
@@ -144,9 +231,24 @@ class _BakraMandiPostScreenState extends State<BakraMandiPostScreen> {
       'age': _ageController.text.trim(),
       'weight': _weightController.text.trim(),
       'bakraExpiresAt': expiresAt.toIso8601String(),
+      'expiresAt': expiresAt.toIso8601String(),
       'archiveAfter': expiresAt.toIso8601String(),
+      'isArchived': false,
       'status': 'pending_review',
       'isVerifiedSource': true,
+
+      // Manual/admin flags only (no payment flow in V1).
+      'isFeatured': false,
+      'isUrgent': false,
+      'isDealer': false,
+
+      // Seller interest hooks for manual follow-up.
+      'featuredHookRequested': _wantsFeatured,
+      'urgentHookRequested': _wantsUrgent,
+      'dealerHookRequested': _wantsDealer,
+      'featuredHookPriceDisplay': 'PKR 300',
+      'urgentHookPriceDisplay': 'PKR 200',
+      'dealerHookPriceDisplay': 'PKR 3000',
     };
 
     final mediaFiles = <String, dynamic>{
@@ -161,10 +263,13 @@ class _BakraMandiPostScreenState extends State<BakraMandiPostScreen> {
         mediaFiles,
       );
       await _analytics.logEvent(
-        event: 'bakra_post_created',
+        event: 'bakra_mandi_post_created',
         data: <String, dynamic>{
           'category': 'bakra_mandi',
           'status': status,
+          'featuredHookRequested': _wantsFeatured,
+          'urgentHookRequested': _wantsUrgent,
+          'dealerHookRequested': _wantsDealer,
         },
       );
       if (!mounted) return;
@@ -208,11 +313,139 @@ class _BakraMandiPostScreenState extends State<BakraMandiPostScreen> {
             _field(_titleController, 'جانور کا نام/عنوان', required: true),
             _field(
               _priceController,
-              'قیمت (PKR)',
+              'قیمت (روپے)',
               keyboardType: TextInputType.number,
               required: true,
             ),
-            _field(_cityController, 'شہر', required: true),
+            Builder(
+              builder: (BuildContext context) {
+                final PakistanLocationService locationService =
+                    PakistanLocationService.instance;
+                final List<BilingualLocationOption> provinces =
+                  locationService.provinceOptions;
+                final List<BilingualLocationOption> districts =
+                  _selectedProvince == null
+                  ? const <BilingualLocationOption>[]
+                  : locationService.districtOptions(_selectedProvince!);
+                final List<BilingualLocationOption> tehsils =
+                  _selectedDistrict == null
+                  ? const <BilingualLocationOption>[]
+                  : locationService.tehsilOptions(_selectedDistrict!);
+                final List<BilingualLocationOption> cities =
+                    (_selectedDistrict == null || _selectedTehsil == null)
+                  ? const <BilingualLocationOption>[]
+                  : locationService.cityOptionsLocalized(
+                        district: _selectedDistrict!,
+                        tehsil: _selectedTehsil!,
+                      );
+
+                return Column(
+                  children: <Widget>[
+                    DropdownButtonFormField<String>(
+                      isExpanded: true,
+                      initialValue: _selectedProvince,
+                      dropdownColor: AppColors.cardSurface,
+                      style: const TextStyle(color: AppColors.primaryText),
+                      decoration: const InputDecoration(
+                        labelText: 'Province / صوبہ',
+                      ),
+                      items: provinces
+                          .map(
+                            (BilingualLocationOption item) => DropdownMenuItem<String>(
+                              value: item.labelEn,
+                              child: Text(item.bilingualLabel),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (String? value) {
+                        setState(() {
+                          _selectedProvince = value;
+                          _selectedDistrict = null;
+                          _selectedTehsil = null;
+                          _selectedCity = null;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 10),
+                    DropdownButtonFormField<String>(
+                      isExpanded: true,
+                      initialValue: _selectedDistrict,
+                      dropdownColor: AppColors.cardSurface,
+                      style: const TextStyle(color: AppColors.primaryText),
+                      decoration: const InputDecoration(
+                        labelText: 'District / ضلع',
+                      ),
+                      items: districts
+                          .map(
+                            (BilingualLocationOption item) => DropdownMenuItem<String>(
+                              value: item.labelEn,
+                              child: Text(item.bilingualLabel),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: _selectedProvince == null
+                          ? null
+                          : (String? value) {
+                              setState(() {
+                                _selectedDistrict = value;
+                                _selectedTehsil = null;
+                                _selectedCity = null;
+                              });
+                            },
+                    ),
+                    const SizedBox(height: 10),
+                    DropdownButtonFormField<String>(
+                      isExpanded: true,
+                      initialValue: _selectedTehsil,
+                      dropdownColor: AppColors.cardSurface,
+                      style: const TextStyle(color: AppColors.primaryText),
+                      decoration: const InputDecoration(
+                        labelText: 'Tehsil / تحصیل',
+                      ),
+                      items: tehsils
+                          .map(
+                            (BilingualLocationOption item) => DropdownMenuItem<String>(
+                              value: item.labelEn,
+                              child: Text(item.bilingualLabel),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: _selectedDistrict == null
+                          ? null
+                          : (String? value) {
+                              setState(() {
+                                _selectedTehsil = value;
+                                _selectedCity = null;
+                              });
+                            },
+                    ),
+                    const SizedBox(height: 10),
+                    DropdownButtonFormField<String>(
+                      isExpanded: true,
+                      initialValue: _selectedCity,
+                      dropdownColor: AppColors.cardSurface,
+                      style: const TextStyle(color: AppColors.primaryText),
+                      decoration: const InputDecoration(
+                        labelText: 'City / شہر',
+                      ),
+                      items: cities
+                          .map(
+                            (BilingualLocationOption item) => DropdownMenuItem<String>(
+                              value: item.labelEn,
+                              child: Text(item.bilingualLabel),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: _selectedTehsil == null
+                          ? null
+                          : (String? value) {
+                              setState(() => _selectedCity = value);
+                            },
+                    ),
+                  ],
+                );
+              },
+            ),
             _field(
               _phoneController,
               'فون نمبر',
@@ -226,9 +459,50 @@ class _BakraMandiPostScreenState extends State<BakraMandiPostScreen> {
               label: Text('تصاویر منتخب کریں (${_images.length}/6)'),
             ),
             const SizedBox(height: 10),
+            _sectionTitle('نمایاں اختیارات (اختیاری)'),
+            const SizedBox(height: 8),
+            _hookTile(
+              label: 'نمایاں لسٹنگ / Featured Listing',
+              price: 'PKR 300',
+              note: 'زیادہ نمایاں جگہ',
+              selected: _wantsFeatured,
+              onTap: () {
+                setState(() => _wantsFeatured = !_wantsFeatured);
+                if (_wantsFeatured) {
+                  _analytics.logEvent(event: 'bakra_mandi_featured_interest');
+                }
+              },
+            ),
+            const SizedBox(height: 8),
+            _hookTile(
+              label: 'فوری فروخت / Urgent Sale',
+              price: 'PKR 200',
+              note: 'فوری بیج اور ترجیحی جگہ',
+              selected: _wantsUrgent,
+              onTap: () {
+                setState(() => _wantsUrgent = !_wantsUrgent);
+                if (_wantsUrgent) {
+                  _analytics.logEvent(event: 'bakra_mandi_urgent_interest');
+                }
+              },
+            ),
+            const SizedBox(height: 8),
+            _hookTile(
+              label: 'ڈیلر پلان / Dealer Plan',
+              price: 'PKR 3000',
+              note: 'ڈیلر بیج اور اضافی ترجیح',
+              selected: _wantsDealer,
+              onTap: () {
+                setState(() => _wantsDealer = !_wantsDealer);
+                if (_wantsDealer) {
+                  _analytics.logEvent(event: 'bakra_mandi_dealer_interest');
+                }
+              },
+            ),
+            const SizedBox(height: 10),
             _sectionTitle('اختیاری معلومات'),
             const SizedBox(height: 8),
-            _field(_breedController, 'نسل (Breed)'),
+            _field(_breedController, 'نسل'),
             _field(_ageController, 'عمر (مہینے)'),
             _field(_weightController, 'وزن (کلوگرام)'),
             _field(
@@ -257,7 +531,7 @@ class _BakraMandiPostScreenState extends State<BakraMandiPostScreen> {
                 child: ListView.separated(
                   scrollDirection: Axis.horizontal,
                   itemCount: _images.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: 8),
+                  separatorBuilder: (context, index) => const SizedBox(width: 8),
                   itemBuilder: (context, index) {
                     return ClipRRect(
                       borderRadius: BorderRadius.circular(8),
@@ -330,9 +604,60 @@ class _BakraMandiPostScreenState extends State<BakraMandiPostScreen> {
           return ChoiceChip(
             label: Text(type),
             selected: selected,
-            onSelected: (_) => setState(() => _selectedAnimal = type),
+            onSelected: (selectedValue) => setState(() => _selectedAnimal = type),
           );
         }).toList(growable: false),
+      ),
+    );
+  }
+
+  Widget _hookTile({
+    required String label,
+    required String price,
+    required String note,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: _isSubmitting ? null : onTap,
+      child: Ink(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: AppColors.cardSurface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: selected ? AppColors.accentGold : AppColors.divider,
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              selected ? Icons.check_circle : Icons.radio_button_unchecked,
+              color: selected ? AppColors.accentGold : AppColors.secondaryText,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '$label - $price',
+                    style: const TextStyle(
+                      color: AppColors.primaryText,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    note,
+                    style: const TextStyle(color: AppColors.secondaryText),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

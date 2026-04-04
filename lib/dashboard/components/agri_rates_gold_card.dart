@@ -28,6 +28,7 @@ class AgriRatesGoldCard extends StatelessWidget {
       child: StreamBuilder<List<AgriRatePoint>>(
         stream: ratesStream,
         builder: (context, snapshot) {
+          final rates = snapshot.data ?? const <AgriRatePoint>[];
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
@@ -37,7 +38,7 @@ class AgriRatesGoldCard extends StatelessWidget {
                   SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Real-time Agri Rates',
+                      'آج کے ضروری ریٹس',
                       style: TextStyle(
                         color: _deepGreen,
                         fontWeight: FontWeight.w800,
@@ -50,26 +51,46 @@ class AgriRatesGoldCard extends StatelessWidget {
               const SizedBox(height: 10),
               SizedBox(
                 height: 82,
-                child: ListView(
-                  physics: const NeverScrollableScrollPhysics(),
-                  children: const <Widget>[
-                    _RateItemRow(
-                      commodityLabel: 'Gandum (Wheat)',
-                      valueLabel: 'Rs. 4,500',
-                    ),
-                    SizedBox(height: 8),
-                    _RateItemRow(
-                      commodityLabel: 'Kapaas (Cotton)',
-                      valueLabel: 'Rs. 8,200',
-                    ),
-                  ],
-                ),
+                child: rates.isEmpty
+                    ? const Center(
+                        child: Text(
+                          'ریٹس اپڈیٹ ہو رہے ہیں',
+                          style: TextStyle(
+                            color: _deepGreen,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      )
+                    : ListView.separated(
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: rates.length >= 2 ? 2 : rates.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 8),
+                        itemBuilder: (context, index) {
+                          final item = rates[index];
+                          return _RateItemRow(
+                            commodityLabel: item.urduName,
+                            valueLabel:
+                                'روپے ${item.pricePkr.toStringAsFixed(0)} / ${_displayUnit(item)}',
+                          );
+                        },
+                      ),
               ),
             ],
           );
         },
       ),
     );
+  }
+
+  static String _displayUnit(AgriRatePoint item) {
+    switch (item.id) {
+      case 'sugar':
+        return 'بوری';
+      case 'flour_20kg':
+        return 'تھیلا';
+      default:
+        return item.unit;
+    }
   }
 }
 

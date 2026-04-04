@@ -1,10 +1,16 @@
-﻿import 'package:cloud_firestore/cloud_firestore.dart';
+﻿import 'dart:async';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../../config/promotion_payment_config.dart';
+import '../../core/seasonal_bakra_mandi_config.dart';
+import '../../routes.dart';
 import '../../services/admin_action_service.dart';
+import '../../services/auth_service.dart';
 import '../../services/layer2_market_intelligence_service.dart';
+import '../../services/phase1_notification_engine.dart';
 import '../../services/session_service.dart';
 import 'admin_listing_detail_screen.dart';
 
@@ -31,29 +37,98 @@ class _AdminDashboardState extends State<AdminDashboard>
 
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final AdminActionService _adminActions = AdminActionService();
+  final AuthService _authService = AuthService();
   final Layer2MarketIntelligenceService _layer2MarketService =
       Layer2MarketIntelligenceService();
+  final Phase1NotificationEngine _phase1Notifications =
+      Phase1NotificationEngine();
   late final TabController _tabs;
   final Set<String> _loadingActions = <String>{};
   final Set<String> _hiddenModerationIds = <String>{};
   final Map<String, String> _auctionStatusOverrides = <String, String>{};
   late Future<AdminMarketInsightsResult> _adminInsightsFuture;
+  bool _adminBootRouteLogged = false;
+  bool _adminBootRenderableLogged = false;
+  bool _bakraMandiEnabled = SeasonalBakraMandiConfig.showBakraMandi;
+  StreamSubscription<bool>? _bakraToggleSubscription;
 
   @override
   void initState() {
     super.initState();
     _tabs = TabController(length: 6, vsync: this);
-    _adminInsightsFuture = _layer2MarketService.buildAdminMarketInsights();
+    _adminBoot('routeEntered=true');
+    _adminBootRouteLogged = true;
+    _adminBoot('loadingWidget=AdminDashboardShell');
+    _adminInsightsFuture = _loadAdminInsightsSafely(source: 'initState');
+    unawaited(_hydrateBakraToggle());
+    _listenBakraToggle();
+  }
+
+  void _adminBoot(String message) {
+    debugPrint('[ADMIN_BOOT] $message');
+  }
+
+  Future<AdminMarketInsightsResult> _loadAdminInsightsSafely({
+    required String source,
+  }) async {
+    _adminBoot('serviceStart=$source');
+    try {
+      final result = await _layer2MarketService.buildAdminMarketInsights();
+      _adminBoot('fallbackUsed=false');
+      return result;
+    } on FirebaseException catch (error) {
+      if (error.code == 'permission-denied') {
+        _adminBoot('serviceError=permission-denied source=$source');
+      } else {
+        _adminBoot('serviceError=${error.code} source=$source');
+      }
+      _adminBoot('fallbackUsed=true');
+      return const AdminMarketInsightsResult(
+        topRisingCrops: <String>[],
+        topFallingCrops: <String>[],
+        highDemandCategories: <String>[],
+      );
+    } catch (_) {
+      _adminBoot('serviceError=unknown source=$source');
+      _adminBoot('fallbackUsed=true');
+      return const AdminMarketInsightsResult(
+        topRisingCrops: <String>[],
+        topFallingCrops: <String>[],
+        highDemandCategories: <String>[],
+      );
+    }
+  }
+
+  Future<void> _hydrateBakraToggle() async {
+    final persisted = await SeasonalBakraMandiConfig.loadRuntimeVisibility();
+    if (!mounted) return;
+    setState(() {
+      _bakraMandiEnabled = persisted;
+    });
+  }
+
+  void _listenBakraToggle() {
+    _bakraToggleSubscription?.cancel();
+    _bakraToggleSubscription = SeasonalBakraMandiConfig.visibilityStream()
+        .listen((value) {
+          if (!mounted) return;
+          setState(() {
+            _bakraMandiEnabled = value;
+          });
+        });
   }
 
   void _refreshAdminInsights() {
     setState(() {
-      _adminInsightsFuture = _layer2MarketService.buildAdminMarketInsights();
+      _adminInsightsFuture = _loadAdminInsightsSafely(
+        source: 'manual_refresh',
+      );
     });
   }
 
   @override
   void dispose() {
+    _bakraToggleSubscription?.cancel();
     _tabs.dispose();
     super.dispose();
   }
@@ -214,12 +289,51 @@ class _AdminDashboardState extends State<AdminDashboard>
     return _s(data['auctionStatus'], fallback: _status(data)).toLowerCase();
   }
 
+  String _formatAdminDateTime(dynamic value) {
+    final DateTime? dt = _toDate(value);
+    if (dt == null) {
+      final String raw = (value ?? '').toString().trim();
+      return raw.isEmpty ? 'Not available' : raw;
+    }
+    final DateTime local = dt.toLocal();
+    final String m = local.month.toString().padLeft(2, '0');
+    final String d = local.day.toString().padLeft(2, '0');
+    final String h = local.hour.toString().padLeft(2, '0');
+    final String min = local.minute.toString().padLeft(2, '0');
+    return '${local.year}-$m-$d $h:$min';
+  }
+
+  String _displayField(dynamic value, {String fallback = 'Not available'}) {
+    final String text = (value ?? '').toString().trim();
+    if (text.isEmpty || text.toLowerCase() == 'null') {
+      return fallback;
+    }
+    return text;
+  }
+
   String _safeError(Object error) {
     if (error is _AdminUiException) return error.message;
     if (error is FirebaseException && (error.message ?? '').trim().isNotEmpty) {
       return error.message!.trim();
     }
     return 'Operation failed';
+  }
+
+  String _errorCode(Object error) {
+    if (error is FirebaseException) return error.code;
+    return 'unknown';
+  }
+
+  String _buildActionErrorMessage(String failedMessage, Object error) {
+    final String code = _errorCode(error).trim();
+    final String detail = _safeError(error).trim();
+    if (detail.isEmpty || detail == 'Operation failed') {
+      return failedMessage;
+    }
+    if (code.isEmpty || code == 'unknown') {
+      return '$failedMessage ($detail)';
+    }
+    return '$failedMessage ($code: $detail)';
   }
 
   Future<void> _traceFailure({
@@ -328,22 +442,41 @@ class _AdminDashboardState extends State<AdminDashboard>
     String? listingId,
     Map<String, dynamic>? metadata,
   }) async {
-    await _db.collection('notifications').add({
-      'userId': userId,
-      'type': type,
-      'title': title,
-      'body': body,
-      'titleUr': titleUr,
-      'bodyUr': bodyUr,
-      'routeName': listingId == null ? '' : 'buyer_listing_detail',
-      'routeParams': listingId == null
-          ? <String, dynamic>{}
-          : {'listingId': listingId},
-      'listingId': listingId,
-      'metadata': metadata ?? <String, dynamic>{},
-      'createdAt': FieldValue.serverTimestamp(),
-      'read': false,
-    });
+    final normalizedUserId = userId.trim();
+    final normalizedListingId = (listingId ?? '').trim();
+    final normalizedType = type.trim().toUpperCase();
+    if (normalizedUserId.isEmpty || normalizedListingId.isEmpty) {
+      debugPrint(
+        '[NotifWrite] skipped_invalid_payload type=$normalizedType toUid=$normalizedUserId listingId=$normalizedListingId',
+      );
+      return;
+    }
+
+    final bool isRuleSupported = Phase1NotificationType.all.contains(
+      normalizedType,
+    );
+    if (!isRuleSupported) {
+      debugPrint(
+        '[NotifWrite] skipped_unsupported_type type=$normalizedType toUid=$normalizedUserId listingId=$normalizedListingId',
+      );
+      return;
+    }
+
+    final roleHint = (metadata?['targetRole'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+    final targetRole = roleHint.isEmpty ? 'seller' : roleHint;
+    await _phase1Notifications.createOnce(
+      userId: normalizedUserId,
+      type: normalizedType,
+      listingId: normalizedListingId,
+      titleEn: title,
+      bodyEn: body,
+      titleUr: titleUr,
+      bodyUr: bodyUr,
+      targetRole: targetRole,
+    );
   }
 
   Future<void> _writeRevenueLedger({
@@ -441,12 +574,28 @@ class _AdminDashboardState extends State<AdminDashboard>
     VoidCallback? onSuccess,
   }) async {
     if (_isActionLoading(key)) return;
+    final String firebaseUid = (FirebaseAuth.instance.currentUser?.uid ?? '').trim();
+    debugPrint('[ADMIN_ACTION] action=$failureAction');
+    debugPrint('[ADMIN_ACTION] firebaseUid=$firebaseUid');
+    debugPrint('[ADMIN_ACTION] docPath=$targetCollection/$targetId');
+    debugPrint('[ADMIN_ACTION] payload={"actionKey":"$key"}');
     _diag(
       'action_tap action=$failureAction target=$targetCollection/$targetId',
     );
     setState(() => _loadingActions.add(key));
     try {
+      final bool hasSession = await _authService.ensureFirebaseSessionForAdminWrite(
+        flowLabel: 'admin_dashboard_$failureAction',
+      );
+      if (!hasSession) {
+        throw const _AdminUiException(
+          'Admin Firebase session is not active or lacks admin role. Please sign in again.',
+        );
+      }
       await work();
+      debugPrint('[ADMIN_ACTION] errorCode=');
+      debugPrint('[ADMIN_ACTION] errorMessage=');
+      debugPrint('[ADMIN_ACTION] success=true');
       if (!mounted) return;
       onSuccess?.call();
       if (successMessage != null && successMessage.isNotEmpty) {
@@ -455,6 +604,9 @@ class _AdminDashboardState extends State<AdminDashboard>
         ).showSnackBar(SnackBar(content: Text(successMessage)));
       }
     } catch (error) {
+      debugPrint('[ADMIN_ACTION] errorCode=${_errorCode(error)}');
+      debugPrint('[ADMIN_ACTION] errorMessage=${_safeError(error)}');
+      debugPrint('[ADMIN_ACTION] success=false');
       _diag(
         'action_failure action=$failureAction target=$targetCollection/$targetId error=${_safeError(error)}',
       );
@@ -473,9 +625,13 @@ class _AdminDashboardState extends State<AdminDashboard>
         );
       }
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(failedMessage)));
+      final String failureText = _buildActionErrorMessage(
+        failedMessage,
+        error,
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(failureText)),
+      );
     } finally {
       if (mounted) {
         setState(() => _loadingActions.remove(key));
@@ -498,6 +654,15 @@ class _AdminDashboardState extends State<AdminDashboard>
     await _adminActions.approveListingAdminWithNote(listingId: id, note: note);
     final updated = await _db.collection('listings').doc(id).get();
     final um = updated.data() ?? <String, dynamic>{};
+    final sellerUid = _s(um['sellerId'], fallback: '');
+    if (sellerUid.isNotEmpty) {
+      await _phase1Notifications.createOnce(
+        userId: sellerUid,
+        type: Phase1NotificationType.listingApproved,
+        listingId: id,
+        targetRole: 'seller',
+      );
+    }
     _diag(
       'approve_listing doc listing=$id isApproved=${um['isApproved']} status=${um['status']} listingStatus=${um['listingStatus']} auctionStatus=${um['auctionStatus']}',
     );
@@ -517,6 +682,17 @@ class _AdminDashboardState extends State<AdminDashboard>
       'reject_listing request_start listing=$id function=rejectListingAdmin',
     );
     await _adminActions.rejectListingAdmin(listingId: id, note: note);
+    final updated = await _db.collection('listings').doc(id).get();
+    final um = updated.data() ?? <String, dynamic>{};
+    final sellerUid = _s(um['sellerId'], fallback: '');
+    if (sellerUid.isNotEmpty) {
+      await _phase1Notifications.createOnce(
+        userId: sellerUid,
+        type: Phase1NotificationType.listingRejected,
+        listingId: id,
+        targetRole: 'seller',
+      );
+    }
     _diag('reject_listing success listing=$id previousStatus=$status');
   }
 
@@ -697,6 +873,21 @@ class _AdminDashboardState extends State<AdminDashboard>
       updates['promotionRejectedAt'] = now;
       updates['promotionReviewRequired'] = false;
     }
+    final String promoAction = status == 'approved'
+      ? 'approve_promotion'
+      : status == 'rejected'
+        ? 'reject_promotion'
+        : status == 'active'
+          ? 'activate_promotion'
+          : status == 'expired'
+            ? 'deactivate_promotion'
+            : 'promotion_$status';
+    final String firebaseUid =
+      (FirebaseAuth.instance.currentUser?.uid ?? '').trim();
+    debugPrint('[ADMIN_ACTION] action=$promoAction');
+    debugPrint('[ADMIN_ACTION] firebaseUid=$firebaseUid');
+    debugPrint('[ADMIN_ACTION] docPath=listings/$id');
+    debugPrint('[ADMIN_ACTION] payload=$updates');
     await _db
         .collection('listings')
         .doc(id)
@@ -711,30 +902,42 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
     if (sellerId.isNotEmpty && sellerId != '-' && amount > 0) {
       final bool approvedEvent = status == 'approved' || status == 'active';
-      await _writeRevenueLedger(
-        entryType: 'promotion_$status',
-        listingId: id,
-        sellerId: sellerId,
-        amount: amount,
-        revenueCategory: promoType,
-        status: status,
-        notes: note.trim().isEmpty ? 'Promotion $status' : note.trim(),
-        markApproved: approvedEvent,
-      );
+      try {
+        await _writeRevenueLedger(
+          entryType: 'promotion_$status',
+          listingId: id,
+          sellerId: sellerId,
+          amount: amount,
+          revenueCategory: promoType,
+          status: status,
+          notes: note.trim().isEmpty ? 'Promotion $status' : note.trim(),
+          markApproved: approvedEvent,
+        );
+      } catch (error) {
+        _diag(
+          'non_critical_revenue_ledger_failure action=promotion_$status target=listings/$id error=${_safeError(error)}',
+        );
+      }
     }
 
-    await _log(
-      'listing',
-      id,
-      'promotion_$status',
-      previousStatus: _status(current),
-      newStatus: _status(current),
-      previousAuctionStatus: _auctionStatus(current),
-      newAuctionStatus: _auctionStatus(current),
-      previousPromotionStatus: currentPromo,
-      newPromotionStatus: status,
-      notes: note.trim(),
-    );
+    try {
+      await _log(
+        'listing',
+        id,
+        'promotion_$status',
+        previousStatus: _status(current),
+        newStatus: _status(current),
+        previousAuctionStatus: _auctionStatus(current),
+        newAuctionStatus: _auctionStatus(current),
+        previousPromotionStatus: currentPromo,
+        newPromotionStatus: status,
+        notes: note.trim(),
+      );
+    } catch (error) {
+      _diag(
+        'non_critical_log_failure action=promotion_$status target=listings/$id error=${_safeError(error)}',
+      );
+    }
 
     if (sellerId.isNotEmpty && sellerId != '-') {
       final title = _s(
@@ -744,21 +947,30 @@ class _AdminDashboardState extends State<AdminDashboard>
       final userFacingStatus = status == 'pending_review'
           ? 'under review'
           : status;
-      await _notifyUser(
-        userId: sellerId,
-        type: 'promotion_$status',
-        title: 'Promotion update',
-        body: note.trim().isEmpty
-            ? 'Promotion for $title is now $userFacingStatus.'
-            : 'Promotion for $title is now $userFacingStatus. Reason: $note',
-        titleUr: 'پروموشن اپڈیٹ',
-        bodyUr: note.trim().isEmpty
-            ? '$title کی پروموشن اسٹیٹس اب $userFacingStatus ہے۔'
-            : '$title کی پروموشن اسٹیٹس اب $userFacingStatus ہے۔ وجہ: $note',
-        listingId: id,
-        metadata: {'status': status, 'note': note.trim()},
-      );
+      try {
+        await _notifyUser(
+          userId: sellerId,
+          type: 'promotion_$status',
+          title: 'Promotion update',
+          body: note.trim().isEmpty
+              ? 'Promotion for $title is now $userFacingStatus.'
+              : 'Promotion for $title is now $userFacingStatus. Reason: $note',
+          titleUr: 'پروموشن اپڈیٹ',
+          bodyUr: note.trim().isEmpty
+              ? '$title کی پروموشن اسٹیٹس اب $userFacingStatus ہے۔'
+              : '$title کی پروموشن اسٹیٹس اب $userFacingStatus ہے۔ وجہ: $note',
+          listingId: id,
+          metadata: {'status': status, 'note': note.trim()},
+        );
+      } catch (error) {
+        _diag(
+          'non_critical_notify_failure action=promotion_$status target=listings/$id error=${_safeError(error)}',
+        );
+      }
     }
+    debugPrint('[ADMIN_ACTION] errorCode=');
+    debugPrint('[ADMIN_ACTION] errorMessage=');
+    debugPrint('[ADMIN_ACTION] success=true');
   }
 
   Future<void> _userFlags(
@@ -777,59 +989,139 @@ class _AdminDashboardState extends State<AdminDashboard>
     if (trusted != null) updates['trustedSeller'] = trusted;
     if (suspended != null) updates['isSuspended'] = suspended;
     if (restricted != null) updates['listingRestricted'] = restricted;
+    final String firebaseUid = (FirebaseAuth.instance.currentUser?.uid ?? '').trim();
+    debugPrint('[ADMIN_ACTION] action=update_user_risk_flags');
+    debugPrint('[ADMIN_ACTION] firebaseUid=$firebaseUid');
+    debugPrint('[ADMIN_ACTION] docPath=users/$id');
+    debugPrint('[ADMIN_ACTION] payload=$updates');
     await _db.collection('users').doc(id).set(updates, SetOptions(merge: true));
-    await _log(
-      'user',
-      id,
-      'update_user_risk_flags',
-      notes:
-          'before=${before.toString()} after=${updates.toString()} note=$note',
-    );
-
-    if (suspended != null) {
-      await _notifyUser(
-        userId: id,
-        type: suspended ? 'account_suspended' : 'account_reactivated',
-        title: suspended ? 'Account suspended' : 'Account reactivated',
-        body: suspended
-            ? (note.trim().isEmpty
-                  ? 'Your account has been suspended by admin.'
-                  : 'Your account has been suspended: $note')
-            : 'Your account has been reactivated by admin.',
-        titleUr: suspended ? 'اکاؤنٹ معطل' : 'اکاؤنٹ بحال',
-        bodyUr: suspended
-            ? (note.trim().isEmpty
-                  ? 'ایڈمن نے آپ کا اکاؤنٹ معطل کر دیا ہے۔'
-                  : 'آپ کا اکاؤنٹ معطل کر دیا گیا: $note')
-            : 'ایڈمن نے آپ کا اکاؤنٹ دوبارہ بحال کر دیا ہے۔',
-        metadata: {
-          'note': note,
-          'action': suspended ? 'suspend_user' : 'reactivate_user',
-        },
+    try {
+      await _log(
+        'user',
+        id,
+        'update_user_risk_flags',
+        notes:
+            'before=${before.toString()} after=${updates.toString()} note=$note',
+      );
+    } catch (error) {
+      _diag(
+        'non_critical_log_failure action=update_user_risk_flags target=users/$id error=${_safeError(error)}',
       );
     }
+
+    if (suspended != null) {
+      try {
+        await _notifyUser(
+          userId: id,
+          type: suspended ? 'account_suspended' : 'account_reactivated',
+          title: suspended ? 'Account suspended' : 'Account reactivated',
+          body: suspended
+              ? (note.trim().isEmpty
+                    ? 'Your account has been suspended by admin.'
+                    : 'Your account has been suspended: $note')
+              : 'Your account has been reactivated by admin.',
+          titleUr: suspended ? 'اکاؤنٹ معطل' : 'اکاؤنٹ بحال',
+          bodyUr: suspended
+              ? (note.trim().isEmpty
+                    ? 'ایڈمن نے آپ کا اکاؤنٹ معطل کر دیا ہے۔'
+                    : 'آپ کا اکاؤنٹ معطل کر دیا گیا: $note')
+              : 'ایڈمن نے آپ کا اکاؤنٹ دوبارہ بحال کر دیا ہے۔',
+          metadata: {
+            'note': note,
+            'action': suspended ? 'suspend_user' : 'reactivate_user',
+          },
+        );
+      } catch (error) {
+        _diag(
+          'non_critical_notify_failure action=${suspended ? 'suspend_user' : 'reactivate_user'} target=users/$id error=${_safeError(error)}',
+        );
+      }
+    }
     if (restricted != null) {
-      await _notifyUser(
-        userId: id,
-        type: restricted ? 'listing_restricted' : 'listing_restriction_removed',
-        title: restricted
-            ? 'Listing restricted'
-            : 'Listing restriction removed',
-        body: restricted
-            ? (note.trim().isEmpty
-                  ? 'Your listing privileges were restricted by admin.'
-                  : 'Your listing privileges were restricted: $note')
-            : 'Your listing privileges are now restored.',
-        titleUr: restricted ? 'لسٹنگ محدود' : 'لسٹنگ بحال',
-        bodyUr: restricted
-            ? (note.trim().isEmpty
-                  ? 'ایڈمن نے آپ کی لسٹنگ کی سہولت محدود کر دی ہے۔'
-                  : 'آپ کی لسٹنگ کی سہولت محدود کی گئی: $note')
-            : 'آپ کی لسٹنگ کی سہولت دوبارہ بحال کر دی گئی ہے۔',
-        metadata: {
-          'note': note,
-          'action': restricted ? 'restrict_user' : 'allow_user_listings',
-        },
+      try {
+        await _notifyUser(
+          userId: id,
+          type: restricted
+              ? 'listing_restricted'
+              : 'listing_restriction_removed',
+          title: restricted
+              ? 'Listing restricted'
+              : 'Listing restriction removed',
+          body: restricted
+              ? (note.trim().isEmpty
+                    ? 'Your listing privileges were restricted by admin.'
+                    : 'Your listing privileges were restricted: $note')
+              : 'Your listing privileges are now restored.',
+          titleUr: restricted ? 'لسٹنگ محدود' : 'لسٹنگ بحال',
+          bodyUr: restricted
+              ? (note.trim().isEmpty
+                    ? 'ایڈمن نے آپ کی لسٹنگ کی سہولت محدود کر دی ہے۔'
+                    : 'آپ کی لسٹنگ کی سہولت محدود کی گئی: $note')
+              : 'آپ کی لسٹنگ کی سہولت دوبارہ بحال کر دی گئی ہے۔',
+          metadata: {
+            'note': note,
+            'action': restricted ? 'restrict_user' : 'allow_user_listings',
+          },
+        );
+      } catch (error) {
+        _diag(
+          'non_critical_notify_failure action=${restricted ? 'restrict_user' : 'allow_user_listings'} target=users/$id error=${_safeError(error)}',
+        );
+      }
+    }
+  }
+
+  String _sellerVerificationStatus(Map<String, dynamic> data) {
+    final raw = _s(data['verificationStatus'], fallback: '').toLowerCase();
+    if (raw == 'approved' || raw == 'verified') return 'approved';
+    if (raw == 'rejected') return 'rejected';
+    return 'pending';
+  }
+
+  Future<void> _setSellerVerificationStatus(
+    String userId, {
+    required String status,
+    String rejectionReason = '',
+  }) async {
+    final normalized = status.trim().toLowerCase();
+    if (normalized != 'approved' &&
+        normalized != 'rejected' &&
+        normalized != 'pending') {
+      throw const _AdminUiException('Invalid verification status');
+    }
+
+    final adminUid = FirebaseAuth.instance.currentUser?.uid ?? 'admin';
+    final now = FieldValue.serverTimestamp();
+    final updates = <String, dynamic>{
+      'verificationStatus': normalized,
+      'isApproved': normalized == 'approved',
+      'reviewedAt': now,
+      'reviewedBy': adminUid,
+      'rejectionReason': normalized == 'rejected' ? rejectionReason.trim() : null,
+      'verifiedAt': normalized == 'approved' ? now : null,
+      'reviewRequired': normalized != 'approved',
+      'updatedAt': now,
+    };
+
+    final String firebaseUid = (FirebaseAuth.instance.currentUser?.uid ?? '').trim();
+    debugPrint('[ADMIN_ACTION] action=seller_verification_$normalized');
+    debugPrint('[ADMIN_ACTION] firebaseUid=$firebaseUid');
+    debugPrint('[ADMIN_ACTION] docPath=users/$userId');
+    debugPrint('[ADMIN_ACTION] payload=$updates');
+
+    await _db.collection('users').doc(userId).set(updates, SetOptions(merge: true));
+    try {
+      await _log(
+        'user',
+        userId,
+        'seller_verification_$normalized',
+        previousStatus: null,
+        newStatus: normalized,
+        notes: rejectionReason.trim(),
+      );
+    } catch (error) {
+      _diag(
+        'non_critical_log_failure action=seller_verification_$normalized target=users/$userId error=${_safeError(error)}',
       );
     }
   }
@@ -887,13 +1179,25 @@ class _AdminDashboardState extends State<AdminDashboard>
           roleSnap.data?.data()?['role'],
           fallback: _s(roleSnap.data?.data()?['userRole']),
         ).toLowerCase();
-        if (!roleSnap.hasData) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
+        if (!roleSnap.hasData && !roleSnap.hasError) {
+          _adminBoot('loadingWidget=AdminRoleGate');
         }
-        if (role != 'admin') {
+        if (roleSnap.hasError) {
+          _adminBoot('serviceError=permission-denied source=role_users_stream');
+          _adminBoot('fallbackUsed=true');
+        }
+        if (roleSnap.hasData && role != 'admin') {
+          _adminBoot('dashboardRenderable=false');
           return const Scaffold(body: Center(child: Text('Access denied')));
+        }
+
+        if (!_adminBootRouteLogged) {
+          _adminBoot('routeEntered=true');
+          _adminBootRouteLogged = true;
+        }
+        if (!_adminBootRenderableLogged) {
+          _adminBoot('dashboardRenderable=true');
+          _adminBootRenderableLogged = true;
         }
 
         return Scaffold(
@@ -1172,6 +1476,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                       builder: (context, insightSnap) {
                         if (insightSnap.connectionState ==
                             ConnectionState.waiting) {
+                          _adminBoot('loadingWidget=AdminMarketInsightsPanel');
                           return _panel(
                             child: Row(
                               children: const [
@@ -1191,8 +1496,21 @@ class _AdminDashboardState extends State<AdminDashboard>
                             ),
                           );
                         }
+                        if (insightSnap.hasError) {
+                          _adminBoot(
+                            'serviceError=permission-denied source=insights_futurebuilder',
+                          );
+                          _adminBoot('fallbackUsed=true');
+                          return _panel(
+                            child: const Text(
+                              'Market insights unavailable',
+                              style: TextStyle(color: Colors.white70),
+                            ),
+                          );
+                        }
                         final insights = insightSnap.data;
                         if (insights == null) {
+                          _adminBoot('fallbackUsed=true');
                           return _panel(
                             child: const Text(
                               'Market insights unavailable',
@@ -1897,15 +2215,15 @@ class _AdminDashboardState extends State<AdminDashboard>
                           style: const TextStyle(color: Colors.white70),
                         ),
                         Text(
-                          'Requested At: ${_s(d['promotionRequestedAt'], fallback: _s(d['createdAt']))}',
+                          'Requested At: ${_formatAdminDateTime(d['promotionRequestedAt'] ?? d['createdAt'])}',
                           style: const TextStyle(color: Colors.white70),
                         ),
                         Text(
-                          'Payment Ref: ${_s(d['promotionPaymentReference'], fallback: _s(d['paymentReference']))}',
+                          'Payment Ref: ${_displayField(d['promotionPaymentReference'] ?? d['paymentReference'])}',
                           style: const TextStyle(color: Colors.white70),
                         ),
                         Text(
-                          'Proof: ${_s(d['promotionProofUrl'], fallback: _s(d['paymentReceiptUrl'], fallback: 'not_provided'))}',
+                          'Proof: ${_displayField(d['promotionProofUrl'] ?? d['paymentReceiptUrl'])}',
                           style: const TextStyle(color: Colors.white70),
                         ),
                         const SizedBox(height: 8),
@@ -2129,6 +2447,8 @@ class _AdminDashboardState extends State<AdminDashboard>
             const SizedBox(height: 10),
             ...sellers.take(80).map((doc) {
               final d = doc.data();
+              final verificationStatus = _sellerVerificationStatus(d);
+              final rejectionReason = _s(d['rejectionReason'], fallback: '');
               return _panel(
                 margin: const EdgeInsets.only(bottom: 10),
                 child: Column(
@@ -2145,7 +2465,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                       ),
                     ),
                     Text(
-                      'Trusted: ${_b(d['trustedSeller'])} | Suspended: ${_b(d['isSuspended'])} | Restricted: ${_b(d['listingRestricted'])}',
+                      'Trusted: ${_b(d['trustedSeller'])} | Suspended: ${_b(d['isSuspended'])} | Restricted: ${_b(d['listingRestricted'])} | Verification: $verificationStatus',
                       style: const TextStyle(color: Colors.white70),
                     ),
                     const SizedBox(height: 6),
@@ -2153,6 +2473,12 @@ class _AdminDashboardState extends State<AdminDashboard>
                       spacing: 6,
                       runSpacing: 6,
                       children: [
+                        if (verificationStatus == 'pending')
+                          _statusBadge('Pending Review', Colors.amber),
+                        if (verificationStatus == 'approved')
+                          _statusBadge('Approved', Colors.lightGreenAccent),
+                        if (verificationStatus == 'rejected')
+                          _statusBadge('Rejected', Colors.redAccent),
                         if (_b(d['trustedSeller']))
                           _statusBadge('Trusted', _green),
                         if (_b(d['isSuspended']))
@@ -2161,11 +2487,89 @@ class _AdminDashboardState extends State<AdminDashboard>
                           _statusBadge('Restricted', Colors.orangeAccent),
                       ],
                     ),
+                    if (verificationStatus == 'rejected' &&
+                        rejectionReason.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        'Rejection reason: $rejectionReason',
+                        style: const TextStyle(color: Colors.orangeAccent),
+                      ),
+                    ],
                     const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
                       children: [
+                        _button(
+                          'Approve Seller',
+                          Colors.green,
+                          () => _runAction(
+                            key: 'verify_approved_${doc.id}',
+                            failedMessage:
+                                'Could not approve seller. Please retry.',
+                            failureAction: 'seller_verification_approved',
+                            targetCollection: 'users',
+                            targetId: doc.id,
+                            intendedStatus: 'approved',
+                            work: () => _setSellerVerificationStatus(
+                              doc.id,
+                              status: 'approved',
+                            ),
+                            successMessage: 'Seller approved',
+                          ),
+                          actionKey: 'verify_approved_${doc.id}',
+                        ),
+                        _button(
+                          'Reject Seller',
+                          Colors.red,
+                          () => _runAction(
+                            key: 'verify_rejected_${doc.id}',
+                            failedMessage:
+                                'Could not reject seller. Please retry.',
+                            failureAction: 'seller_verification_rejected',
+                            targetCollection: 'users',
+                            targetId: doc.id,
+                            intendedStatus: 'rejected',
+                            work: () async {
+                              final note = await _askAdminNote(
+                                'Reject seller reason',
+                                hint: 'Required reason for rejection',
+                                required: true,
+                              );
+                              if (note == null) {
+                                throw const _AdminUiException(
+                                  'Action cancelled',
+                                );
+                              }
+                              await _setSellerVerificationStatus(
+                                doc.id,
+                                status: 'rejected',
+                                rejectionReason: note,
+                              );
+                            },
+                            successMessage: 'Seller rejected',
+                          ),
+                          actionKey: 'verify_rejected_${doc.id}',
+                        ),
+                        _button(
+                          'Mark Pending',
+                          Colors.amber,
+                          () => _runAction(
+                            key: 'verify_pending_${doc.id}',
+                            failedMessage:
+                                'Could not mark pending. Please retry.',
+                            failureAction: 'seller_verification_pending',
+                            targetCollection: 'users',
+                            targetId: doc.id,
+                            intendedStatus: 'pending',
+                            work: () => _setSellerVerificationStatus(
+                              doc.id,
+                              status: 'pending',
+                            ),
+                            successMessage: 'Seller marked pending review',
+                          ),
+                          actionKey: 'verify_pending_${doc.id}',
+                        ),
                         _button(
                           'Mark Trusted',
                           Colors.green,
@@ -2291,163 +2695,292 @@ class _AdminDashboardState extends State<AdminDashboard>
   }
 
   Widget _riskOps() {
+    return Column(
+      children: [
+        // ── Seasonal Bakra Mandi toggle ──────────────────────────────────────
+        Container(
+          margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF122B4A), Color(0xFF163357)],
+            ),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.white24),
+          ),
+          child: SwitchListTile(
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 4,
+            ),
+            secondary: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: (_bakraMandiEnabled ? _green : Colors.white12),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(
+                Icons.storefront_rounded,
+                color: _bakraMandiEnabled ? Colors.white : Colors.white54,
+                size: 20,
+              ),
+            ),
+            title: const Text(
+              'Bakra Mandi (Seasonal)',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+                fontSize: 14,
+              ),
+            ),
+            subtitle: Text(
+              _bakraMandiEnabled
+                  ? 'Live — visible to all buyers'
+                  : 'Hidden — not shown to buyers',
+              style: TextStyle(
+                color: _bakraMandiEnabled ? _green : Colors.white38,
+                fontSize: 12,
+              ),
+            ),
+            value: _bakraMandiEnabled,
+            activeThumbColor: _green,
+            onChanged: (v) async {
+              final adminUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+              await SeasonalBakraMandiConfig.setRuntimeVisibility(
+                enabled: v,
+                actorUid: adminUid,
+              );
+              if (!mounted) return;
+              setState(() {
+                _bakraMandiEnabled = v;
+              });
+            },
+          ),
+        ),
+        const SizedBox(height: 4),
+        // ── Completion Reports navigation ────────────────────────────────────
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          child: InkWell(
+            onTap: () => Navigator.of(context).pushNamed(
+              Routes.adminCompletionReports,
+            ),
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.white24),
+              ),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.report_problem_outlined,
+                    color: Color(0xFFFFD700),
+                    size: 20,
+                  ),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Completion Reports',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 14,
+                          ),
+                        ),
+                        Text(
+                          'Review seller reports on failed deals',
+                          style: TextStyle(
+                            color: Colors.white54,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Icon(
+                    Icons.chevron_right_rounded,
+                    color: Colors.white38,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        // ── Alerts & Risk stream ─────────────────────────────────────────────
+        Expanded(
+          child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: _db
+                .collection('admin_alerts')
+                .orderBy('timestamp', descending: true)
+                .limit(160)
+                .snapshots(),
+            builder: (context, alertSnap) {
+              final alerts =
+                  alertSnap.data?.docs ??
+                  const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+              debugPrint('[NotifReadAdmin] count=${alerts.length}');
+              return _riskAlerts(alerts);
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _riskAlerts(List<QueryDocumentSnapshot<Map<String, dynamic>>> alerts) {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: _db
-          .collection('admin_alerts')
-          .orderBy('timestamp', descending: true)
-          .limit(160)
+          .collection('listings')
+          .orderBy('createdAt', descending: true)
+          .limit(120)
           .snapshots(),
-      builder: (context, alertSnap) {
-        final alerts =
-            alertSnap.data?.docs ??
-            const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
-
-        return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-          stream: _db
-              .collection('listings')
-              .orderBy('createdAt', descending: true)
-              .limit(120)
-              .snapshots(),
-          builder: (context, listingSnap) {
-            final listings =
-                listingSnap.data?.docs ??
-                const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
-
-            if (alerts.isEmpty && listings.isEmpty) {
-              return _emptyState(
-                'No active risk alerts',
-                'Admin alerts and high-risk items will appear here automatically.',
-                Icons.shield_outlined,
-              );
-            }
-
-            final suspiciousListings = alerts.where((doc) {
-              final d = doc.data();
-              final type = _s(d['type'], fallback: '').toLowerCase();
-              return type.contains('listing') || type.contains('price');
-            }).length;
-
-            final suspiciousBids = alerts.where((doc) {
-              final d = doc.data();
-              final type = _s(d['type'], fallback: '').toLowerCase();
-              return type.contains('bid') || _n(d['aiBidRiskScore']) > 0;
-            }).length;
-
-            final fraudAlerts = alerts.where((doc) {
-              final d = doc.data();
-              final type = _s(d['type'], fallback: '').toLowerCase();
-              final message = _s(d['message'], fallback: '').toLowerCase();
-              return type.contains('fraud') || message.contains('fraud');
-            }).length;
-
-            final listingHighRisk = listings.where((doc) {
-              final d = doc.data();
-              return _n(d['aiRiskScore']) >= 70 || _n(d['riskScore']) >= 70;
-            }).length;
-
-            final alertHighRisk = alerts.where((doc) {
-              final d = doc.data();
-              return _n(d['aiBidRiskScore']) >= 70 || _n(d['riskScore']) >= 70;
-            }).length;
-
-            final highRiskItems = listingHighRisk + alertHighRisk;
-
-            return ListView(
-              padding: const EdgeInsets.all(12),
-              children: [
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    _metricCard(
-                      'Suspicious Listings',
-                      '$suspiciousListings',
-                      Colors.orangeAccent,
-                      Icons.store_mall_directory_rounded,
-                    ),
-                    _metricCard(
-                      'Suspicious Bids',
-                      '$suspiciousBids',
-                      Colors.deepOrangeAccent,
-                      Icons.gavel_rounded,
-                    ),
-                    _metricCard(
-                      'Fraud Alerts',
-                      '$fraudAlerts',
-                      Colors.redAccent,
-                      Icons.warning_amber_rounded,
-                    ),
-                    _metricCard(
-                      'High Risk Items',
-                      '$highRiskItems',
-                      _gold,
-                      Icons.shield_rounded,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                if (alerts.isEmpty)
-                  _panel(
-                    child: const Text(
-                      'No admin alerts found yet. Suspicious bid/listing alerts will appear here.',
-                      style: TextStyle(color: Colors.white70),
-                    ),
-                  )
-                else
-                  ...alerts.take(80).map((doc) {
-                    final d = doc.data();
-                    final alertType = _s(
-                      d['type'],
-                      fallback: 'alert',
-                    ).toUpperCase();
-                    final reason = _s(d['reason'], fallback: _s(d['message']));
-                    final listingId = _s(d['listingId'], fallback: '-');
-                    final bidId = _s(d['bidId'], fallback: '-');
-                    final riskScore = _n(d['riskScore']) > 0
-                        ? _n(d['riskScore'])
-                        : _n(d['aiBidRiskScore']);
-
-                    return _panel(
-                      margin: const EdgeInsets.only(bottom: 10),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              _statusBadge(alertType, Colors.orangeAccent),
-                              if (riskScore > 0)
-                                _chip(
-                                  'Risk ${riskScore.toStringAsFixed(0)}',
-                                  riskScore >= 70
-                                      ? Colors.redAccent
-                                      : Colors.amber,
-                                ),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            reason,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Listing: $listingId | Bid: $bidId',
-                            style: const TextStyle(color: Colors.white70),
-                          ),
-                        ],
-                      ),
-                    );
-                  }),
-              ],
-            );
-          },
-        );
+      builder: (context, listingSnap) {
+        // delegate to the original inner logic
+        return _riskAlertsInner(alerts, listingSnap);
       },
+    );
+  }
+
+  Widget _riskAlertsInner(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> alerts,
+    AsyncSnapshot<QuerySnapshot<Map<String, dynamic>>> listingSnap,
+  ) {
+    final listings =
+        listingSnap.data?.docs ??
+        const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+
+    if (alerts.isEmpty && listings.isEmpty) {
+      return _emptyState(
+        'No active risk alerts',
+        'Admin alerts and high-risk items will appear here automatically.',
+        Icons.shield_outlined,
+      );
+    }
+
+    final suspiciousListings = alerts.where((doc) {
+      final d = doc.data();
+      final type = _s(d['type'], fallback: '').toLowerCase();
+      return type.contains('listing') || type.contains('price');
+    }).length;
+
+    final suspiciousBids = alerts.where((doc) {
+      final d = doc.data();
+      final type = _s(d['type'], fallback: '').toLowerCase();
+      return type.contains('bid') || _n(d['aiBidRiskScore']) > 0;
+    }).length;
+
+    final fraudAlerts = alerts.where((doc) {
+      final d = doc.data();
+      final type = _s(d['type'], fallback: '').toLowerCase();
+      final message = _s(d['message'], fallback: '').toLowerCase();
+      return type.contains('fraud') || message.contains('fraud');
+    }).length;
+
+    final listingHighRisk = listings.where((doc) {
+      final d = doc.data();
+      return _n(d['aiRiskScore']) >= 70 || _n(d['riskScore']) >= 70;
+    }).length;
+
+    final alertHighRisk = alerts.where((doc) {
+      final d = doc.data();
+      return _n(d['aiBidRiskScore']) >= 70 || _n(d['riskScore']) >= 70;
+    }).length;
+
+    final highRiskItems = listingHighRisk + alertHighRisk;
+
+    return ListView(
+      padding: const EdgeInsets.all(12),
+      children: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            _metricCard(
+              'Suspicious Listings',
+              '$suspiciousListings',
+              Colors.orangeAccent,
+              Icons.store_mall_directory_rounded,
+            ),
+            _metricCard(
+              'Suspicious Bids',
+              '$suspiciousBids',
+              Colors.deepOrangeAccent,
+              Icons.gavel_rounded,
+            ),
+            _metricCard(
+              'Fraud Alerts',
+              '$fraudAlerts',
+              Colors.redAccent,
+              Icons.warning_amber_rounded,
+            ),
+            _metricCard(
+              'High Risk Items',
+              '$highRiskItems',
+              _gold,
+              Icons.shield_rounded,
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        if (alerts.isEmpty)
+          _panel(
+            child: const Text(
+              'No admin alerts found yet. Suspicious bid/listing alerts will appear here.',
+              style: TextStyle(color: Colors.white70),
+            ),
+          )
+        else
+          ...alerts.take(80).map((doc) {
+            final d = doc.data();
+            final alertType = _s(d['type'], fallback: 'alert').toUpperCase();
+            final reason = _s(d['reason'], fallback: _s(d['message']));
+            final listingId = _s(d['listingId'], fallback: '-');
+            final bidId = _s(d['bidId'], fallback: '-');
+            final riskScore = _n(d['riskScore']) > 0
+                ? _n(d['riskScore'])
+                : _n(d['aiBidRiskScore']);
+
+            return _panel(
+              margin: const EdgeInsets.only(bottom: 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _statusBadge(alertType, Colors.orangeAccent),
+                      if (riskScore > 0)
+                        _chip(
+                          'Risk ${riskScore.toStringAsFixed(0)}',
+                          riskScore >= 70 ? Colors.redAccent : Colors.amber,
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    reason,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Listing: $listingId | Bid: $bidId',
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+                ],
+              ),
+            );
+          }),
+      ],
     );
   }
 

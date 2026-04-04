@@ -1,0 +1,11 @@
+﻿originalUid lWoGCBogg7f71bsWmONrz4zBE562
+usersDocExists true
+adminsDocExists true
+usersPhone +923054158007
+usersRole admin
+originalAuthExists true
+originalAuthEmail 
+originalProviders phone
+canonicalEmailOwnerUid 
+duplicateUidFound false
+duplicateUid 

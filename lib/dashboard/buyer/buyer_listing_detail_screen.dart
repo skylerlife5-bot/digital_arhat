@@ -10,6 +10,7 @@ import '../../services/auction_lifecycle_service.dart';
 import '../../services/bid_eligibility_service.dart';
 import '../../services/trust_safety_service.dart';
 import '../../theme/app_colors.dart';
+import '../../core/location_display_helper.dart';
 
 // FIX: Use a single PKR formatter across listing detail UI.
 String formatPkr(num amount) => 'Rs. ${amount.toStringAsFixed(0)}';
@@ -272,8 +273,8 @@ class _BuyerListingDetailScreenState extends State<BuyerListingDetailScreen> {
               ], fallback: 'Item');
               final qty = _readDouble(data['quantity']);
               final unit = _safeText(data, 'unit', fallback: 'kg');
-              final province = _safeText(data, 'province');
-              final district = _safeText(data, 'district');
+                final locationDisplay =
+                  LocationDisplayHelper.locationDisplayFromData(data);
               final rate = _readDouble(
                 data['rate'] ?? data['price'] ?? data['unitPrice'],
               );
@@ -388,6 +389,8 @@ class _BuyerListingDetailScreenState extends State<BuyerListingDetailScreen> {
                     ),
                   );
                   final sellerUid = _safeText(data, 'sellerId');
+                    final bool canUpdateDealOutcome =
+                      sellerUid.isNotEmpty && buyerId == sellerUid;
 
                   return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
                     stream: sellerUid.isEmpty
@@ -398,6 +401,33 @@ class _BuyerListingDetailScreenState extends State<BuyerListingDetailScreen> {
                               .snapshots(),
                     builder: (context, sellerSnapshot) {
                       final sellerData = sellerSnapshot.data?.data();
+                      String firstSellerField(List<String> keys) {
+                        final data = sellerData ?? const <String, dynamic>{};
+                        for (final key in keys) {
+                          final value = (data[key] ?? '').toString().trim();
+                          if (value.isNotEmpty) return value;
+                        }
+                        return '';
+                      }
+
+                      final sellerProfilePhone = firstSellerField(
+                        const <String>[
+                          'phone',
+                          'phoneNumber',
+                          'contact',
+                          'mobile',
+                          'contactPhone',
+                        ],
+                      );
+
+                      final mappedSellerPhone =
+                          sellerPhone.trim().isNotEmpty
+                          ? sellerPhone.trim()
+                          : sellerProfilePhone;
+                      debugPrint(
+                        '[AcceptBidContact] uiMappedSellerPhone=$mappedSellerPhone',
+                      );
+
                       final trustBadges =
                           TrustSafetyService.resolveBuyerTrustBadges(
                             listingData: data,
@@ -438,8 +468,10 @@ class _BuyerListingDetailScreenState extends State<BuyerListingDetailScreen> {
                                   '${qty.toStringAsFixed(0)} ${unit.trim().isEmpty ? 'N/A' : unit}',
                                 ),
                                 _line(
-                                  'Province/District',
-                                  '${province.trim().isEmpty ? 'N/A' : province} / ${district.trim().isEmpty ? 'N/A' : district}',
+                                  'Location / مقام',
+                                  locationDisplay.trim().isEmpty
+                                      ? 'Pakistan / پاکستان'
+                                      : locationDisplay,
                                 ),
                                 _line(
                                   'Rate',
@@ -577,6 +609,9 @@ class _BuyerListingDetailScreenState extends State<BuyerListingDetailScreen> {
                           _privacyPanel(
                             contactUnlocked:
                                 acceptedForBuyer || contactUnlocked,
+                            sellerPhone: mappedSellerPhone,
+                            sellerWhatsApp: sellerWhatsApp,
+                            isAuction: isAuction,
                           ),
                           const SizedBox(height: 10),
                           if (_riskReport?.level == _RiskLevel.high)
@@ -597,58 +632,6 @@ class _BuyerListingDetailScreenState extends State<BuyerListingDetailScreen> {
                               ),
                               activeColor: _gold,
                               checkColor: AppColors.ctaTextDark,
-                            ),
-                          if (isAuction && contactUnlocked)
-                            _notice(
-                              'آپ کی بولی قبول ہوگئی\nرابطہ اَن لاک ہو گیا ہے\nبراہِ راست بات کر کے ادائیگی اور ڈلیوری طے کریں',
-                            ),
-                          if (isAuction && (acceptedForBuyer || contactUnlocked))
-                            _card(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text(
-                                    'Contact unlocked after seller acceptance.\nبولی قبول ہونے کے بعد رابطہ کھل گیا ہے',
-                                    style: TextStyle(
-                                      color: AppColors.primaryText,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Row(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      const Icon(
-                                        Icons.phone_rounded,
-                                        size: 16,
-                                        color: AppColors.divider,
-                                      ),
-                                      const SizedBox(width: 6),
-                                      Expanded(
-                                        child: Text(
-                                          sellerPhone.isEmpty
-                                              ? 'Seller contact will appear here once available.'
-                                              : 'Seller Phone: $sellerPhone',
-                                          maxLines: 2,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: const TextStyle(
-                                            color: AppColors.secondaryText,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 8),
-                                  const Text(
-                                    'Complete deal offline after verifying listing and seller details.\n'
-                                    'لسٹنگ اور فروخت کنندہ کی تصدیق کے بعد براہِ راست سودا مکمل کریں',
-                                    style: TextStyle(
-                                      color: AppColors.secondaryText,
-                                    ),
-                                  ),
-                                ],
-                              ),
                             ),
                           if (isAuction && (acceptedForBuyer || contactUnlocked))
                             _card(
@@ -674,92 +657,31 @@ class _BuyerListingDetailScreenState extends State<BuyerListingDetailScreen> {
                                     spacing: 8,
                                     runSpacing: 8,
                                     children: [
-                                      FilledButton(
-                                        onPressed: () => _updateDealOutcome(
-                                          status: 'successful',
-                                          note:
-                                              'Buyer marked successful completion',
+                                      if (canUpdateDealOutcome)
+                                        FilledButton(
+                                          onPressed: () => _updateDealOutcome(
+                                            status: 'successful',
+                                            note:
+                                                'Seller marked successful completion',
+                                          ),
+                                          child: const Text('Mark Successful'),
                                         ),
-                                        child: const Text('Mark Successful'),
-                                      ),
-                                      OutlinedButton(
-                                        onPressed: () => _updateDealOutcome(
-                                          status: 'failed',
-                                          note: 'Buyer marked deal failed',
+                                      if (canUpdateDealOutcome)
+                                        OutlinedButton(
+                                          onPressed: () => _updateDealOutcome(
+                                            status: 'failed',
+                                            note: 'Seller marked deal failed',
+                                          ),
+                                          child: const Text('Mark Failed'),
                                         ),
-                                        child: const Text('Mark Failed'),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            ),
-                          if (isAuction && !(acceptedForBuyer || contactUnlocked))
-                            _notice(
-                              'Contact unlocks after seller accepts a bid.\nرابطہ بولی قبول ہونے کے بعد کھلتا ہے',
-                            ),
-                          if (!isAuction)
-                            _card(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text(
-                                    'Direct Contact / براہِ راست رابطہ',
-                                    style: TextStyle(
-                                      color: AppColors.primaryText,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    sellerPhone.isEmpty
-                                        ? 'Seller contact not provided yet.'
-                                        : 'Phone: $sellerPhone',
-                                    style: const TextStyle(
-                                      color: AppColors.secondaryText,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 10),
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: FilledButton.icon(
-                                          onPressed: sellerPhone.isEmpty
-                                              ? null
-                                              : () async {
-                                                  final uri = Uri.parse(
-                                                    'tel:$sellerPhone',
-                                                  );
-                                                  await launchUrl(
-                                                    uri,
-                                                    mode: LaunchMode.externalApplication,
-                                                  );
-                                                },
-                                          icon: const Icon(Icons.phone_rounded),
-                                          label: const Text('Call'),
+                                      if (!canUpdateDealOutcome)
+                                        const Text(
+                                          'Only seller can update deal outcome / نتیجہ صرف فروخت کنندہ اپڈیٹ کر سکتا ہے',
+                                          style: TextStyle(
+                                            color: AppColors.secondaryText,
+                                            fontWeight: FontWeight.w600,
+                                          ),
                                         ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Expanded(
-                                        child: OutlinedButton.icon(
-                                          onPressed: sellerWhatsApp.isEmpty
-                                              ? null
-                                              : () async {
-                                                  final digits = sellerWhatsApp
-                                                      .replaceAll(RegExp(r'[^0-9]'), '');
-                                                  if (digits.isEmpty) return;
-                                                  final uri = Uri.parse(
-                                                    'https://wa.me/$digits',
-                                                  );
-                                                  await launchUrl(
-                                                    uri,
-                                                    mode: LaunchMode.externalApplication,
-                                                  );
-                                                },
-                                          icon: const Icon(Icons.chat_bubble_outline),
-                                          label: const Text('WhatsApp'),
-                                        ),
-                                      ),
                                     ],
                                   ),
                                 ],
@@ -1192,33 +1114,203 @@ class _BuyerListingDetailScreenState extends State<BuyerListingDetailScreen> {
     return null;
   }
 
-  Widget _privacyPanel({required bool contactUnlocked}) {
-    return _card(
+  Widget _privacyPanel({
+    required bool contactUnlocked,
+    required String sellerPhone,
+    required String sellerWhatsApp,
+    required bool isAuction,
+  }) {
+    const titleColor = Color(0xFFFFFFFF);
+    const primaryColor = Color(0xFFE8F5E9);
+    const secondaryColor = Color(0xFFCFE8D4);
+    final bool effectiveUnlocked = !isAuction || contactUnlocked;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1B5A43),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFF2E7A5A)),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
             'Privacy & Contact / رازداری اور رابطہ',
             style: TextStyle(
-              color: AppColors.primaryText,
-              fontWeight: FontWeight.w700,
+              color: titleColor,
+              fontWeight: FontWeight.w800,
+              fontSize: 16,
             ),
           ),
           const SizedBox(height: 8),
-          const Text(
-            'Before bid acceptance: contact remains hidden. / بولی قبول ہونے سے پہلے رابطہ چھپا رہے گا۔',
-            style: TextStyle(color: AppColors.secondaryText),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            contactUnlocked
-                ? 'Contact unlocked after seller acceptance. / بولی قبول ہونے کے بعد رابطہ کھل گیا ہے'
-                : 'Contact unlocks after seller accepts a bid. / رابطہ بولی قبول ہونے کے بعد کھلتا ہے',
-            style: TextStyle(
-              color: contactUnlocked ? AppColors.divider : AppColors.accentGold,
-              fontWeight: FontWeight.w700,
+          if (!effectiveUnlocked) ...[
+            const Text(
+              'Before acceptance: Contact hidden',
+              style: TextStyle(
+                color: secondaryColor,
+                fontWeight: FontWeight.w600,
+              ),
             ),
-          ),
+            const SizedBox(height: 3),
+            const Text(
+              'After acceptance: Contact unlocked',
+              style: TextStyle(
+                color: primaryColor,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 10,
+              ),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.06),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.16),
+                ),
+              ),
+              child: const Row(
+                children: [
+                  Icon(
+                    Icons.lock_outline_rounded,
+                    size: 18,
+                    color: titleColor,
+                  ),
+                  SizedBox(width: 8),
+                  Text(
+                    'Contact hidden',
+                    style: TextStyle(
+                      color: titleColor,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ] else ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.16),
+                ),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(
+                      Icons.phone_rounded,
+                      size: 22,
+                      color: titleColor,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Seller Phone',
+                          style: TextStyle(
+                            color: secondaryColor,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          sellerPhone.trim().isEmpty
+                              ? '—'
+                              : sellerPhone.trim(),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: titleColor,
+                            fontSize: 24,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.2,
+                            height: 1.1,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (sellerPhone.trim().isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor:
+                            Colors.white.withValues(alpha: 0.15),
+                        foregroundColor: titleColor,
+                      ),
+                      onPressed: () async {
+                        final uri =
+                            Uri.parse('tel:${sellerPhone.trim()}');
+                        await launchUrl(
+                          uri,
+                          mode: LaunchMode.externalApplication,
+                        );
+                      },
+                      icon: const Icon(Icons.call_rounded, size: 18),
+                      label: const Text('Call'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: titleColor,
+                        side: BorderSide(
+                          color: Colors.white.withValues(alpha: 0.4),
+                        ),
+                      ),
+                      onPressed: () async {
+                        final source =
+                            sellerWhatsApp.trim().isNotEmpty
+                            ? sellerWhatsApp.trim()
+                            : sellerPhone.trim();
+                        final digits = source
+                            .replaceAll(RegExp(r'[^0-9]'), '');
+                        if (digits.isEmpty) return;
+                        final uri =
+                            Uri.parse('https://wa.me/$digits');
+                        await launchUrl(
+                          uri,
+                          mode: LaunchMode.externalApplication,
+                        );
+                      },
+                      icon: const Icon(
+                        Icons.chat_bubble_outline_rounded,
+                        size: 18,
+                      ),
+                      label: const Text('WhatsApp'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ],
         ],
       ),
     );

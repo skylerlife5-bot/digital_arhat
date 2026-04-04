@@ -8,6 +8,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 import 'dart:developer' as developer;
 import '../../core/constants.dart';
+import '../../core/location_display_helper.dart';
 import '../../core/widgets/media_preview_widget.dart';
 import '../../core/widgets/primary_gradient_button.dart';
 import '../../routes.dart';
@@ -1092,6 +1093,11 @@ class MarketListingCard extends StatelessWidget {
   }
 
   String _resolveLocation(Map<String, dynamic> data) {
+    final String display = LocationDisplayHelper.locationDisplayFromData(data);
+    if (display.trim().isNotEmpty) {
+      return display.split(',').first.trim();
+    }
+
     final locationDataRaw = data['locationData'];
     final locationData = locationDataRaw is Map
         ? Map<String, dynamic>.from(locationDataRaw)
@@ -1134,6 +1140,11 @@ class MarketListingCard extends StatelessWidget {
   }
 
   String _resolveLocationTrail(Map<String, dynamic> data) {
+    final String display = LocationDisplayHelper.locationDisplayFromData(data);
+    if (display.trim().isNotEmpty) {
+      return display;
+    }
+
     final locationDataRaw = data['locationData'];
     final locationData = locationDataRaw is Map
         ? Map<String, dynamic>.from(locationDataRaw)

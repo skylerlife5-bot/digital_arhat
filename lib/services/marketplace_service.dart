@@ -37,9 +37,9 @@ class MarketplaceService {
   static const String _bidProbeListingId = 'XqRWvNzhZiE9nS6txc4N';
   static const bool _bidProbeEnabled = false;
 
-    static const String _canonicalMandiRatesCollection =
+  static const String _canonicalMandiRatesCollection =
       AppConstants.mandiRatesCollection;
-    static const String _legacyMandiRatesCollection =
+  static const String _legacyMandiRatesCollection =
       AppConstants.pakistanMandiRatesCollection;
 
   static const List<_MandiSyncItem> _defaultMandiSyncItems = <_MandiSyncItem>[
@@ -218,64 +218,6 @@ class MarketplaceService {
     }
   }
 
-  Stream<Map<String, double>?> getPakistanMandiRateStream(
-    String cropName, {
-    MandiType type = MandiType.crops,
-  }) {
-    final docId = _buildMandiRateDocId(type, cropName);
-    return _db
-        .collection(_canonicalMandiRatesCollection)
-        .doc(docId)
-        .snapshots()
-        .asyncMap((doc) async {
-          final primary = doc.data();
-          if (_isValidMandiRateMap(primary)) {
-            return <String, double>{
-              'average': _toDouble(primary!['average'])!,
-              'min': _toDouble(primary['min'])!,
-              'max': _toDouble(primary['max'])!,
-            };
-          }
-
-          final legacyDoc = await _db
-              .collection(_legacyMandiRatesCollection)
-              .doc(docId)
-              .get();
-          final legacy = legacyDoc.data();
-          if (!_isValidMandiRateMap(legacy)) return null;
-
-          return <String, double>{
-            'average': _toDouble(legacy!['average'])!,
-            'min': _toDouble(legacy['min'])!,
-            'max': _toDouble(legacy['max'])!,
-          };
-        });
-  }
-
-  Future<Map<String, double>?> getPakistanMandiRate(
-    String cropName, {
-    MandiType type = MandiType.crops,
-  }) async {
-    final docId = _buildMandiRateDocId(type, cropName);
-    final doc = await _readMandiRateDoc(docId);
-    final data = doc.data();
-    if (data == null) return null;
-
-    final average = _toDouble(data['average']);
-    final min = _toDouble(data['min']);
-    final max = _toDouble(data['max']);
-    if (average == null ||
-        min == null ||
-        max == null ||
-        average <= 0 ||
-        min <= 0 ||
-        max <= 0) {
-      return null;
-    }
-
-    return <String, double>{'average': average, 'min': min, 'max': max};
-  }
-
   Stream<Map<String, dynamic>?> getPakistanMandiRateDocStream(
     String cropName, {
     MandiType type = MandiType.crops,
@@ -291,23 +233,12 @@ class MarketplaceService {
   Future<DocumentSnapshot<Map<String, dynamic>>> _readMandiRateDoc(
     String docId,
   ) async {
-    final primary =
-        await _db.collection(_canonicalMandiRatesCollection).doc(docId).get();
+    final primary = await _db
+        .collection(_canonicalMandiRatesCollection)
+        .doc(docId)
+        .get();
     if (primary.exists) return primary;
     return _db.collection(_legacyMandiRatesCollection).doc(docId).get();
-  }
-
-  bool _isValidMandiRateMap(Map<String, dynamic>? data) {
-    if (data == null) return false;
-    final average = _toDouble(data['average']);
-    final min = _toDouble(data['min']);
-    final max = _toDouble(data['max']);
-    return average != null &&
-        min != null &&
-        max != null &&
-        average > 0 &&
-        min > 0 &&
-        max > 0;
   }
 
   /// �S& Generic File Upload (Handles Images, Videos, and Audios)
@@ -315,7 +246,9 @@ class MarketplaceService {
     final text = raw.toLowerCase();
     return text.contains('app check') ||
         text.contains('appcheck') ||
+        text.contains('app_check') ||
         text.contains('placeholder token') ||
+        text.contains('attestation failed') ||
         text.contains('too many attempts') ||
         text.contains('unauthenticated') ||
         text.contains('unauthorized') ||
@@ -337,6 +270,10 @@ class MarketplaceService {
     void Function(double progress)? onProgress,
   }) async {
     try {
+      final String authUid = (_auth.currentUser?.uid ?? '').trim();
+      debugPrint(
+        '[AddListingUpload] start path=$storagePath authUid=${authUid.isEmpty ? 'null' : authUid} fileExists=${await file.exists()}',
+      );
       Reference ref = _storage.ref().child(storagePath);
       UploadTask? uploadTask;
       if (await file.exists()) {
@@ -355,12 +292,22 @@ class MarketplaceService {
         throw Exception('upload_failed:no_upload_task');
       }
       TaskSnapshot snapshot = await uploadTask;
-      return await snapshot.ref.getDownloadURL();
+      final String downloadUrl = await snapshot.ref.getDownloadURL();
+      debugPrint(
+        '[AddListingUpload] success path=$storagePath authUid=${authUid.isEmpty ? 'null' : authUid}',
+      );
+      return downloadUrl;
     } on FirebaseException catch (e) {
+      debugPrint(
+        '[AddListingUpload] failed path=$storagePath code=${e.code} message=${e.message ?? ''}',
+      );
       throw Exception(
         'upload_failed:firebase_storage/${e.code}:${e.message ?? ''}',
       );
     } catch (e) {
+      debugPrint(
+        '[AddListingUpload] failed path=$storagePath error=${e.toString()}',
+      );
       throw Exception('upload_failed:${e.toString()}');
     }
   }
@@ -397,19 +344,12 @@ class MarketplaceService {
   }
 
   Future<void> _ensureAppCheckReadyForUpload() async {
-    try {
-      final String? token = await FirebaseAppCheck.instance.getToken(false);
-      final bool hasToken = token != null && token.trim().isNotEmpty;
-      debugPrint(
-        '[UploadTrace] App Check preflight token status: ${hasToken ? 'present' : 'empty'}',
-      );
-      if (!hasToken) {
-        throw Exception('app_check_token_empty');
-      }
-    } catch (e) {
-      debugPrint('[UploadTrace] App Check preflight failed error=$e');
-      throw Exception('app_check_preflight_failed:${e.toString()}');
-    }
+    // Firebase App Check SDK auto-attaches tokens to all Firebase SDK calls
+    // (Storage, Firestore). Calling getToken() here is unnecessary and can
+    // cause "Too many attempts" rate-limit errors — so we skip it entirely.
+    debugPrint(
+      '[UploadTrace] App Check is auto-managed by SDK for Storage/Firestore calls.',
+    );
   }
 
   /// �S& Main Professional Method: Create Listing
@@ -420,12 +360,15 @@ class MarketplaceService {
   }) async {
     try {
       final user = _auth.currentUser;
-      if (user == null) throw Exception("User authorize nahi hai.");
+      final String resolvedSellerId = (user?.uid ?? data['sellerId'] ?? '')
+          .toString()
+          .trim();
+      if (resolvedSellerId.isEmpty) throw Exception("User authorize nahi hai.");
 
       final String requestedId = (data['listingId'] ?? '').toString().trim();
       final String listingId = requestedId.isNotEmpty
           ? requestedId
-          : '${user.uid}_${DateTime.now().toUtc().millisecondsSinceEpoch}';
+          : '${resolvedSellerId}_${DateTime.now().toUtc().millisecondsSinceEpoch}';
       final rawVideoPath = (data['video'] ?? '').toString().trim();
       final rawImages = (data['images'] as List?)?.cast<dynamic>() ?? const [];
       final imagePaths = rawImages
@@ -511,7 +454,7 @@ class MarketplaceService {
       try {
         if (rawAudioPath.isNotEmpty) {
           final audioStoragePath =
-              'audio_notes/${user.uid}/${DateTime.now().millisecondsSinceEpoch}.m4a';
+              'audio_notes/$resolvedSellerId/${DateTime.now().millisecondsSinceEpoch}.m4a';
           audioUrl = await _uploadToStorage(
             File(rawAudioPath),
             audioStoragePath,
@@ -548,7 +491,7 @@ class MarketplaceService {
 
       // 3. Prepare Final Data Packet
       final Map<String, dynamic> finalData = {
-        'sellerId': user.uid,
+        'sellerId': resolvedSellerId,
         'sellerName': data['sellerName'] ?? "Kisan Bhai",
         'mandiType': data['mandiType'] ?? MandiType.crops.wireValue,
         'category': data['category'] ?? '',
@@ -574,6 +517,10 @@ class MarketplaceService {
         'location': data['location'],
         'locationData': data['locationData'],
         'saleType': data['saleType'] ?? 'auction',
+        'isAuction':
+            data['isAuction'] == true ||
+            (data['saleType'] ?? 'auction').toString().toLowerCase() ==
+                'auction',
         'featured':
             data['promotionStatus'] == 'active' && data['featured'] == true,
         'featuredAuction':
@@ -609,7 +556,6 @@ class MarketplaceService {
         'verificationCapturedAt': data['verificationCapturedAt'],
         'verificationVideoTag': data['verificationVideoTag'],
         'audioUrl': audioUrl ?? '',
-        'status': analysis['status'] ?? 'pending',
         'isSuspicious': analysis['isSuspicious'] ?? false,
         'suspiciousReason': analysis['reason'] ?? '',
         'isApproved': false,
@@ -629,7 +575,20 @@ class MarketplaceService {
       final DocumentReference docRef = _db
           .collection('listings')
           .doc(listingId);
-      await docRef.set(finalData, SetOptions(merge: true));
+      debugPrint(
+        '[CreateListing] firestore_write_start listingId=$listingId sellerId=$resolvedSellerId',
+      );
+      try {
+        await docRef.set(finalData, SetOptions(merge: true));
+      } on FirebaseException catch (e) {
+        debugPrint(
+          '[CreateListing] firestore_write_failed listingId=$listingId sellerId=$resolvedSellerId code=${e.code} message=${e.message ?? ''}',
+        );
+        rethrow;
+      }
+      debugPrint(
+        '[CreateListing] firestore_write_success listingId=$listingId',
+      );
 
       // 5. Automatic Admin Alert for Suspicious Price
       if (finalData['isSuspicious'] == true) {
@@ -661,7 +620,9 @@ class MarketplaceService {
     required String functionName,
     required Map<String, dynamic> payload,
   }) async {
-    debugPrint('[AddListing] _postSecureFunction_start functionName=$functionName');
+    debugPrint(
+      '[AddListing] _postSecureFunction_start functionName=$functionName',
+    );
     final user = _auth.currentUser;
     if (user == null) {
       throw Exception('User authorize nahi hai.');
@@ -669,13 +630,34 @@ class MarketplaceService {
 
     final token = await user.getIdToken();
     final uri = Uri.parse('$_functionsBaseUrl/$functionName');
+
+    // Attach App Check token so Cloud Functions with App Check enforcement
+    // accept the request.  Non-blocking: if the token is unavailable we
+    // still attempt the call and let the backend decide.
+    String? appCheckToken;
+    try {
+      appCheckToken = await FirebaseAppCheck.instance.getToken(false);
+      debugPrint(
+        '[AddListing] app_check_token hasToken=${(appCheckToken ?? '').isNotEmpty}',
+      );
+    } catch (e) {
+      debugPrint(
+        '[AddListing] app_check_token_fetch_failed (non-blocking) error=$e',
+      );
+    }
+
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer $token',
+    };
+    if ((appCheckToken ?? '').isNotEmpty) {
+      headers['X-Firebase-AppCheck'] = appCheckToken!;
+    }
+
     debugPrint('[AddListing] http_post_start uri=$uri');
     final response = await http.post(
       uri,
-      headers: <String, String>{
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $token',
-      },
+      headers: headers,
       body: jsonEncode(payload),
     );
 
@@ -693,7 +675,9 @@ class MarketplaceService {
         rawBody.trimLeft().startsWith('[');
 
     if (!looksLikeJson && rawBody.trim().isNotEmpty) {
-      debugPrint('[AddListing] http_response_not_json contentType=$contentType rawBody=$rawBody');
+      debugPrint(
+        '[AddListing] http_response_not_json contentType=$contentType rawBody=$rawBody',
+      );
       throw Exception(
         'non_json_response:'
         'status=${response.statusCode};'
@@ -710,7 +694,9 @@ class MarketplaceService {
           : (jsonDecode(rawBody) as Map<String, dynamic>);
       debugPrint('[AddListing] http_json_decoded ok');
     } on FormatException {
-      debugPrint('[AddListing] http_json_decode_failed status=${response.statusCode}');
+      debugPrint(
+        '[AddListing] http_json_decode_failed status=${response.statusCode}',
+      );
       throw Exception(
         'invalid_json_response:'
         'status=${response.statusCode};'
@@ -721,8 +707,13 @@ class MarketplaceService {
     }
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      final errorFromResponse = (decoded['error'] ?? 'LISTING_CREATE_FAILED(status=${response.statusCode})').toString();
-      debugPrint('[AddListing] http_request_failed status=${response.statusCode} error=$errorFromResponse decoded=$decoded');
+      final errorFromResponse =
+          (decoded['error'] ??
+                  'LISTING_CREATE_FAILED(status=${response.statusCode})')
+              .toString();
+      debugPrint(
+        '[AddListing] http_request_failed status=${response.statusCode} error=$errorFromResponse decoded=$decoded',
+      );
       throw Exception(errorFromResponse);
     }
 
@@ -739,14 +730,26 @@ class MarketplaceService {
   }) async {
     final user = _auth.currentUser;
     if (user == null) throw Exception('User authorize nahi hai.');
+    final String localSellerId = (listingData['sellerId'] ?? '')
+        .toString()
+        .trim();
+    debugPrint(
+      '[AddListingSubmit] auth_snapshot '
+      'firebaseUid=${user.uid} '
+      'payloadSellerId=${localSellerId.isEmpty ? 'null' : localSellerId} '
+      'finalResolvedUid=${user.uid}',
+    );
 
     final String listingId =
         '${user.uid}_${DateTime.now().toUtc().millisecondsSinceEpoch}';
-    debugPrint('[AddListing] createListingSecure_start listingId=$listingId uid=${user.uid}');
+    debugPrint(
+      '[AddListing] createListingSecure_start listingId=$listingId uid=${user.uid}',
+    );
 
     final imageFiles = (mediaFiles['images'] as List?) ?? const [];
     final videoFile = mediaFiles['video'];
     final audioPath = (mediaFiles['audioPath'] ?? '').toString().trim();
+    final paymentProofImageFile = mediaFiles['paymentProofImage'];
 
     final imagePaths = imageFiles
         .map((file) {
@@ -779,7 +782,8 @@ class MarketplaceService {
     final int totalUploads =
         imagePaths.length +
         (videoPath.isNotEmpty ? 1 : 0) +
-        (audioPath.isNotEmpty ? 1 : 0);
+        (audioPath.isNotEmpty ? 1 : 0) +
+        (paymentProofImageFile != null ? 1 : 0);
 
     void reportProgress() {
       if (onProgress == null || totalUploads <= 0) return;
@@ -798,6 +802,7 @@ class MarketplaceService {
     final List<String> imageUrls = <String>[];
     String videoUrl = '';
     String uploadedAudioUrl = '';
+    String paymentProofUrl = '';
 
     if (imagePaths.isNotEmpty) {
       onStage?.call('uploading_trust_photo');
@@ -811,13 +816,21 @@ class MarketplaceService {
       final storagePath =
           'listings/$listingId/images/${DateTime.now().millisecondsSinceEpoch}_$index.jpg';
       try {
+        debugPrint(
+          '[AddListingUpload] image_start path=$storagePath index=$index',
+        );
         if (index > 0) {
           debugPrint('[UploadTrace] extra image upload start index=$index');
         }
         final url = await _uploadToStorage(File(path), storagePath);
         imageUrls.add(url);
+        debugPrint(
+          '[AddListingUpload] image_success path=$storagePath index=$index',
+        );
       } catch (e) {
-        debugPrint('[UploadTrace] image upload failed index=$index error=$e');
+        debugPrint(
+          '[AddListingUpload] image_failed path=$storagePath index=$index error=${e.toString()}',
+        );
         if (index == 0) {
           throw Exception('trust_photo_upload_failed:${e.toString()}');
         }
@@ -837,13 +850,17 @@ class MarketplaceService {
       final storagePath =
           'listings/$listingId/video/${DateTime.now().millisecondsSinceEpoch}.mp4';
       try {
+        debugPrint('[AddListingUpload] video_start path=$storagePath');
         videoUrl = await _uploadToStorageWithRetry(
           File(videoPath),
           storagePath,
           maxAttempts: 2,
         );
+        debugPrint('[AddListingUpload] video_success path=$storagePath');
       } catch (e) {
-        debugPrint('[UploadTrace] optional video upload failed error=$e');
+        debugPrint(
+          '[AddListingUpload] video_failed path=$storagePath error=${e.toString()}',
+        );
         if (_looksLikeAppCheckOrAuthIssue(e.toString())) {
           onNonBlockingIssue?.call('video_upload_app_check_failed');
         } else {
@@ -861,9 +878,13 @@ class MarketplaceService {
       final storagePath =
           'audio_notes/${user.uid}/${DateTime.now().millisecondsSinceEpoch}.m4a';
       try {
+        debugPrint('[AddListingUpload] audio_start path=$storagePath');
         uploadedAudioUrl = await _uploadToStorage(File(audioPath), storagePath);
+        debugPrint('[AddListingUpload] audio_success path=$storagePath');
       } catch (e) {
-        debugPrint('[UploadTrace] audio upload failed error=$e');
+        debugPrint(
+          '[AddListingUpload] audio_failed path=$storagePath error=${e.toString()}',
+        );
         if (_looksLikeAppCheckOrAuthIssue(e.toString())) {
           onNonBlockingIssue?.call('audio_upload_app_check_failed');
         } else {
@@ -871,6 +892,45 @@ class MarketplaceService {
         }
         uploadedAudioUrl = '';
       } finally {
+        markUploadDone();
+      }
+    }
+
+    if (paymentProofImageFile != null) {
+      onStage?.call('uploading_payment_proof');
+      debugPrint('[UploadTrace] payment proof upload start');
+      
+      String paymentProofPath = '';
+      if (paymentProofImageFile is File) {
+        paymentProofPath = paymentProofImageFile.path;
+      } else {
+        final dynamic anyFile = paymentProofImageFile;
+        if (anyFile != null && anyFile.path is String) {
+          paymentProofPath = (anyFile.path as String).trim();
+        }
+      }
+      
+      if (paymentProofPath.isNotEmpty) {
+        final storagePath =
+            'listings/$listingId/payment_proof/${DateTime.now().millisecondsSinceEpoch}.jpg';
+        try {
+          debugPrint('[AddListingUpload] payment_proof_start path=$storagePath');
+          paymentProofUrl = await _uploadToStorage(File(paymentProofPath), storagePath);
+          debugPrint('[AddListingUpload] payment_proof_success path=$storagePath');
+        } catch (e) {
+          debugPrint(
+            '[AddListingUpload] payment_proof_failed path=$storagePath error=${e.toString()}',
+          );
+          if (_looksLikeAppCheckOrAuthIssue(e.toString())) {
+            onNonBlockingIssue?.call('payment_proof_upload_app_check_failed');
+          } else {
+            onNonBlockingIssue?.call('payment_proof_upload_failed');
+          }
+          paymentProofUrl = '';
+        } finally {
+          markUploadDone();
+        }
+      } else {
         markUploadDone();
       }
     }
@@ -913,6 +973,10 @@ class MarketplaceService {
         'subcategory': (listingData['subcategory'] ?? '').toString(),
         'subcategoryLabel': (listingData['subcategoryLabel'] ?? '').toString(),
         'saleType': (listingData['saleType'] ?? 'auction').toString(),
+        'isAuction':
+            listingData['isAuction'] == true ||
+            (listingData['saleType'] ?? 'auction').toString().toLowerCase() ==
+                'auction',
         'featured': listingData['featured'] == true,
         'featuredAuction': listingData['featuredAuction'] == true,
         'featuredCost': _toDouble(listingData['featuredCost']) ?? 0,
@@ -936,6 +1000,13 @@ class MarketplaceService {
         'promotionPaymentReference':
             (listingData['promotionPaymentReference'] ?? '').toString(),
         'promotionProofUrl': (listingData['promotionProofUrl'] ?? '')
+            .toString(),
+        'paymentMethod': (listingData['paymentMethod'] ?? '').toString(),
+        'paymentRef': (listingData['paymentRef'] ?? '').toString(),
+        'paymentProofUrl': paymentProofUrl,
+        'paymentProofFileName': (listingData['paymentProofFileName'] ?? '')
+            .toString(),
+        'promotionPaymentSubmittedAt': (listingData['promotionPaymentSubmittedAt'] ?? '')
             .toString(),
         'priorityScore':
             (listingData['promotionStatus'] ?? '').toString().toLowerCase() ==
@@ -1015,6 +1086,12 @@ class MarketplaceService {
     debugPrint(
       '[UploadTrace] Firestore save start (via createListingSecureHttp)',
     );
+    debugPrint(
+      '[CreateListingSecure] payload_keys_listingData=${(payload['listingData'] as Map).keys.toList()}',
+    );
+    debugPrint(
+      '[CreateListingSecure] forbidden_fields_check status=${(payload['listingData'] as Map?)?.containsKey('status')} riskScore=${(payload['listingData'] as Map?)?.containsKey('riskScore')} fraudFlags=${(payload['listingData'] as Map?)?.containsKey('fraudFlags')}',
+    );
 
     Map<String, dynamic> response;
     try {
@@ -1024,6 +1101,9 @@ class MarketplaceService {
       );
     } catch (e) {
       debugPrint('[UploadTrace] save failed error=$e');
+      debugPrint(
+        '[CreateListingSecure] error_type=${e.runtimeType} error_message=$e',
+      );
       throw Exception('save_failed:${e.toString()}');
     }
     debugPrint('[UploadTrace] save succeeded status=${response['status']}');
@@ -1382,7 +1462,6 @@ class MarketplaceService {
         'status': 'pending_verification',
         'timestamp': FieldValue.serverTimestamp(),
       };
-      batch.set(_db.collection('admin_alerts').doc(), adminAlertPayload);
     }
 
     if (adminAlertPayload != null) {
@@ -1446,6 +1525,18 @@ class MarketplaceService {
       '[BidFlow] success listing=${bid.listingId} buyer=${user.uid} bidId=${bidRef.id} highest=${bid.bidAmount.toStringAsFixed(2)}',
     );
 
+    if (adminAlertPayload != null) {
+      try {
+        await _db.collection('admin_alerts').add(adminAlertPayload);
+      } on FirebaseException catch (e) {
+        debugPrint(
+          '[BidFlow] admin_alert_write_skipped code=${e.code} message=${e.message ?? ''}',
+        );
+      } catch (e) {
+        debugPrint('[BidFlow] admin_alert_write_skipped error=${e.toString()}');
+      }
+    }
+
     await _notifyBidLifecycleEvents(
       listingRef: listingRef,
       listingData: listingData,
@@ -1501,11 +1592,7 @@ class MarketplaceService {
       await listingRef.update(listingUpdatePayload);
       debugPrint('[BidProbe] listing_update PASS path=$listingPath');
     } catch (e) {
-      _logBidProbeFailure(
-        path: listingPath,
-        error: e,
-        label: 'listing_update',
-      );
+      _logBidProbeFailure(path: listingPath, error: e, label: 'listing_update');
       return _BidProbeResult(allPass: false, failedPath: listingPath, error: e);
     }
 
@@ -1560,9 +1647,10 @@ class MarketplaceService {
     };
     debugPrint('[BidProbe] notification_payload=$notificationPayload');
     try {
-      await _db.collection('notifications').doc(notificationId).set(
-        notificationPayload,
-      );
+      await _db
+          .collection('notifications')
+          .doc(notificationId)
+          .set(notificationPayload);
       debugPrint('[BidProbe] notification_create PASS path=$notificationPath');
     } catch (e) {
       _logBidProbeFailure(
@@ -1929,11 +2017,7 @@ class _MandiSyncItem {
 }
 
 class _BidProbeResult {
-  const _BidProbeResult({
-    required this.allPass,
-    this.failedPath,
-    this.error,
-  });
+  const _BidProbeResult({required this.allPass, this.failedPath, this.error});
 
   final bool allPass;
   final String? failedPath;

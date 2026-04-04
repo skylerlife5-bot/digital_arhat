@@ -4,7 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../routes.dart';
+import '../../services/auth_service.dart';
 import '../../theme/app_colors.dart';
+import '../assistant/aarhat_assistant_fab.dart';
+import '../assistant/aarhat_assistant_welcome_sheet.dart';
+import '../assistant/assistant_prefs_service.dart';
+import '../common/my_deals_screen.dart';
 import 'seller_bids.dart';
 import 'seller_listings.dart';
 
@@ -24,6 +29,21 @@ class _SellerDashboardState extends State<SellerDashboard> {
   DateTime _lastSyncedAt = DateTime.now();
   bool _ayatExpanded = false;
   bool _secureTradingExpanded = true;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeShowAssistantWelcome());
+  }
+
+  Future<void> _maybeShowAssistantWelcome() async {
+    final seen = await AssistantPrefsService.hasSeenWelcome();
+    if (seen || !mounted) return;
+    await AarhatAssistantWelcomeSheet.show(
+      context,
+      userData: widget.userData,
+    );
+  }
 
   String get _sellerUid {
     final authUid = FirebaseAuth.instance.currentUser?.uid ?? '';
@@ -78,6 +98,22 @@ class _SellerDashboardState extends State<SellerDashboard> {
         .snapshots();
   }
 
+  Stream<QuerySnapshot<Map<String, dynamic>>> _sellerNotificationsStream() {
+    if (_sellerUid.isEmpty) {
+      return FirebaseFirestore.instance
+          .collection('notifications')
+          .where('toUid', isEqualTo: '__none__')
+          .snapshots();
+    }
+
+    return FirebaseFirestore.instance
+        .collection('notifications')
+        .where('toUid', isEqualTo: _sellerUid)
+        .orderBy('createdAt', descending: true)
+        .limit(25)
+        .snapshots();
+  }
+
   Future<void> _refreshDashboard() async {
     if (_sellerUid.isNotEmpty) {
       await Future.wait([
@@ -89,6 +125,11 @@ class _SellerDashboardState extends State<SellerDashboard> {
         FirebaseFirestore.instance
             .collection('deals')
             .where('sellerId', isEqualTo: _sellerUid)
+            .limit(25)
+            .get(),
+        FirebaseFirestore.instance
+            .collection('notifications')
+            .where('toUid', isEqualTo: _sellerUid)
             .limit(25)
             .get(),
         FirebaseFirestore.instance.collection('users').doc(_sellerUid).get(),
@@ -103,24 +144,90 @@ class _SellerDashboardState extends State<SellerDashboard> {
 
   Future<void> _logout() async {
     HapticFeedback.mediumImpact();
+    final bool confirmed = await _showLogoutConfirmation();
+    if (!confirmed) return;
     await FirebaseAuth.instance.signOut();
+    await AuthService().clearPersistedSessionUid();
     if (!mounted) return;
-    Navigator.of(context).pushNamedAndRemoveUntil(Routes.welcome, (route) => false);
+    Navigator.of(
+      context,
+    ).pushNamedAndRemoveUntil(Routes.welcome, (route) => false);
+  }
+
+  Future<bool> _showLogoutConfirmation() async {
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF103A29),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+            side: BorderSide(color: _gold.withValues(alpha: 0.42)),
+          ),
+          titlePadding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
+          contentPadding: const EdgeInsets.fromLTRB(20, 0, 20, 18),
+          actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          title: const Text(
+            'Logout / لاگ آؤٹ',
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          content: const Text(
+            'Are you sure you want to log out?\nکیا آپ واقعی لاگ آؤٹ کرنا چاہتے ہیں؟',
+            style: TextStyle(
+              color: Colors.white70,
+              height: 1.35,
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text(
+                'Cancel / منسوخ',
+                style: TextStyle(color: Colors.white70),
+              ),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              style: FilledButton.styleFrom(
+                backgroundColor: _gold,
+                foregroundColor: _greenDark,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: const Text(
+                'Logout / لاگ آؤٹ',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    return confirmed ?? false;
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _greenDark,
+      floatingActionButton: AarhatAssistantFab(userData: widget.userData),
       appBar: AppBar(
         elevation: 0,
         backgroundColor: Colors.transparent,
         titleSpacing: 12,
         title: const Text(
-          'Seller Dashboard / ڈیش بورڈ',
+          'Seller Dashboard / سیلر ڈیش بورڈ',
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: TextStyle(color: AppColors.primaryText, fontWeight: FontWeight.w700),
+          style: TextStyle(
+            color: AppColors.primaryText,
+            fontWeight: FontWeight.w700,
+          ),
         ),
         actions: [
           IconButton(
@@ -137,6 +244,7 @@ class _SellerDashboardState extends State<SellerDashboard> {
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(14, 10, 14, 24),
           children: [
+            _buildPendingVerificationBanner(),
             _buildGreetingCard(),
             const SizedBox(height: 10),
             _buildAyatCard(),
@@ -152,10 +260,7 @@ class _SellerDashboardState extends State<SellerDashboard> {
             const SizedBox(height: 10),
             _buildPrimaryActionGrid(),
             const SizedBox(height: 14),
-            const _SectionTitle(
-              titleEn: 'Action Center',
-              titleUr: 'اہم الرٹس',
-            ),
+            const _SectionTitle(titleEn: 'Action Center', titleUr: 'اہم الرٹس'),
             const SizedBox(height: 8),
             _buildActionCenter(),
             const SizedBox(height: 14),
@@ -166,23 +271,94 @@ class _SellerDashboardState extends State<SellerDashboard> {
     );
   }
 
+  Widget _buildPendingVerificationBanner() {
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: _sellerProfileStream(),
+      builder: (context, snapshot) {
+        final profile = snapshot.data?.data() ?? widget.userData;
+        final status = _resolveVerificationStatus(profile);
+
+        if (status == 'approved') return const SizedBox.shrink();
+
+        final bool rejected = status == 'rejected';
+        final String title = rejected
+            ? 'اکاؤنٹ مسترد ہوا ہے'
+            : 'اکاؤنٹ کامیابی سے بن گیا ہے';
+        final String message = rejected
+            ? 'آپ کی درخواست مسترد ہوئی ہے۔ براہِ کرم ایڈمن کی ہدایت کے مطابق پروفائل درست کریں۔'
+            : 'آپ کا اکاؤنٹ زیرِ جائزہ ہے۔ منظوری کے بعد آپ لسٹنگ پوسٹ کر سکیں گے۔';
+
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: rejected
+                  ? const Color(0xFF7A1F1F).withValues(alpha: 0.2)
+                  : const Color(0xFF7B5800).withValues(alpha: 0.18),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: rejected
+                    ? const Color(0xFFFF8A80).withValues(alpha: 0.45)
+                    : const Color(0xFFFFD700).withValues(alpha: 0.35),
+              ),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  rejected ? Icons.cancel_rounded : Icons.access_time_rounded,
+                  color: rejected
+                      ? const Color(0xFFFF8A80)
+                      : const Color(0xFFFFD700),
+                  size: 22,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Directionality(
+                    textDirection: TextDirection.rtl,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          style: TextStyle(
+                            color: rejected
+                                ? const Color(0xFFFF8A80)
+                                : const Color(0xFFFFD700),
+                            fontWeight: FontWeight.w700,
+                            fontSize: 15,
+                            fontFamily: 'JameelNoori',
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          message,
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 13,
+                            fontFamily: 'JameelNoori',
+                            height: 1.4,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildGreetingCard() {
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       stream: _sellerProfileStream(),
       builder: (context, snapshot) {
         final profile = snapshot.data?.data() ?? const <String, dynamic>{};
-        final phoneVerified =
-            _readBool(profile['phoneVerified']) ||
-            _readBool(profile['isPhoneVerified']);
-        final videoVerified =
-            _readBool(profile['videoVerified']) ||
-            _readBool(profile['isFaceVerified']);
-        final trusted = phoneVerified && videoVerified;
-
-        final reasons = <String>[
-          if (!videoVerified) 'Video Verification Required / ویڈیو تصدیق لازمی',
-          if (!phoneVerified) 'Phone Not Verified / فون تصدیق نہیں',
-        ];
+        final verificationStatus = _resolveVerificationStatus(profile);
 
         return _DashboardCard(
           child: Column(
@@ -204,7 +380,10 @@ class _SellerDashboardState extends State<SellerDashboard> {
                           'Assalam-o-Alaikum / السلام علیکم',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(color: AppColors.secondaryText, fontSize: 13),
+                          style: TextStyle(
+                            color: AppColors.secondaryText,
+                            fontSize: 13,
+                          ),
                         ),
                         const SizedBox(height: 4),
                         Text(
@@ -220,25 +399,9 @@ class _SellerDashboardState extends State<SellerDashboard> {
                       ],
                     ),
                   ),
-                  _TrustBadge(isVerified: trusted),
+                  _VerificationBadge(status: verificationStatus),
                 ],
               ),
-              if (reasons.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: reasons
-                      .map(
-                        (message) => _SignalChip(
-                          text: message,
-                          color: const Color(0xFFFFB74D),
-                          icon: Icons.warning_amber_rounded,
-                        ),
-                      )
-                      .toList(growable: false),
-                ),
-              ],
             ],
           ),
         );
@@ -414,10 +577,7 @@ class _SellerDashboardState extends State<SellerDashboard> {
           semanticsLabel: 'Add Listing',
           onTap: () {
             HapticFeedback.lightImpact();
-            Navigator.of(context).pushNamed(
-              Routes.postListingOption,
-              arguments: <String, dynamic>{'userData': widget.userData},
-            );
+            _handleAddListingTap();
           },
         ),
         _ActionTile(
@@ -454,13 +614,16 @@ class _SellerDashboardState extends State<SellerDashboard> {
         ),
         _ActionTile(
           icon: Icons.handshake_outlined,
-          titleEn: 'Deals',
-          titleUr: 'سودے',
-          semanticsLabel: 'Deals',
+          titleEn: 'Sales',
+          titleUr: 'میری فروخت',
+          semanticsLabel: 'Sales',
           onTap: () {
             HapticFeedback.lightImpact();
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Deals screen coming soon')),
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const MyDealsScreen(isSeller: true),
+              ),
             );
           },
         ),
@@ -478,254 +641,306 @@ class _SellerDashboardState extends State<SellerDashboard> {
             return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
               stream: _sellerDealsStream(),
               builder: (context, dealsSnapshot) {
-                if (userSnapshot.hasError ||
-                    listingsSnapshot.hasError ||
-                    dealsSnapshot.hasError) {
-                  return _DashboardCard(
-                    child: Row(
-                      children: [
-                        const Icon(
-                          Icons.wifi_off_rounded,
-                          color: AppColors.accentGoldAccent,
+                return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  stream: _sellerNotificationsStream(),
+                  builder: (context, notifSnapshot) {
+                    if (userSnapshot.hasError ||
+                        listingsSnapshot.hasError ||
+                        dealsSnapshot.hasError ||
+                        notifSnapshot.hasError) {
+                      return _DashboardCard(
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.wifi_off_rounded,
+                              color: AppColors.accentGoldAccent,
+                            ),
+                            const SizedBox(width: 8),
+                            const Expanded(
+                              child: Text(
+                                'آف لائن مسئلہ، دوبارہ کوشش کریں',
+                                style: TextStyle(color: AppColors.primaryText),
+                              ),
+                            ),
+                            TextButton(
+                              onPressed: _refreshDashboard,
+                              child: const Text('Retry'),
+                            ),
+                          ],
                         ),
-                        const SizedBox(width: 8),
-                        const Expanded(
-                          child: Text(
-                            'آف لائن مسئلہ، دوبارہ کوشش کریں',
-                            style: TextStyle(color: AppColors.primaryText),
-                          ),
-                        ),
-                        TextButton(
-                          onPressed: _refreshDashboard,
-                          child: const Text('Retry'),
-                        ),
-                      ],
-                    ),
-                  );
-                }
+                      );
+                    }
 
-                if (!userSnapshot.hasData ||
-                    !listingsSnapshot.hasData ||
-                    !dealsSnapshot.hasData) {
-                  return const _DashboardCard(child: _ActionCenterSkeleton());
-                }
+                    if (!userSnapshot.hasData ||
+                        !listingsSnapshot.hasData ||
+                        !dealsSnapshot.hasData ||
+                        !notifSnapshot.hasData) {
+                      return const _DashboardCard(
+                        child: _ActionCenterSkeleton(),
+                      );
+                    }
 
-                final profile =
-                    userSnapshot.data?.data() ?? const <String, dynamic>{};
-                final listings =
-                    listingsSnapshot.data?.docs ??
-                    const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
-                final deals =
-                    dealsSnapshot.data?.docs ??
-                    const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+                    final profile =
+                        userSnapshot.data?.data() ?? const <String, dynamic>{};
+                    final listings =
+                        listingsSnapshot.data?.docs ??
+                        const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+                    final deals =
+                        dealsSnapshot.data?.docs ??
+                        const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+                    final notificationDocs =
+                        notifSnapshot.data?.docs ??
+                        const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+                    final sellerNotifications = notificationDocs
+                        .where((doc) {
+                          final data = doc.data();
+                          final role = (data['targetRole'] ?? '')
+                              .toString()
+                              .trim()
+                              .toLowerCase();
+                          return role.isEmpty || role == 'seller';
+                        })
+                        .toList(growable: false);
 
-                final alerts = <_ActionAlert>[];
+                    debugPrint(
+                      '[NotifReadSeller] count=${sellerNotifications.length}',
+                    );
 
-                final videoVerified =
-                    _readBool(profile['videoVerified']) ||
-                    _readBool(profile['isFaceVerified']);
-                if (!videoVerified) {
-                  alerts.add(
-                    const _ActionAlert(
-                      title: 'Verification Video لازمی',
-                      subtitle: 'ہر نئی لسٹنگ کیلئے GPS ویڈیو ضروری ہے',
-                      color: Color(0xFFFFB74D),
-                      icon: Icons.videocam_off_rounded,
-                    ),
-                  );
-                }
+                    final alerts = <_ActionAlert>[];
 
-                final hasLowPriceWarning = listings.any((doc) {
-                  final data = doc.data();
-                  final price =
-                      _toDouble(data['price']) ?? _toDouble(data['rate']) ?? 0;
-                  final market =
-                      _toDouble(data['marketRate']) ??
-                      _toDouble(data['market_average']) ??
-                      _toDouble(data['marketAverage']) ??
-                      0;
-                  if (price <= 0 || market <= 0) return false;
-                  return price < market * 0.65 || price > market * 1.65;
-                });
-
-                if (hasLowPriceWarning) {
-                  alerts.add(
-                    const _ActionAlert(
-                      title: 'Low price warning / کم قیمت الرٹ',
-                      subtitle: 'کچھ ریٹس مارکیٹ سے کافی مختلف ہیں',
-                      color: Color(0xFFFFA726),
-                      icon: Icons.trending_down_rounded,
-                    ),
-                  );
-                }
-
-                final suspiciousFlag =
-                    _readBool(profile['suspiciousActivity']) ||
-                    listings.any((doc) {
+                    for (final doc in sellerNotifications.take(3)) {
                       final data = doc.data();
-                      final suspicious = _readBool(data['isSuspicious']);
-                      final risk = _toDouble(data['riskScore']) ?? 0;
-                      return suspicious || risk >= 70;
+                      final title =
+                          (data['titleEn'] ??
+                                  data['title'] ??
+                                  'Marketplace Update')
+                              .toString()
+                              .trim();
+                      final body = (data['bodyEn'] ?? data['body'] ?? '')
+                          .toString()
+                          .trim();
+                      alerts.add(
+                        _ActionAlert(
+                          title: title.isEmpty
+                              ? 'Marketplace Update / مارکیٹ اپڈیٹ'
+                              : title,
+                          subtitle: body.isEmpty
+                              ? 'Review this update to keep your sales flow active / اس اپڈیٹ کو دیکھیں اور فروخت روانی میں رکھیں'
+                              : body,
+                          color: const Color(0xFF4FC3F7),
+                          icon: Icons.notifications_active_rounded,
+                        ),
+                      );
+                    }
+
+                    final hasLowPriceWarning = listings.any((doc) {
+                      final data = doc.data();
+                      final price =
+                          _toDouble(data['price']) ??
+                          _toDouble(data['rate']) ??
+                          0;
+                      final market =
+                          _toDouble(data['marketRate']) ??
+                          _toDouble(data['market_average']) ??
+                          _toDouble(data['marketAverage']) ??
+                          0;
+                      if (price <= 0 || market <= 0) return false;
+                      return price < market * 0.65 || price > market * 1.65;
                     });
 
-                if (suspiciousFlag) {
-                  alerts.add(
-                    const _ActionAlert(
-                      title: 'Suspicious activity flag / مشکوک',
-                      subtitle: 'AI نے ممکنہ فراڈ سرگرمی نشان زد کی',
-                      color: Color(0xFFE53935),
-                      icon: Icons.report_problem_rounded,
-                    ),
-                  );
-                }
+                    if (hasLowPriceWarning) {
+                      alerts.add(
+                        const _ActionAlert(
+                          title: 'Price Alert / قیمت الرٹ',
+                          subtitle:
+                              'کچھ ریٹس مارکیٹ قیمت سے نمایاں مختلف ہیں',
+                          color: Color(0xFFFFA726),
+                          icon: Icons.trending_down_rounded,
+                        ),
+                      );
+                    }
 
-                final submittedDeals = deals
-                    .where((doc) {
-                      final data = doc.data();
-                      final paymentStatus = (data['paymentStatus'] ?? '')
-                          .toString()
-                          .toLowerCase()
-                          .trim();
-                      return paymentStatus == 'payment_submitted';
-                    })
-                    .toList(growable: false);
+                    final suspiciousFlag =
+                        _readBool(profile['suspiciousActivity']) ||
+                        listings.any((doc) {
+                          final data = doc.data();
+                          final suspicious = _readBool(data['isSuspicious']);
+                          final risk = _toDouble(data['riskScore']) ?? 0;
+                          return suspicious || risk >= 70;
+                        });
 
-                if (submittedDeals.isNotEmpty) {
-                  alerts.add(
-                    _ActionAlert(
-                      title:
-                          'Deal update received / سودا اپڈیٹ (${submittedDeals.length})',
-                      subtitle:
-                          'Buyer ne response diya hai, براہِ راست رابطہ کریں',
-                      color: const Color(0xFF26A69A),
-                      icon: Icons.local_shipping_rounded,
-                    ),
-                  );
-                }
+                    if (suspiciousFlag) {
+                      alerts.add(
+                        const _ActionAlert(
+                          title: 'Security Alert / سیکیورٹی الرٹ',
+                          subtitle:
+                              'نظام نے ممکنہ مشکوک سرگرمی نشان زد کی',
+                          color: Color(0xFFE53935),
+                          icon: Icons.report_problem_rounded,
+                        ),
+                      );
+                    }
 
-                if (alerts.isEmpty && submittedDeals.isEmpty) {
-                  return _buildSystemStatusCard();
-                }
+                    final submittedDeals = deals
+                        .where((doc) {
+                          final data = doc.data();
+                          final paymentStatus = (data['paymentStatus'] ?? '')
+                              .toString()
+                              .toLowerCase()
+                              .trim();
+                          return paymentStatus == 'payment_submitted';
+                        })
+                        .toList(growable: false);
 
-                return _DashboardCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children:
-                        alerts
-                            .take(3)
-                            .map(
-                              (alert) => Padding(
-                                padding: const EdgeInsets.only(bottom: 8),
-                                child: _ActionAlertTile(alert: alert),
-                              ),
-                            )
-                            .toList(growable: false)
-                          ..addAll(
-                            submittedDeals.take(2).map((dealDoc) {
-                              final deal = dealDoc.data();
-                              final product =
-                                  (deal['productName'] ??
-                                          deal['itemName'] ??
-                                          'Deal')
-                                      .toString();
-                              final listingId = (deal['listingId'] ?? '')
-                                  .toString();
-                              return Padding(
-                                padding: const EdgeInsets.only(top: 8),
-                                child: Container(
-                                  width: double.infinity,
-                                  padding: const EdgeInsets.all(10),
-                                  decoration: BoxDecoration(
-                                    color: AppColors.primaryText.withValues(alpha: 0.06),
-                                    borderRadius: BorderRadius.circular(10),
-                                    border: Border.all(color: AppColors.primaryText24),
+                    if (submittedDeals.isNotEmpty) {
+                      alerts.add(
+                        _ActionAlert(
+                          title:
+                              'Bid Accepted / بولی منظور (${submittedDeals.length})',
+                          subtitle:
+                              'A buyer response is ready. Review and continue delivery / خریدار کا جواب موصول ہوا، جائزہ لے کر اگلا مرحلہ شروع کریں',
+                          color: const Color(0xFF26A69A),
+                          icon: Icons.local_shipping_rounded,
+                        ),
+                      );
+                    }
+
+                    if (alerts.isEmpty && submittedDeals.isEmpty) {
+                      return _buildSystemStatusCard();
+                    }
+
+                    return _DashboardCard(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children:
+                            alerts
+                                .take(3)
+                                .map(
+                                  (alert) => Padding(
+                                    padding: const EdgeInsets.only(bottom: 8),
+                                    child: _ActionAlertTile(alert: alert),
                                   ),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        product,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(
-                                          color: AppColors.primaryText,
-                                          fontWeight: FontWeight.w700,
+                                )
+                                .toList()
+                              ..addAll(
+                                submittedDeals.take(2).map((dealDoc) {
+                                  final deal = dealDoc.data();
+                                  final product =
+                                      (deal['productName'] ??
+                                              deal['itemName'] ??
+                                              'Deal')
+                                          .toString();
+                                  final listingId = (deal['listingId'] ?? '')
+                                      .toString();
+                                  return Padding(
+                                    padding: const EdgeInsets.only(top: 8),
+                                    child: Container(
+                                      width: double.infinity,
+                                      padding: const EdgeInsets.all(10),
+                                      decoration: BoxDecoration(
+                                        color: AppColors.primaryText.withValues(
+                                          alpha: 0.06,
+                                        ),
+                                        borderRadius: BorderRadius.circular(10),
+                                        border: Border.all(
+                                          color: AppColors.primaryText24,
                                         ),
                                       ),
-                                      const SizedBox(height: 4),
-                                      Row(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         children: [
-                                          const Text(
-                                            'Deal: ',
-                                            style: TextStyle(
-                                              color: AppColors.secondaryText,
-                                              fontSize: 12,
+                                          Text(
+                                            product,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              color: AppColors.primaryText,
+                                              fontWeight: FontWeight.w700,
                                             ),
                                           ),
-                                          Expanded(
-                                            child: Text(
-                                              dealDoc.id,
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: const TextStyle(
-                                                color: AppColors.secondaryText,
-                                                fontSize: 12,
+                                          const SizedBox(height: 4),
+                                          Row(
+                                            children: [
+                                              const Text(
+                                                'Deal: ',
+                                                style: TextStyle(
+                                                  color:
+                                                      AppColors.secondaryText,
+                                                  fontSize: 12,
+                                                ),
+                                              ),
+                                              Expanded(
+                                                child: Text(
+                                                  dealDoc.id,
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: const TextStyle(
+                                                    color:
+                                                        AppColors.secondaryText,
+                                                    fontSize: 12,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          if (listingId.isNotEmpty)
+                                            Row(
+                                              children: [
+                                                const Text(
+                                                  'Listing: ',
+                                                  style: TextStyle(
+                                                    color:
+                                                        AppColors.secondaryText,
+                                                    fontSize: 12,
+                                                  ),
+                                                ),
+                                                Expanded(
+                                                  child: Text(
+                                                    listingId,
+                                                    maxLines: 1,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                    style: const TextStyle(
+                                                      color: AppColors
+                                                          .secondaryText,
+                                                      fontSize: 12,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          const SizedBox(height: 8),
+                                          SizedBox(
+                                            width: double.infinity,
+                                            child: ElevatedButton.icon(
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: _gold,
+                                                foregroundColor:
+                                                    AppColors.ctaTextDark,
+                                              ),
+                                              onPressed: () => _startDelivery(
+                                                dealId: dealDoc.id,
+                                                listingId: listingId,
+                                              ),
+                                              icon: const Icon(
+                                                Icons.local_shipping_rounded,
+                                              ),
+                                              label: const Text(
+                                                'Start Delivery / ترسیل شروع کریں',
                                               ),
                                             ),
                                           ),
                                         ],
                                       ),
-                                      if (listingId.isNotEmpty)
-                                        Row(
-                                          children: [
-                                            const Text(
-                                              'Listing: ',
-                                              style: TextStyle(
-                                                color: AppColors.secondaryText,
-                                                fontSize: 12,
-                                              ),
-                                            ),
-                                            Expanded(
-                                              child: Text(
-                                                listingId,
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                                style: const TextStyle(
-                                                  color: AppColors.secondaryText,
-                                                  fontSize: 12,
-                                                ),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      const SizedBox(height: 8),
-                                      SizedBox(
-                                        width: double.infinity,
-                                        child: ElevatedButton.icon(
-                                          style: ElevatedButton.styleFrom(
-                                            backgroundColor: _gold,
-                                            foregroundColor: AppColors.ctaTextDark,
-                                          ),
-                                          onPressed: () => _startDelivery(
-                                            dealId: dealDoc.id,
-                                            listingId: listingId,
-                                          ),
-                                          icon: const Icon(
-                                            Icons.local_shipping_rounded,
-                                          ),
-                                          label: const Text(
-                                            'Start Delivery / ڈیلیوری شروع کریں',
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            }),
-                          ),
-                  ),
+                                    ),
+                                  );
+                                }),
+                              ),
+                      ),
+                    );
+                  },
                 );
               },
             );
@@ -771,12 +986,12 @@ class _SellerDashboardState extends State<SellerDashboard> {
           ),
           SizedBox(height: 8),
           _StatusOkLine(
-            text: 'All listings verified / تمام اشتہارات تصدیق شدہ ہیں',
+            text: 'Listings are verified / لسٹنگز تصدیق شدہ ہیں',
           ),
-          _StatusOkLine(text: 'No fraud alerts / کوئی فراڈ الرٹ نہیں ہے'),
+          _StatusOkLine(text: 'No fraud flags / کوئی فراڈ الرٹ موجود نہیں'),
           _StatusOkLine(
             text:
-                'Accepted bids unlock contact / قبول شدہ بولی پر رابطہ اَن لاک ہوتا ہے',
+                'Accepted bids unlock direct contact / منظور شدہ بولی پر براہِ راست رابطہ کھلتا ہے',
           ),
         ],
       ),
@@ -804,20 +1019,18 @@ class _SellerDashboardState extends State<SellerDashboard> {
           ),
           children: const [
             _SecurePoint(
-              en: 'After bid acceptance, buyer and seller connect directly',
-              ur: 'بولی قبول ہونے کے بعد خریدار اور فروخت کنندہ براہِ راست رابطہ کرتے ہیں',
+              en: 'Buyer and seller connect directly after bid acceptance',
+              ur:
+                  'بولی منظور ہونے کے بعد خریدار اور فروخت کنندہ براہِ راست رابطہ کرتے ہیں',
             ),
             _SecurePoint(
-              en: 'Complete deal offline after verifying listing and contact details',
-              ur: 'لسٹنگ اور رابطہ کی تصدیق کے بعد براہِ راست سودا مکمل کریں',
+              en: 'Verify listing and contact details before completing the deal',
+              ur:
+                  'لسٹنگ اور رابطے کی تصدیق کے بعد سودا مکمل کریں',
             ),
             _SecurePoint(
-              en: 'Every listing requires a verification video with GPS',
-              ur: 'ہر اشتہار کے لیے GPS کے ساتھ تصدیقی ویڈیو لازمی ہے',
-            ),
-            _SecurePoint(
-              en: 'AI system monitors fraud and suspicious activity',
-              ur: 'مصنوعی ذہانت (AI) دھوکہ دہی اور مشکوک سرگرمیوں پر نظر رکھتی ہے',
+              en: 'The system actively monitors suspicious activity',
+              ur: 'نظام مشکوک سرگرمیوں پر مسلسل نگرانی رکھتا ہے',
             ),
           ],
         ),
@@ -837,6 +1050,58 @@ class _SellerDashboardState extends State<SellerDashboard> {
     return null;
   }
 
+  String _resolveVerificationStatus(Map<String, dynamic> data) {
+    final status =
+        (data['verificationStatus'] ?? '').toString().trim().toLowerCase();
+    if (status == 'approved' || status == 'verified') return 'approved';
+    if (status == 'rejected') return 'rejected';
+    return 'pending';
+  }
+
+  bool _isSellerApproved(Map<String, dynamic> data) {
+    final status = _resolveVerificationStatus(data);
+    if (status == 'approved') return true;
+    if (data['isApproved'] == true) return true;
+    return false;
+  }
+
+  Future<Map<String, dynamic>> _loadSellerProfile() async {
+    if (_sellerUid.isEmpty) return widget.userData;
+    final doc =
+        await FirebaseFirestore.instance.collection('users').doc(_sellerUid).get();
+    return doc.data() ?? widget.userData;
+  }
+
+  Future<void> _handleAddListingTap() async {
+    final profile = await _loadSellerProfile();
+    final approved = _isSellerApproved(profile);
+    if (!mounted) return;
+    if (!approved) {
+      _showApprovalRequiredMessage();
+      return;
+    }
+    Navigator.of(context).pushNamed(
+      Routes.postListingOption,
+      arguments: <String, dynamic>{'userData': profile},
+    );
+  }
+
+  void _showApprovalRequiredMessage() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Directionality(
+          textDirection: TextDirection.rtl,
+          child: Text(
+            'آپ کی تصدیق ابھی جاری ہے۔ منظوری کے بعد آپ لسٹنگ پوسٹ کر سکیں گے۔',
+            style: TextStyle(fontFamily: 'JameelNoori', fontSize: 14),
+          ),
+        ),
+        backgroundColor: Color(0xFF1B5E20),
+        duration: Duration(seconds: 3),
+      ),
+    );
+  }
+
   String _two(int value) => value.toString().padLeft(2, '0');
 }
 
@@ -852,9 +1117,7 @@ class _DashboardCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppColors.cardSurface,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: AppColors.secondarySurface,
-        ),
+        border: Border.all(color: AppColors.secondarySurface),
         boxShadow: [
           BoxShadow(
             color: AppColors.shadowDark.withValues(alpha: 0.28),
@@ -910,68 +1173,43 @@ class _SectionTitle extends StatelessWidget {
   }
 }
 
-class _TrustBadge extends StatelessWidget {
-  const _TrustBadge({required this.isVerified});
+class _VerificationBadge extends StatelessWidget {
+  const _VerificationBadge({required this.status});
 
-  final bool isVerified;
+  final String status;
 
   @override
   Widget build(BuildContext context) {
+    late final Color color;
+    late final String text;
+    switch (status) {
+      case 'approved':
+        color = const Color(0xFF2E7D32);
+        text = 'Approved / منظور شدہ';
+        break;
+      case 'rejected':
+        color = const Color(0xFFC62828);
+        text = 'Rejected / مسترد';
+        break;
+      default:
+        color = const Color(0xFFFFB74D);
+        text = 'Pending Review / زیرِ جائزہ';
+        break;
+    }
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: isVerified ? const Color(0xFF2E7D32) : const Color(0xFFFFB74D),
+        color: color,
         borderRadius: BorderRadius.circular(32),
       ),
       child: Text(
-        isVerified ? 'Verified ✅' : 'Unverified ⚠️',
+        text,
         style: const TextStyle(
           color: AppColors.primaryText,
           fontWeight: FontWeight.w700,
           fontSize: 12,
         ),
-      ),
-    );
-  }
-}
-
-class _SignalChip extends StatelessWidget {
-  const _SignalChip({
-    required this.text,
-    required this.color,
-    required this.icon,
-  });
-
-  final String text;
-  final Color color;
-  final IconData icon;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.17),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withValues(alpha: 0.55)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, color: color, size: 14),
-          const SizedBox(width: 5),
-          Flexible(
-            child: Text(
-              text,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: color,
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -1042,7 +1280,10 @@ class _StatCard extends StatelessWidget {
             subtitle,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: AppColors.primaryText60, fontSize: 11),
+            style: const TextStyle(
+              color: AppColors.primaryText60,
+              fontSize: 11,
+            ),
           ),
         ],
       ),
@@ -1177,15 +1418,15 @@ class _ActionAlertTile extends StatelessWidget {
       width: double.infinity,
       decoration: BoxDecoration(
         color: alert.color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: alert.color.withValues(alpha: 0.52)),
       ),
-      padding: const EdgeInsets.all(10),
+      padding: const EdgeInsets.fromLTRB(11, 10, 11, 10),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(alert.icon, color: alert.color),
-          const SizedBox(width: 8),
+          Icon(alert.icon, color: alert.color, size: 18),
+          const SizedBox(width: 9),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1194,13 +1435,18 @@ class _ActionAlertTile extends StatelessWidget {
                   alert.title,
                   style: TextStyle(
                     color: alert.color,
+                    fontSize: 13,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: 4),
                 Text(
                   alert.subtitle,
-                  style: const TextStyle(color: AppColors.secondaryText, fontSize: 12),
+                  style: const TextStyle(
+                    color: AppColors.secondaryText,
+                    fontSize: 12.3,
+                    height: 1.3,
+                  ),
                 ),
               ],
             ),
@@ -1250,7 +1496,10 @@ class _StatusOkLine extends StatelessWidget {
           Expanded(
             child: Text(
               text,
-              style: const TextStyle(color: AppColors.primaryText, fontSize: 13),
+              style: const TextStyle(
+                color: AppColors.primaryText,
+                fontSize: 13,
+              ),
             ),
           ),
         ],
@@ -1271,10 +1520,10 @@ class _SecurePoint extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 10),
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.all(10),
+        padding: const EdgeInsets.fromLTRB(11, 10, 11, 10),
         decoration: BoxDecoration(
           color: AppColors.primaryText.withValues(alpha: 0.06),
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: _SellerDashboardState._gold.withValues(alpha: 0.28),
           ),
@@ -1331,4 +1580,3 @@ class _SkeletonLine extends StatelessWidget {
     );
   }
 }
-

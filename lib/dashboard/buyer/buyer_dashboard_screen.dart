@@ -3,9 +3,12 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+
+import '../../core/location_display_helper.dart';
 import 'package:flutter/services.dart';
 
 import '../../routes.dart';
+import '../../services/auth_service.dart';
 import '../../services/buyer_engagement_service.dart';
 import '../../theme/app_colors.dart';
 import 'bid_bottom_sheet.dart';
@@ -103,6 +106,7 @@ class _BuyerDashboardScreenState extends State<BuyerDashboardScreen> {
 
   Future<void> _logout() async {
     await FirebaseAuth.instance.signOut();
+    await AuthService().clearPersistedSessionUid();
     if (!mounted) return;
     Navigator.of(
       context,
@@ -313,10 +317,9 @@ class _BuyerDashboardScreenState extends State<BuyerDashboardScreen> {
                       final province = (data['province'] ?? '')
                           .toString()
                           .trim();
-                      final haystack =
-                          '${data['itemName'] ?? ''} ${data['district'] ?? ''} ${data['province'] ?? ''}'
-                              .toString()
-                              .toLowerCase();
+                      final haystack = LocationDisplayHelper.searchTextFromData(
+                        data,
+                      );
 
                       final searchMatch =
                           _searchQuery.isEmpty ||
@@ -582,7 +585,11 @@ class _BuyerDashboardScreenState extends State<BuyerDashboardScreen> {
                   children: _marketProvinces
                       .map(
                         (province) => ChoiceChip(
-                          label: Text(province),
+                          label: Text(
+                            province == 'All Pakistan'
+                                ? 'All Pakistan / پورا پاکستان'
+                                : LocationDisplayHelper.bilingualLabel(province),
+                          ),
                           selected: _selectedProvince == province,
                           backgroundColor: const Color(0xFF12402A),
                           selectedColor: _gold.withValues(alpha: 0.30),
@@ -662,7 +669,11 @@ class _BuyerDashboardScreenState extends State<BuyerDashboardScreen> {
               (province) => Padding(
                 padding: const EdgeInsets.only(right: 7),
                 child: ChoiceChip(
-                  label: Text(province),
+                  label: Text(
+                    province == 'All Pakistan'
+                        ? 'All Pakistan / پورا پاکستان'
+                        : LocationDisplayHelper.bilingualLabel(province),
+                  ),
                   selected: _selectedProvince == province,
                   backgroundColor: const Color(
                     0xFF12402A,
@@ -1289,13 +1300,7 @@ class _ListingCard extends StatelessWidget {
   }
 
   String _locationLine(Map<String, dynamic> map) {
-    final district = (map['district'] ?? '').toString().trim();
-    final city = (map['city'] ?? '').toString().trim();
-    final province = (map['province'] ?? '').toString().trim();
-    if (city.isNotEmpty) return city;
-    if (district.isNotEmpty) return district;
-    if (province.isNotEmpty) return province;
-    return 'Pakistan';
+    return LocationDisplayHelper.locationDisplayFromData(map);
   }
 
   String _firstImageUrl(Map<String, dynamic> map) {
@@ -1477,200 +1482,265 @@ class _MyBidCard extends StatelessWidget {
                         listing['ownerName'] ??
                         'Seller')
                     .toString();
-            final sellerPhone =
-                (dealData['sellerPhone'] ??
-                        listing['sellerPhone'] ??
-                        listing['phone'] ??
-                        listing['contactPhone'] ??
-                        listing['sellerContact'])
+            final String sellerUid =
+                (dealData['sellerId'] ?? listing['sellerId'] ?? '')
                     .toString()
                     .trim();
 
-            return Container(
-              margin: const EdgeInsets.only(bottom: 10),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    Colors.white.withValues(alpha: 0.10),
-                    Colors.white.withValues(alpha: 0.05),
-                  ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: _BuyerDashboardScreenState._gold.withValues(
-                    alpha: 0.26,
+            return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+              stream: sellerUid.isEmpty
+                  ? null
+                  : FirebaseFirestore.instance
+                        .collection('users')
+                        .doc(sellerUid)
+                        .snapshots(),
+              builder: (context, sellerSnapshot) {
+                final sellerProfile =
+                    sellerSnapshot.data?.data() ?? const <String, dynamic>{};
+
+                String firstPhone(
+                  Map<String, dynamic> map,
+                  List<String> keys,
+                ) {
+                  for (final key in keys) {
+                    final value = (map[key] ?? '').toString().trim();
+                    if (value.isNotEmpty) return value;
+                  }
+                  return '';
+                }
+
+                final sellerPhoneFromDealOrListing =
+                    firstPhone(dealData, const <String>[
+                      'sellerPhone',
+                      'phone',
+                      'contactPhone',
+                      'sellerContact',
+                    ]).isNotEmpty
+                    ? firstPhone(dealData, const <String>[
+                        'sellerPhone',
+                        'phone',
+                        'contactPhone',
+                        'sellerContact',
+                      ])
+                    : firstPhone(listing, const <String>[
+                        'sellerPhone',
+                        'phone',
+                        'phoneNumber',
+                        'contactPhone',
+                        'contact',
+                        'mobile',
+                        'sellerContact',
+                      ]);
+
+                final sellerPhoneFromProfile =
+                    firstPhone(sellerProfile, const <String>[
+                      'phone',
+                      'phoneNumber',
+                      'contact',
+                      'mobile',
+                      'contactPhone',
+                      'sellerPhone',
+                    ]);
+
+                final mappedSellerPhone =
+                    sellerPhoneFromDealOrListing.isNotEmpty
+                    ? sellerPhoneFromDealOrListing
+                    : sellerPhoneFromProfile;
+                debugPrint(
+                  '[AcceptBidContact] uiMappedSellerPhone=$mappedSellerPhone',
+                );
+
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 10),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        Colors.white.withValues(alpha: 0.10),
+                        Colors.white.withValues(alpha: 0.05),
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: _BuyerDashboardScreenState._gold.withValues(
+                        alpha: 0.26,
+                      ),
+                    ),
                   ),
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(
-                        child: Text(
-                          item,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 9,
-                          vertical: 5,
-                        ),
-                        decoration: BoxDecoration(
-                          color: statusColor.withValues(alpha: 0.16),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                            color: statusColor.withValues(alpha: 0.8),
-                          ),
-                        ),
-                        child: Text(
-                          statusLabel,
-                          style: TextStyle(
-                            color: statusColor,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 11,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 6,
-                    children: [
-                      _miniChip(Icons.payments_outlined, formatPkr(amount)),
-                      _miniChip(Icons.schedule_rounded, created),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  _longMetaRow(
-                    context: context,
-                    label: 'Listing ID',
-                    value: listingId,
-                    allowCopy: true,
-                  ),
-                  if (thisBidAccepted && contactUnlocked) ...[
-                    const SizedBox(height: 10),
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF2ECC71).withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                          color: const Color(0xFF2ECC71).withValues(alpha: 0.7),
-                        ),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      Row(
                         children: [
-                          const Text(
-                            'Bid Accepted / بولی قبول ہوگئی',
-                            style: TextStyle(
-                              color: Color(0xFF9EF4C0),
-                              fontWeight: FontWeight.w700,
+                          Expanded(
+                            child: Text(
+                              item,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
                           ),
-                          const SizedBox(height: 6),
-                          const Text(
-                            'آپ کی بولی قبول ہوگئی',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700,
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 9,
+                              vertical: 5,
                             ),
-                          ),
-                          const SizedBox(height: 4),
-                          const Text(
-                            'Contact unlocked / رابطہ اَن لاک',
-                            style: TextStyle(color: Colors.white70),
-                          ),
-                          const SizedBox(height: 2),
-                          const Text(
-                            'براہِ راست بات کر کے ادائیگی اور ڈلیوری طے کریں',
-                            style: TextStyle(color: Colors.white70),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Accepted Amount: ${formatPkr(acceptedAmount)}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(color: Colors.white),
-                          ),
-                          Text(
-                            'Accepted Time: $acceptedAtLabel',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(color: Colors.white70),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Listing: $item',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(color: Colors.white),
-                          ),
-                          Text(
-                            'Seller: $sellerName',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(color: Colors.white),
-                          ),
-                          Text(
-                            sellerPhone.isEmpty
-                                ? 'Seller contact will appear here once available.'
-                                : 'Phone: $sellerPhone',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(color: Colors.white),
+                            decoration: BoxDecoration(
+                              color: statusColor.withValues(alpha: 0.16),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: statusColor.withValues(alpha: 0.8),
+                              ),
+                            ),
+                            child: Text(
+                              statusLabel,
+                              style: TextStyle(
+                                color: statusColor,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 11,
+                              ),
+                            ),
                           ),
                         ],
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.07),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: Colors.white24),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        children: [
+                          _miniChip(Icons.payments_outlined, formatPkr(amount)),
+                          _miniChip(Icons.schedule_rounded, created),
+                        ],
                       ),
-                      child: const Text(
-                        'Digital Arhat Phase-1 mein سودا براہِ راست مکمل ہوتا ہے\n'
-                        'Please verify listing and seller details before finalizing the deal.\n'
-                        'سودا مکمل کرنے سے پہلے چیز اور فروخت کنندہ کی تفصیل ضرور چیک کریں',
-                        style: TextStyle(color: Colors.white70),
+                      const SizedBox(height: 8),
+                      _longMetaRow(
+                        context: context,
+                        label: 'Listing ID',
+                        value: listingId,
+                        allowCopy: true,
                       ),
-                    ),
-                  ],
-                  if (!thisBidAccepted) ...[
-                    const SizedBox(height: 10),
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.07),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: Colors.white24),
-                      ),
-                      child: const Text(
-                        'Seller contact appears after your bid is accepted / بولی قبول ہونے کے بعد رابطہ ظاہر ہوگا',
-                        style: TextStyle(color: Colors.white70),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
+                      if (thisBidAccepted && contactUnlocked) ...[
+                        const SizedBox(height: 10),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(
+                              0xFF2ECC71,
+                            ).withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: const Color(
+                                0xFF2ECC71,
+                              ).withValues(alpha: 0.7),
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Bid Accepted / بولی قبول ہوگئی',
+                                style: TextStyle(
+                                  color: Color(0xFF9EF4C0),
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              const Text(
+                                'آپ کی بولی قبول ہوگئی',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              const Text(
+                                'Contact unlocked / رابطہ اَن لاک',
+                                style: TextStyle(color: Colors.white70),
+                              ),
+                              const SizedBox(height: 2),
+                              const Text(
+                                'براہِ راست بات کر کے ادائیگی اور ڈلیوری طے کریں',
+                                style: TextStyle(color: Colors.white70),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'Accepted Amount: ${formatPkr(acceptedAmount)}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(color: Colors.white),
+                              ),
+                              Text(
+                                'Accepted Time: $acceptedAtLabel',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(color: Colors.white70),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'Listing: $item',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(color: Colors.white),
+                              ),
+                              Text(
+                                'Seller: $sellerName',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(color: Colors.white),
+                              ),
+                              Text(
+                                mappedSellerPhone.isEmpty
+                                    ? 'Seller contact will appear here once available.'
+                                    : 'Phone: $mappedSellerPhone',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(color: Colors.white),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.07),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: Colors.white24),
+                          ),
+                          child: const Text(
+                            'Digital Arhat Phase-1 mein سودا براہِ راست مکمل ہوتا ہے\n'
+                            'Please verify listing and seller details before finalizing the deal.\n'
+                            'سودا مکمل کرنے سے پہلے چیز اور فروخت کنندہ کی تفصیل ضرور چیک کریں',
+                            style: TextStyle(color: Colors.white70),
+                          ),
+                        ),
+                      ],
+                      if (!thisBidAccepted) ...[
+                        const SizedBox(height: 10),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.07),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: Colors.white24),
+                          ),
+                          child: const Text(
+                            'Seller contact appears after your bid is accepted / بولی قبول ہونے کے بعد رابطہ ظاہر ہوگا',
+                            style: TextStyle(color: Colors.white70),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                );
+              },
             );
           },
         );

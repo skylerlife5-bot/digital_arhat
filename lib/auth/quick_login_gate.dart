@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../routes.dart';
+import '../services/auth_service.dart';
 import 'quick_login_service.dart';
 
 class QuickLoginGate extends StatefulWidget {
@@ -175,6 +176,7 @@ class _QuickUnlockScreenState extends State<QuickUnlockScreen> {
 
   Future<void> _logoutAndUsePassword() async {
     await FirebaseAuth.instance.signOut();
+    await AuthService().clearPersistedSessionUid();
     QuickLoginService.clearSessionUnlock(widget.userId);
     if (!mounted) return;
     Navigator.of(
@@ -469,7 +471,7 @@ class _QuickLoginSetupScreenState extends State<QuickLoginSetupScreen> {
                               : 'Biometric not available on this device',
                           style: const TextStyle(color: Colors.white70),
                         ),
-                        activeColor: _gold,
+                        activeThumbColor: _gold,
                       ),
                       const SizedBox(height: 8),
                       FilledButton(

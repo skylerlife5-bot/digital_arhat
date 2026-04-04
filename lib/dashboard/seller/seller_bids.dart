@@ -7,6 +7,7 @@ import '../../config/fee_policy.dart';
 import '../../services/auction_lifecycle_service.dart';
 import '../../services/bidding_service.dart';
 import '../../services/marketplace_service.dart';
+import 'seller_report_deal_sheet.dart';
 
 class SellerBidsScreen extends StatefulWidget {
   final String listingId;
@@ -403,6 +404,19 @@ class _SellerBidsScreenState extends State<SellerBidsScreen> {
                           ),
                           child: const Text('Failed / ناکام'),
                         ),
+                        OutlinedButton(
+                          onPressed: () => _showReportSheet(
+                            context: context,
+                            listingId: listingId,
+                            bidId: bidId,
+                            data: data,
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.redAccent,
+                            side: const BorderSide(color: Colors.redAccent),
+                          ),
+                          child: const Text('رپورٹ خریدار'),
+                        ),
                       ],
                     ),
                   ],
@@ -652,6 +666,30 @@ class _SellerBidsScreenState extends State<SellerBidsScreen> {
             style: TextStyle(color: Colors.white38),
           ),
         ],
+      ),
+    );
+  }
+
+  void _showReportSheet({
+    required BuildContext context,
+    required String listingId,
+    required String bidId,
+    required Map<String, dynamic> data,
+  }) {
+    final sellerId = FirebaseAuth.instance.currentUser?.uid ?? '';
+    final buyerId = (data['buyerId'] ?? '').toString();
+    final buyerName = (data['buyerName'] ?? 'Buyer').toString();
+    if (sellerId.isEmpty || buyerId.isEmpty) return;
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => SellerReportDealSheet(
+        listingId: listingId,
+        buyerId: buyerId,
+        buyerName: buyerName,
+        sellerId: sellerId,
+        bidId: bidId,
       ),
     );
   }

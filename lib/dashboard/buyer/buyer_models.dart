@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import '../../core/location_display_helper.dart';
+
 enum RiskLevel { low, medium, high, unknown }
 
 enum OrderLifecycleStatus { pendingAdmin, approved, paid, rejected, cancelled, unknown }
@@ -13,6 +15,9 @@ class BuyerListing {
     required this.unit,
     required this.province,
     required this.district,
+    required this.tehsil,
+    required this.city,
+    required this.locationDisplay,
     required this.sellerId,
     required this.status,
     required this.expiresAt,
@@ -29,6 +34,9 @@ class BuyerListing {
   final String unit;
   final String province;
   final String district;
+  final String tehsil;
+  final String city;
+  final String locationDisplay;
   final String sellerId;
   final String status;
   final DateTime expiresAt;
@@ -40,7 +48,15 @@ class BuyerListing {
 
   bool get isExpired => DateTime.now().toUtc().isAfter(expiresAt.toUtc());
 
-  String get locationLabel => '$district, $province';
+  String get locationLabel {
+    return LocationDisplayHelper.locationDisplayFromData(<String, dynamic>{
+      'locationDisplay': locationDisplay,
+      'city': city,
+      'tehsil': tehsil,
+      'district': district,
+      'province': province,
+    });
+  }
 
   static BuyerListing fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final map = doc.data() ?? const <String, dynamic>{};
@@ -48,14 +64,42 @@ class BuyerListing {
     final expiresAt =
         _timestampToDate(map['expiresAt']) ??
         (approvedAt ?? DateTime.now().toUtc()).add(const Duration(hours: 24));
+    final locationDataRaw = map['locationData'];
+    final locationData = locationDataRaw is Map
+        ? Map<String, dynamic>.from(locationDataRaw)
+        : const <String, dynamic>{};
+
+    final province = _readString(
+      map['province'],
+      fallback: _readString(locationData['province'], fallback: 'Pakistan'),
+    );
+    final district = _readString(
+      map['district'],
+      fallback: _readString(locationData['district']),
+    );
+    final tehsil = _readString(
+      map['tehsil'],
+      fallback: _readString(locationData['tehsil']),
+    );
+    final city = _readString(
+      map['city'],
+      fallback: _readString(locationData['city']),
+    );
+    final locationDisplay = _readString(
+      map['locationDisplay'],
+      fallback: _readString(map['location']),
+    );
 
     return BuyerListing(
       id: doc.id,
       itemName: _readString(map['itemName'], fallback: _readString(map['cropName'], fallback: 'Item')),
       quantity: _readDouble(map['quantity'], fallback: 0),
       unit: _readString(map['unit'], fallback: 'kg'),
-      province: _readString(map['province'], fallback: 'Pakistan'),
-      district: _readString(map['district'], fallback: 'N/A'),
+      province: province,
+      district: district,
+      tehsil: tehsil,
+      city: city,
+      locationDisplay: locationDisplay,
       sellerId: _readString(map['sellerId']),
       status: _readString(map['status'], fallback: 'live'),
       expiresAt: expiresAt,

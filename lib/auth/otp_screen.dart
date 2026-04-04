@@ -1,9 +1,9 @@
 ﻿import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../routes.dart';
+import '../services/auth_service.dart';
 
 class OtpScreen extends StatefulWidget {
   final String? verificationId;
@@ -14,6 +14,7 @@ class OtpScreen extends StatefulWidget {
 }
 
 class _OtpScreenState extends State<OtpScreen> {
+  final AuthService _authService = AuthService();
   final TextEditingController _otpController = TextEditingController();
   bool _isLoading = false;
 
@@ -24,7 +25,17 @@ class _OtpScreenState extends State<OtpScreen> {
     final Map<String, dynamic> payloadFromSignup =
         (args?['userData'] as Map<String, dynamic>?) ?? <String, dynamic>{};
 
-    if (_otpController.text.length < 6 && !kIsWeb) {
+    if (vId.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          duration: Duration(seconds: 5),
+          content: Text('OTP session expired. Please request a new code.'),
+        ),
+      );
+      return;
+    }
+
+    if (_otpController.text.trim().length != 6) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(duration: Duration(seconds: 5), content: Text("Pura code likhen")));
       return;
     }
@@ -32,11 +43,6 @@ class _OtpScreenState extends State<OtpScreen> {
     setState(() => _isLoading = true);
 
     try {
-      if (kIsWeb) {
-        Navigator.pushNamedAndRemoveUntil(context, Routes.roleRouter, (route) => false);
-        return;
-      }
-
       final credential = PhoneAuthProvider.credential(
         verificationId: vId,
         smsCode: _otpController.text.trim(),
@@ -47,6 +53,9 @@ class _OtpScreenState extends State<OtpScreen> {
       if (userCredential.user != null) {
         String finalRole = roleFromUI;
         String uid = userCredential.user!.uid;
+        final String normalizedPhone = _authService.normalizePhone(
+          userCredential.user!.phoneNumber ?? '',
+        );
 
         // �x� CHECK: Pehle se maujood role check karen
         DocumentSnapshot userDoc = await FirebaseFirestore.instance
@@ -67,7 +76,9 @@ class _OtpScreenState extends State<OtpScreen> {
           ...payloadFromSignup,
           'uid': uid,
           'role': finalRole, 
-          'phone': userCredential.user!.phoneNumber,
+          'phone': normalizedPhone.isEmpty
+              ? (userCredential.user!.phoneNumber ?? '')
+              : normalizedPhone,
           'is_verified': true,
           'lastLogin': FieldValue.serverTimestamp(),
         };
@@ -76,6 +87,15 @@ class _OtpScreenState extends State<OtpScreen> {
             .collection('users')
             .doc(uid)
             .set(mergedUserData, SetOptions(merge: true));
+
+        if (normalizedPhone.isNotEmpty) {
+          await _authService.upsertPhoneIndex(
+            normalizedPhone: normalizedPhone,
+            uid: uid,
+          );
+        }
+
+        await _authService.persistSessionUid(uid);
       }
 
       if (!mounted) return;
@@ -115,27 +135,26 @@ class _OtpScreenState extends State<OtpScreen> {
               style: TextStyle(color: Colors.white70)
             ),
             const SizedBox(height: 40),
-            if (!kIsWeb)
-              TextField(
-                controller: _otpController,
-                keyboardType: TextInputType.number,
-                textAlign: TextAlign.center,
-                maxLength: 6,
-                style: const TextStyle(
-                  color: Color(0xFFFFD700), 
-                  fontSize: 32, 
-                  letterSpacing: 10
+            TextField(
+              controller: _otpController,
+              keyboardType: TextInputType.number,
+              textAlign: TextAlign.center,
+              maxLength: 6,
+              style: const TextStyle(
+                color: Color(0xFFFFD700), 
+                fontSize: 32, 
+                letterSpacing: 10
+              ),
+              decoration: const InputDecoration(
+                counterText: "",
+                enabledBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: Colors.white24)
                 ),
-                decoration: const InputDecoration(
-                  counterText: "",
-                  enabledBorder: UnderlineInputBorder(
-                    borderSide: BorderSide(color: Colors.white24)
-                  ),
-                  focusedBorder: UnderlineInputBorder(
-                    borderSide: BorderSide(color: Color(0xFFFFD700))
-                  ),
+                focusedBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: Color(0xFFFFD700))
                 ),
               ),
+            ),
             const SizedBox(height: 40),
             SizedBox(
               width: double.infinity,
@@ -151,7 +170,7 @@ class _OtpScreenState extends State<OtpScreen> {
                 child: _isLoading 
                   ? const CircularProgressIndicator(color: Color(0xFF012210))
                   : const Text(
-                      kIsWeb ? "Skip for Web" : "Verify & Continue", 
+                      "Verify & Continue", 
                       style: TextStyle(
                         color: Color(0xFF012210), 
                         fontSize: 18, 

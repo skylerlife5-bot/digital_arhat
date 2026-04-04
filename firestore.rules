@@ -7,11 +7,20 @@ service cloud.firestore {
 
     function isAdminUid() {
       return isSignedIn() &&
-          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
           (
-            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.userRole == 'admin' ||
-            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.userType == 'admin' ||
+            (
+              exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+              (
+                get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+                get(/databases/$(database)/documents/users/$(request.auth.uid)).data.userRole == 'admin' ||
+                get(/databases/$(database)/documents/users/$(request.auth.uid)).data.userType == 'admin'
+              )
+            ) ||
+            (
+              exists(/databases/$(database)/documents/admins/$(request.auth.uid)) &&
+              get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.isActive == true &&
+              get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.role == 'admin'
+            ) ||
             request.auth.token.admin == true
           );
     }
@@ -20,6 +29,72 @@ service cloud.firestore {
       return isSignedIn() &&
           exists(/databases/$(database)/documents/listings/$(listingId)) &&
           get(/databases/$(database)/documents/listings/$(listingId)).data.sellerId == request.auth.uid;
+    }
+
+    function isDealParticipant(dealId) {
+      return isSignedIn() &&
+          exists(/databases/$(database)/documents/deals/$(dealId)) &&
+          (
+            get(/databases/$(database)/documents/deals/$(dealId)).data.buyerId == request.auth.uid ||
+            get(/databases/$(database)/documents/deals/$(dealId)).data.sellerId == request.auth.uid
+          );
+    }
+
+    function phoneIndexMapsToUser(phoneValue, userId) {
+      return (phoneValue is string) && (
+          (
+            exists(/databases/$(database)/documents/phone_index/$(phoneValue)) &&
+            get(/databases/$(database)/documents/phone_index/$(phoneValue)).data.uid == userId &&
+            get(/databases/$(database)/documents/phone_index/$(phoneValue)).data.registered == true
+          ) ||
+          (
+            phoneValue.matches('^92[0-9]{10}$') &&
+            exists(/databases/$(database)/documents/phone_index/$('+' + phoneValue)) &&
+            get(/databases/$(database)/documents/phone_index/$('+' + phoneValue)).data.uid == userId &&
+            get(/databases/$(database)/documents/phone_index/$('+' + phoneValue)).data.registered == true
+          )
+        );
+    }
+
+    function canReadUserForLogin(userId) {
+      return request.auth == null &&
+          ('phone' in resource.data) &&
+          phoneIndexMapsToUser(resource.data.phone, userId);
+    }
+
+    function changesDealOutcomeFields() {
+      return request.resource.data.diff(resource.data).changedKeys().hasAny([
+        'outcomeStatus',
+        'outcomeNote',
+        'outcomeUpdatedBy',
+        'outcomeUpdatedAt'
+      ]);
+    }
+
+    function isSellerDealOutcomeUpdate() {
+      return request.auth != null &&
+          request.auth.uid == resource.data.sellerId &&
+          immutableField('sellerId') &&
+          immutableField('buyerId') &&
+          immutableField('listingId') &&
+          request.resource.data.diff(resource.data).changedKeys().hasOnly([
+            'outcomeStatus',
+            'outcomeNote',
+            'outcomeUpdatedBy',
+            'outcomeUpdatedAt',
+            'updatedAt'
+          ]) &&
+          request.resource.data.outcomeStatus is string &&
+          request.resource.data.outcomeNote is string &&
+          request.resource.data.outcomeStatus in [
+            'pending_contact',
+            'successful',
+            'failed',
+            'cancelled',
+            'disputed',
+            'no_bids'
+          ] &&
+          request.resource.data.outcomeUpdatedBy == request.auth.uid;
     }
 
     function protectsListingAiFields() {
@@ -151,6 +226,8 @@ service cloud.firestore {
                 isAdminUid() ||
                 (
                   resource.data.sellerId == request.auth.uid &&
+                  immutableField('sellerId') &&
+                  immutableField('createdAt') &&
                   protectsListingAiFields()
                 )
               )
@@ -188,7 +265,29 @@ service cloud.firestore {
 
     match /admin_alerts/{alertId} {
       allow read: if isAdminUid();
-      allow create: if isSignedIn();
+      allow create: if isSignedIn() &&
+          request.resource.data.type is string &&
+          (
+            (
+              request.resource.data.type == 'FRAUD_ALERT' &&
+              request.resource.data.userId == request.auth.uid &&
+              request.resource.data.listingId is string &&
+              request.resource.data.listingId.size() > 0 &&
+              request.resource.data.bidId is string &&
+              request.resource.data.bidId.size() > 0 &&
+              request.resource.data.timestamp is timestamp
+            ) ||
+            (
+              request.resource.data.type == 'payout_ready' &&
+              request.resource.data.dealId is string &&
+              request.resource.data.dealId.size() > 0 &&
+              request.resource.data.processed == false &&
+              (
+                isAdminUid() ||
+                isDealParticipant(request.resource.data.dealId)
+              )
+            )
+          );
       allow update, delete: if isAdminUid();
     }
 
@@ -213,24 +312,97 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow read: if isSignedIn();
+      allow read: if isAdminUid() ||
+          (isSignedIn() && request.auth.uid == userId) ||
+          canReadUserForLogin(userId);
       allow create: if isSignedIn() && userId == request.auth.uid;
-      allow update: if isSignedIn() &&
-          (
-            userId == request.auth.uid ||
-            isAdminUid()
-          );
-      allow delete: if isAdminUid();
+      allow update: if isAdminUid() || (isSignedIn() && request.auth.uid == userId);
+      allow delete: if isSignedIn() && request.auth.uid == userId;
 
       match /watchlist/{listingId} {
         allow read: if isSignedIn() && userId == request.auth.uid;
         allow create, update, delete: if isSignedIn() && userId == request.auth.uid;
       }
+
+      match /transactions/{transactionId} {
+        allow read: if isAdminUid() || (isSignedIn() && userId == request.auth.uid);
+        allow create, update, delete: if isAdminUid();
+      }
+    }
+
+    match /admin_action_logs/{logId} {
+      allow read, write: if isAdminUid();
+    }
+
+    match /revenue_ledger/{entryId} {
+      allow read, write: if isAdminUid();
+    }
+
+    match /transactions/{transactionId} {
+      allow read, write: if isAdminUid();
+    }
+
+    match /transaction_audit/{auditId} {
+      allow read, write: if isAdminUid();
+    }
+
+    match /phone_index/{phone} {
+      // Public doc-level existence lookup for signup duplicate check.
+      allow get: if true;
+      allow list: if false;
+
+      allow create: if isAdminUid() || (
+          isSignedIn() &&
+          request.resource.data.uid == request.auth.uid &&
+          request.resource.data.phone == phone &&
+          request.resource.data.registered == true
+        );
+
+      allow update: if isAdminUid() || (
+          isSignedIn() &&
+          resource.data.uid == request.auth.uid &&
+          request.resource.data.uid == request.auth.uid &&
+          request.resource.data.phone == phone &&
+          request.resource.data.registered == true
+        );
+
+      allow delete: if isAdminUid();
+    }
+
+    match /app_settings/{settingId} {
+      allow read: if true;
+      allow create, update, delete: if isAdminUid();
     }
 
     match /deals/{dealId} {
       allow read: if isSignedIn();
-      allow create, update: if isSignedIn();
+      allow create: if isSignedIn() &&
+          request.resource.data.listingId is string &&
+          request.resource.data.listingId.size() > 0 &&
+          request.resource.data.buyerId is string &&
+          request.resource.data.buyerId.size() > 0 &&
+          request.resource.data.sellerId is string &&
+          request.resource.data.sellerId.size() > 0 &&
+          (
+            isAdminUid() ||
+            request.resource.data.buyerId == request.auth.uid ||
+            request.resource.data.sellerId == request.auth.uid
+          );
+      allow update: if isSignedIn() &&
+          (
+            isAdminUid() ||
+            isSellerDealOutcomeUpdate() ||
+            (
+              !changesDealOutcomeFields() &&
+              (
+                resource.data.buyerId == request.auth.uid ||
+                resource.data.sellerId == request.auth.uid
+              ) &&
+              immutableField('buyerId') &&
+              immutableField('sellerId') &&
+              immutableField('listingId')
+            )
+          );
       allow delete: if isAdminUid();
 
       match /messages/{messageId} {
@@ -267,6 +439,7 @@ service cloud.firestore {
           request.resource.data.type is string &&
           request.resource.data.type in [
             'LISTING_APPROVED',
+            'LISTING_REJECTED',
             'NEW_BID_RECEIVED',
             'BID_PLACED_CONFIRMATION',
             'OUTBID',

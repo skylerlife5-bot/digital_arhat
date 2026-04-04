@@ -6,6 +6,7 @@ import '../../core/constants.dart';
 import '../../core/app_colors.dart';
 import '../../core/widgets/customer_support_button.dart';
 import '../../core/widgets/glass_button.dart';
+import '../../routes.dart';
 import '../../services/bidding_service.dart';
 import '../../services/bid_eligibility_service.dart';
 import '../../services/marketplace_service.dart';
@@ -86,6 +87,92 @@ class _BidDialogState extends State<BidDialog> {
         .snapshots();
   }
 
+  static const String _verificationApproved = 'approved';
+  static const String _verificationPendingReview = 'pending_review';
+  static const String _verificationUnverified = 'unverified';
+
+  Future<String> _getCurrentUserBidVerificationState() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return _verificationUnverified;
+
+    final userSnap = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .get();
+    final data = userSnap.data() ?? <String, dynamic>{};
+
+    bool truthy(dynamic v) {
+      if (v is bool) return v;
+      if (v is num) return v != 0;
+      final t = (v ?? '').toString().trim().toLowerCase();
+      return t == 'true' || t == '1' || t == 'yes';
+    }
+
+    final String verificationStatus =
+        (data['verificationStatus'] ?? '').toString().trim().toLowerCase();
+
+    final bool isApproved =
+        truthy(data['cnicVerified']) ||
+        truthy(data['isCnicVerified']) ||
+        truthy(data['isCNICVerified']) ||
+        verificationStatus == _verificationApproved;
+
+    if (isApproved) return _verificationApproved;
+    if (verificationStatus == _verificationPendingReview) {
+      return _verificationPendingReview;
+    }
+    return _verificationUnverified;
+  }
+
+  Future<void> _showPendingReviewDialog() async {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('آپ کی تصدیق زیرِ جائزہ ہے'),
+          content: const Text(
+            'آپ کی معلومات کا جائزہ لیا جا رہا ہے۔ منظوری کے بعد آپ بولی لگا سکیں گے',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('ٹھیک ہے'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _showBidVerificationGateDialog() async {
+    final action = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('بولی لگانے کے لیے تصدیق ضروری ہے'),
+          content: const Text(
+            'آپ منڈی دیکھ سکتے ہیں، لیکن پہلی بار بولی لگانے کے لیے شناخت کی تصدیق مکمل کرنا لازمی ہے',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop('later'),
+              child: const Text('بعد میں'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop('verify'),
+              child: const Text('ابھی تصدیق کریں'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (action == 'verify') {
+      if (!mounted) return;
+      Navigator.of(context).pushNamed(Routes.masterSignUp);
+    }
+  }
+
   void _submitBid() async {
     if (_isSubmitting) return;
 
@@ -114,6 +201,17 @@ class _BidDialogState extends State<BidDialog> {
           ),
         );
       }
+      return;
+    }
+
+    final String verificationState =
+        await _getCurrentUserBidVerificationState();
+    if (verificationState == _verificationPendingReview) {
+      await _showPendingReviewDialog();
+      return;
+    }
+    if (verificationState != _verificationApproved) {
+      await _showBidVerificationGateDialog();
       return;
     }
 

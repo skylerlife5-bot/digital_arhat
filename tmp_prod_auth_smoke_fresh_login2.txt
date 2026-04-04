@@ -1,0 +1,5 @@
+﻿
+04-03 22:26:18.159  3694  3694 I flutter : [AUTH_WRAPPER] 
+firebaseAuthUid=empty persistedUid=empty route=welcome
+
+

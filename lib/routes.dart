@@ -11,6 +11,7 @@ import 'auth/set_password_screen.dart';
 import 'auth/verification/liveness_detection_screen.dart';
 import 'auth/verification_pending_screen.dart';
 import 'bidding/place_bid_screen.dart';
+import 'dashboard/admin/admin_completion_reports_screen.dart';
 import 'dashboard/admin/admin_dashboard.dart';
 import 'dashboard/admin/listing_moderation.dart';
 import 'dashboard/buyer/buyer_dashboard.dart';
@@ -45,6 +46,7 @@ class Routes {
   static const String adminDashboard = '/admin';
   static const String adminModeration = '/admin-moderation';
   static const String adminPayments = '/admin-payments';
+  static const String adminCompletionReports = '/admin-completion-reports';
 
   static const String forgotPasswordOtp = '/forgot-password-otp';
   static const String otp = '/otp';
@@ -66,8 +68,7 @@ class Routes {
 
   static Map<String, WidgetBuilder> getRoutes() {
     return {
-      splash: (context) =>
-        const SplashScreen(autoNavigate: true, nextRoute: welcome),
+      splash: (context) => const AuthWrapper(),
       welcome: (context) => const WelcomeScreen(),
       createAccount: (context) => const CreateAccountScreen(),
       masterSignUp: (context) => const MasterSignUpScreen(),
@@ -118,6 +119,8 @@ class Routes {
 
       adminDashboard: (context) => const AdminDashboard(),
       adminModeration: (context) => const ListingModeration(),
+      adminCompletionReports: (context) =>
+          const AdminCompletionReportsScreen(),
       adminPayments: (context) => const Scaffold(
         body: Center(
           child: Text('Phase-2 payment verification is disabled in Phase-1.'),

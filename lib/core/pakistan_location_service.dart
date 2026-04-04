@@ -9,26 +9,67 @@ import 'dart:convert';
 
 import 'package:flutter/services.dart';
 
+import 'location_display_helper.dart';
 import 'market_hierarchy.dart';
+
+class BilingualLocationOption {
+  const BilingualLocationOption({
+    required this.code,
+    required this.labelEn,
+    required this.labelUr,
+  });
+
+  final String code;
+  final String labelEn;
+  final String labelUr;
+
+  String get bilingualLabel => LocationDisplayHelper.bilingualLabelFromParts(
+    labelEn,
+    candidateUrdu: labelUr,
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Internal node types (lightweight – English name only, matching Add Listing)
 // ---------------------------------------------------------------------------
 
 class _Leaf {
-  const _Leaf({required this.nameEn});
+  const _Leaf({required this.nameEn, required this.nameUr});
   final String nameEn;
+  final String nameUr;
 }
 
 class _District {
-  const _District({required this.nameEn, required this.tehsils});
+  const _District({
+    required this.nameEn,
+    required this.nameUr,
+    required this.tehsils,
+  });
   final String nameEn;
-  final List<_Leaf> tehsils;
+  final String nameUr;
+  final List<_Tehsil> tehsils;
+}
+
+class _Tehsil {
+  const _Tehsil({
+    required this.nameEn,
+    required this.nameUr,
+    required this.cities,
+  });
+
+  final String nameEn;
+  final String nameUr;
+  final List<_Leaf> cities;
 }
 
 class _Province {
-  const _Province({required this.nameEn, required this.districts});
+  const _Province({
+    required this.nameEn,
+    required this.nameUr,
+    required this.districts,
+  });
   final String nameEn;
+  final String nameUr;
   final List<_District> districts;
 }
 
@@ -62,6 +103,7 @@ class PakistanLocationService {
         final pMap = pItem.cast<String, dynamic>();
         final pEn = (pMap['name_en'] ?? '').toString().trim();
         if (pEn.isEmpty) continue;
+        final pUr = (pMap['name_ur'] ?? '').toString().trim();
 
         final districts = <_District>[];
         final districtsRaw = pMap['districts'];
@@ -71,21 +113,42 @@ class PakistanLocationService {
             final dMap = dItem.cast<String, dynamic>();
             final dEn = (dMap['name_en'] ?? '').toString().trim();
             if (dEn.isEmpty) continue;
+            final dUr = (dMap['name_ur'] ?? '').toString().trim();
 
-            final tehsils = <_Leaf>[];
+            final tehsils = <_Tehsil>[];
             final tehsilsRaw = dMap['tehsils'];
             if (tehsilsRaw is List) {
               for (final tItem in tehsilsRaw) {
                 if (tItem is! Map) continue;
                 final tMap = tItem.cast<String, dynamic>();
                 final tEn = (tMap['name_en'] ?? '').toString().trim();
-                if (tEn.isNotEmpty) tehsils.add(_Leaf(nameEn: tEn));
+                if (tEn.isEmpty) continue;
+
+                final tUr = (tMap['name_ur'] ?? '').toString().trim();
+                final cities = <_Leaf>[];
+                final citiesRaw = tMap['cities'];
+                if (citiesRaw is List) {
+                  for (final cItem in citiesRaw) {
+                    if (cItem is! Map) continue;
+                    final cMap = cItem.cast<String, dynamic>();
+                    final cEn = (cMap['name_en'] ?? '').toString().trim();
+                    if (cEn.isEmpty) continue;
+                    final cUr = (cMap['name_ur'] ?? '').toString().trim();
+                    cities.add(_Leaf(nameEn: cEn, nameUr: cUr));
+                  }
+                }
+
+                tehsils.add(_Tehsil(nameEn: tEn, nameUr: tUr, cities: cities));
               }
             }
-            districts.add(_District(nameEn: dEn, tehsils: tehsils));
+            districts.add(
+              _District(nameEn: dEn, nameUr: dUr, tehsils: tehsils),
+            );
           }
         }
-        provinces.add(_Province(nameEn: pEn, districts: districts));
+        provinces.add(
+          _Province(nameEn: pEn, nameUr: pUr, districts: districts),
+        );
       }
 
       if (provinces.isNotEmpty) {
@@ -108,6 +171,33 @@ class PakistanLocationService {
     return PakistanLocationHierarchy.provinces;
   }
 
+  List<BilingualLocationOption> get provinceOptions {
+    if (_loaded && _provinces.isNotEmpty) {
+      return _provinces
+          .map(
+            (p) => BilingualLocationOption(
+              code: _stableCode(p.nameEn),
+              labelEn: p.nameEn,
+              labelUr: LocationDisplayHelper.resolvedUrduLabel(
+                p.nameEn,
+                candidateUrdu: p.nameUr,
+              ),
+            ),
+          )
+          .toList(growable: false);
+    }
+
+    return PakistanLocationHierarchy.provinces
+        .map(
+          (name) => BilingualLocationOption(
+            code: _stableCode(name),
+            labelEn: name,
+            labelUr: LocationDisplayHelper.resolvedUrduLabel(name),
+          ),
+        )
+        .toList(growable: false);
+  }
+
   List<String> districtsForProvince(String province) {
     if (_loaded && _provinces.isNotEmpty) {
       final match = _provinces.where(
@@ -120,6 +210,40 @@ class PakistanLocationService {
       }
     }
     return PakistanLocationHierarchy.districtsForProvince(province);
+  }
+
+  List<BilingualLocationOption> districtOptions(String province) {
+    if (_loaded && _provinces.isNotEmpty) {
+      final String provinceLower = province.trim().toLowerCase();
+      final Iterable<_Province> match = _provinces.where(
+        (p) => p.nameEn.toLowerCase() == provinceLower,
+      );
+      if (match.isNotEmpty) {
+        return match.first.districts
+            .map(
+              (d) => BilingualLocationOption(
+                code: _stableCode(d.nameEn),
+                labelEn: d.nameEn,
+                labelUr: LocationDisplayHelper.resolvedUrduLabel(
+                  d.nameEn,
+                  candidateUrdu: d.nameUr,
+                ),
+              ),
+            )
+            .toList(growable: false);
+      }
+    }
+
+    final List<String> districts = districtsForProvince(province);
+    return districts
+        .map(
+          (name) => BilingualLocationOption(
+            code: _stableCode(name),
+            labelEn: name,
+            labelUr: LocationDisplayHelper.resolvedUrduLabel(name),
+          ),
+        )
+        .toList(growable: false);
   }
 
   List<String> tehsilsForDistrict(String district) {
@@ -135,23 +259,120 @@ class PakistanLocationService {
     return PakistanLocationHierarchy.tehsilsForDistrict(district);
   }
 
+  List<BilingualLocationOption> tehsilOptions(String district) {
+    if (_loaded && _provinces.isNotEmpty) {
+      final String districtLower = district.trim().toLowerCase();
+      for (final province in _provinces) {
+        for (final d in province.districts) {
+          if (d.nameEn.toLowerCase() != districtLower) continue;
+          return d.tehsils
+              .map(
+                (t) => BilingualLocationOption(
+                  code: _stableCode(t.nameEn),
+                  labelEn: t.nameEn,
+                  labelUr: LocationDisplayHelper.resolvedUrduLabel(
+                    t.nameEn,
+                    candidateUrdu: t.nameUr,
+                  ),
+                ),
+              )
+              .toList(growable: false);
+        }
+      }
+    }
+
+    final List<String> tehsils = tehsilsForDistrict(district);
+    return tehsils
+        .map(
+          (name) => BilingualLocationOption(
+            code: _stableCode(name),
+            labelEn: name,
+            labelUr: LocationDisplayHelper.resolvedUrduLabel(name),
+          ),
+        )
+        .toList(growable: false);
+  }
+
   /// Returns city/area options for a given district+tehsil.
-  /// Mirrors Add Listing's _cityOptions getter:
-  ///   – if the JSON asset is loaded → [tehsil, district] (same as Add Listing)
-  ///   – otherwise → PakistanLocationHierarchy fallback
-  List<String> cityOptions({
+  /// Suggestions are optional and never required for writable city input.
+  List<String> cityOptions({required String district, required String tehsil}) {
+    if (_loaded && _provinces.isNotEmpty) {
+      final districtClean = district.trim().toLowerCase();
+      final tehsilClean = tehsil.trim().toLowerCase();
+      if (districtClean.isNotEmpty && tehsilClean.isNotEmpty) {
+        for (final province in _provinces) {
+          for (final d in province.districts) {
+            if (d.nameEn.toLowerCase() != districtClean) continue;
+            for (final t in d.tehsils) {
+              if (t.nameEn.toLowerCase() != tehsilClean) continue;
+              final cities = t.cities
+                  .map((c) => c.nameEn)
+                  .where((c) => c.trim().isNotEmpty)
+                  .toList(growable: false);
+              if (cities.isNotEmpty) return cities;
+            }
+          }
+        }
+      }
+      return const <String>[];
+    }
+    return const <String>[];
+  }
+
+  List<BilingualLocationOption> cityOptionsLocalized({
     required String district,
     required String tehsil,
   }) {
     if (_loaded && _provinces.isNotEmpty) {
-      if (district.isNotEmpty && tehsil.isNotEmpty) {
-        return <String>[tehsil, district];
+      final String districtLower = district.trim().toLowerCase();
+      final String tehsilLower = tehsil.trim().toLowerCase();
+
+      for (final province in _provinces) {
+        for (final d in province.districts) {
+          if (d.nameEn.toLowerCase() != districtLower) continue;
+          for (final t in d.tehsils) {
+            if (t.nameEn.toLowerCase() != tehsilLower) continue;
+            final List<BilingualLocationOption> localized = t.cities
+                .map(
+                  (c) => BilingualLocationOption(
+                    code: _stableCode(c.nameEn),
+                    labelEn: c.nameEn,
+                    labelUr: LocationDisplayHelper.resolvedUrduLabel(
+                      c.nameEn,
+                      candidateUrdu: c.nameUr,
+                    ),
+                  ),
+                )
+                .where((c) => c.labelEn.trim().isNotEmpty)
+                .toList(growable: false);
+            if (localized.isNotEmpty) {
+              return localized;
+            }
+            return const <BilingualLocationOption>[];
+          }
+        }
       }
-      return const <String>[];
     }
-    return PakistanLocationHierarchy.citiesForTehsil(
-      district: district,
-      tehsil: tehsil,
-    );
+
+    final List<String> cities = cityOptions(district: district, tehsil: tehsil);
+    return cities
+        .map(
+          (name) => BilingualLocationOption(
+            code: _stableCode(name),
+            labelEn: name,
+            labelUr: LocationDisplayHelper.urduFor(name),
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  String _stableCode(String input) {
+    final String normalized = input
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'_+'), '_')
+        .replaceAll(RegExp(r'^_|_$'), '');
+    return normalized.isEmpty ? 'loc_unknown' : normalized;
   }
 }

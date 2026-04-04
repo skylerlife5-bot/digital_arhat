@@ -1,7 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 
 class Phase1NotificationType {
   static const String listingApproved = 'LISTING_APPROVED';
+  static const String listingRejected = 'LISTING_REJECTED';
   static const String newBidReceived = 'NEW_BID_RECEIVED';
   static const String bidPlacedConfirmation = 'BID_PLACED_CONFIRMATION';
   static const String outbid = 'OUTBID';
@@ -12,6 +14,7 @@ class Phase1NotificationType {
 
   static const Set<String> all = <String>{
     listingApproved,
+    listingRejected,
     newBidReceived,
     bidPlacedConfirmation,
     outbid,
@@ -65,6 +68,9 @@ class Phase1NotificationEngine {
       eventSuffix: eventSuffix,
     );
     final docRef = _db.collection('notifications').doc(eventKey);
+    debugPrint(
+      '[NotifWrite] type=$normalizedType toUid=$normalizedUser listingId=$normalizedListing bidId=${(bidId ?? '').trim()} role=${(targetRole ?? '').trim().toLowerCase()}',
+    );
 
     await _db.runTransaction((transaction) async {
       final existing = await transaction.get(docRef);
@@ -89,6 +95,7 @@ class Phase1NotificationEngine {
         'titleUr': urduTitle,
         'bodyUr': urduBody,
         'isRead': false,
+        'read': false,
         'timestamp': FieldValue.serverTimestamp(),
         'createdAt': FieldValue.serverTimestamp(),
         'phase': 'PHASE_1',
@@ -133,6 +140,13 @@ class Phase1NotificationEngine {
           bodyEn: 'Your listing is now live.',
           titleUr: 'لسٹنگ منظور ہوگئی',
           bodyUr: 'آپ کی لسٹنگ اب لائیو ہے',
+        );
+      case Phase1NotificationType.listingRejected:
+        return const _NotificationCopy(
+          titleEn: 'Listing Rejected',
+          bodyEn: 'Your listing was rejected by admin review.',
+          titleUr: 'لسٹنگ مسترد ہوگئی',
+          bodyUr: 'ایڈمن ریویو میں آپ کی لسٹنگ مسترد ہوگئی',
         );
       case Phase1NotificationType.newBidReceived:
         return const _NotificationCopy(

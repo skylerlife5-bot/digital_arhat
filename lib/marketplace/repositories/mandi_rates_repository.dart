@@ -214,20 +214,48 @@ class MandiRatesRepository {
     }
 
     final list = _dedupe(merged.values.toList(growable: false));
+    final strictCityOnly = _filterByUserCity(
+      rates: list,
+      userCity: city,
+      cityAliases: cityAliases,
+    );
     _lastFetchTrace = MandiFetchTrace(
       fetchedDocs: fetchedDocs,
       parsedValidItems: parsedValidItems,
-      postDedupItems: list.length,
+      postDedupItems: strictCityOnly.length,
     );
     debugPrint(
       '[MANDI_FETCH_TRACE] fetchedDocs=$fetchedDocs '
       'parsedValidItems=$parsedValidItems '
-      'postDedupItems=${list.length}',
+      'postDedupItems=${strictCityOnly.length} '
+      'strictCity=${city.isEmpty ? 'none' : city}',
     );
-    if (list.isNotEmpty) {
-      _memoryCache = _dedupe(<LiveMandiRate>[...list, ..._memoryCache]);
+    if (strictCityOnly.isNotEmpty) {
+      _memoryCache = _dedupe(<LiveMandiRate>[...strictCityOnly, ..._memoryCache]);
     }
-    return list.take(targetCount).toList(growable: false);
+    return strictCityOnly.take(targetCount).toList(growable: false);
+  }
+
+  List<LiveMandiRate> _filterByUserCity({
+    required List<LiveMandiRate> rates,
+    required String userCity,
+    required List<String> cityAliases,
+  }) {
+    final normalizedAliases = cityAliases
+        .map((value) => value.trim().toLowerCase())
+        .where((value) => value.isNotEmpty)
+        .toSet();
+    final normalizedCity = userCity.trim().toLowerCase();
+    if (normalizedCity.isNotEmpty) {
+      normalizedAliases.add(normalizedCity);
+    }
+    if (normalizedAliases.isEmpty) return rates;
+
+    return rates.where((rate) {
+      final rateCity = rate.city.trim().toLowerCase();
+      if (rateCity.isEmpty) return false;
+      return normalizedAliases.contains(rateCity);
+    }).toList(growable: false);
   }
 
   Future<_QueryFetchResult> _fetchByFieldValue({

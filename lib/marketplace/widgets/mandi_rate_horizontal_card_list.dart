@@ -23,7 +23,7 @@ class MandiRateHorizontalCardList extends StatelessWidget {
           border: Border.all(color: Colors.white.withValues(alpha: 0.11)),
         ),
         child: const Text(
-          'No live mandi rates available right now. Pull to refresh.\nاس وقت منڈی ریٹس دستیاب نہیں، ریفریش کریں۔',
+          'اس وقت صاف منڈی ریٹس دستیاب نہیں ہیں۔\nچند لمحوں بعد دوبارہ دیکھیں۔',
           style: TextStyle(color: Colors.white70, fontSize: 11.5),
         ),
       );

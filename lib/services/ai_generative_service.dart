@@ -2,6 +2,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
+import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:http/http.dart' as http;
 
 import '../core/constants.dart';
@@ -251,8 +252,11 @@ class MandiIntelligenceService {
     }
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      final error = (body['error'] ?? body['errorMessage'] ?? 'FUNCTION_HTTP_${response.statusCode}')
-          .toString();
+      final error =
+          (body['error'] ??
+                  body['errorMessage'] ??
+                  'FUNCTION_HTTP_${response.statusCode}')
+              .toString();
       throw Exception(error);
     }
 
@@ -687,10 +691,20 @@ class MandiIntelligenceService {
 
   Future<CnicExtractionResult> extractPakistaniCnicFieldsFromImage({
     required Uint8List imageBytes,
+    String? imagePath,
     String mimeType = 'image/jpeg',
+    String? expectedSide,
   }) async {
-    debugPrint('[CNIC_AI] extract_start | payload={mimeType: $mimeType, imageBytesLength: ${imageBytes.length}}');
+    debugPrint(
+      '[CNIC] extraction_started mimeType=$mimeType bytes=${imageBytes.length}',
+    );
+    debugPrint(
+      '[CNIC_AI] extract_start | payload={mimeType: $mimeType, imageBytesLength: ${imageBytes.length}}',
+    );
     if (imageBytes.isEmpty) {
+      debugPrint(
+        '[CNIC] ERROR stage=input code=EMPTY_IMAGE message=No image bytes received',
+      );
       debugPrint('[CNIC_AI] extract_short_circuit_empty_image');
       return const CnicExtractionResult(
         success: false,
@@ -700,80 +714,435 @@ class MandiIntelligenceService {
     }
 
     await _ensureInitialized();
-    try {
-      final response = await _postFunctionJson(
-        functionName: 'aiExtractCnic',
-        payload: <String, dynamic>{
-          'imageBase64': base64Encode(imageBytes),
-          'mimeType': mimeType,
-        },
-      );
+    var backendError = '';
+    var backendRawResponse = '';
+    var backendFunctionUsed = '';
 
+    try {
+      const backendFunctions = <String>['aiExtractCnicV3', 'aiExtractCnic'];
+      Map<String, dynamic> response = <String, dynamic>{};
+      Object? lastBackendException;
+
+      for (final functionName in backendFunctions) {
+        try {
+          debugPrint('[CNIC] backend_started function=$functionName');
+          response = await _postFunctionJson(
+            functionName: functionName,
+            payload: <String, dynamic>{
+              'imageBase64': base64Encode(imageBytes),
+              'mimeType': mimeType,
+            },
+          );
+          backendFunctionUsed = functionName;
+          break;
+        } catch (e) {
+          lastBackendException = e;
+          final errorText = e.toString();
+          final bool isV3NotFound =
+              functionName == 'aiExtractCnicV3' &&
+              errorText.contains('FUNCTION_HTTP_404');
+          debugPrint(
+            '[CNIC] ERROR stage=backend code=FUNCTION_CALL_FAILED message=function=$functionName error=$errorText',
+          );
+          if (isV3NotFound) {
+            debugPrint(
+              '[CNIC] backend_fallback function=aiExtractCnic reason=V3_NOT_FOUND',
+            );
+            continue;
+          }
+          rethrow;
+        }
+      }
+
+      if (backendFunctionUsed.isEmpty) {
+        throw lastBackendException ?? Exception('BACKEND_FUNCTION_UNAVAILABLE');
+      }
+
+      backendRawResponse = (response['rawResponse'] ?? '').toString();
+      debugPrint(
+        '[CNIC] backend_response function=$backendFunctionUsed payload=${response.toString()}',
+      );
       debugPrint('[CNIC_AI] extract_raw_response | ${response.toString()}');
 
       final success = response['success'] == true;
       if (!success) {
-        final aiError = (response['errorMessage'] ?? '').toString().trim();
-        debugPrint('[CNIC_AI] extract_failed_success_false | error=$aiError');
-        return CnicExtractionResult(
-          success: false,
-          errorMessage: _mapCnicErrorToSafeMessage(aiError),
-          rawResponse: (response['rawResponse'] ?? '').toString(),
+        backendError = (response['errorMessage'] ?? '').toString().trim();
+        debugPrint(
+          '[CNIC_AI] extract_failed_success_false | error=$backendError',
+        );
+        debugPrint(
+          '[CNIC] ERROR stage=backend code=SUCCESS_FALSE message=$backendError',
+        );
+      } else {
+        final result = _buildBackendCnicResult(response);
+        if (result.success) {
+          _logCnicParsedResult(result);
+          return result;
+        }
+        backendError = result.errorMessage.isEmpty
+            ? 'backend_rejected_document_or_side'
+            : result.errorMessage;
+        debugPrint(
+          '[CNIC] ERROR stage=backend code=DOCUMENT_REJECTED message=$backendError',
         );
       }
-
-      final name = (response['name'] ?? '').toString().trim();
-      final fatherName = (response['fatherName'] ?? '').toString().trim();
-      final normalizedCnic = _normalizeCnic(
-        (response['cnicNumber'] ?? '').toString(),
-      );
-      final detectedSide = _normalizeDetectedSide(
-        (response['detectedSide'] ?? '').toString(),
-      );
-      final isCnicDocument = response['isCnicDocument'] == true;
-      final dateOfBirth = (response['dateOfBirth'] ?? '').toString().trim();
-      final expiryDate = (response['expiryDate'] ?? '').toString().trim();
-      final confidence = (response['confidence'] ?? 'medium')
-          .toString()
-          .toLowerCase()
-          .trim();
-
-      debugPrint('[CNIC_AI] extract_parsed_fields | name=$name | fatherName=$fatherName | cnicNumber=$normalizedCnic | detectedSide=$detectedSide | isCnicDocument=$isCnicDocument | dob=$dateOfBirth | expiry=$expiryDate | confidence=$confidence');
-
-      if (!isCnicDocument || detectedSide == 'unknown') {
-        debugPrint('[CNIC_AI] extract_rejected_document_or_side | isCnicDocument=$isCnicDocument | detectedSide=$detectedSide');
-        return CnicExtractionResult(
-          success: false,
-          errorMessage:
-              'Could not read CNIC clearly. Please retake the image.\nشناختی کارڈ واضح نہیں پڑھا جا سکا۔ براہ کرم دوبارہ تصویر لیں۔',
-          rawResponse: (response['rawResponse'] ?? '').toString(),
-        );
-      }
-
-      final bool needsReview =
-          confidence == 'low' || name.isEmpty || normalizedCnic.isEmpty;
-
-      return CnicExtractionResult(
-        success: true,
-        name: name,
-        fatherName: fatherName,
-        cnicNumber: normalizedCnic,
-        detectedSide: detectedSide,
-        isCnicDocument: isCnicDocument,
-        dateOfBirth: dateOfBirth,
-        expiryDate: expiryDate,
-        confidence: confidence.isEmpty ? 'medium' : confidence,
-        needsReview: needsReview,
-        rawResponse: (response['rawResponse'] ?? '').toString(),
-      );
     } catch (e) {
+      backendError = e.toString();
+      debugPrint(
+        '[CNIC] ERROR stage=backend code=FUNCTION_EXCEPTION message=$backendError',
+      );
       debugPrint('[CNIC_AI] extract_exception | ${e.toString()}');
-      return const CnicExtractionResult(
-        success: false,
-        errorMessage:
-            'AI service is temporarily unavailable. Please try again.\nAI سروس عارضی طور پر دستیاب نہیں۔ براہ کرم دوبارہ کوشش کریں۔',
+    }
+
+    if (imagePath != null && imagePath.trim().isNotEmpty) {
+      return _extractPakistaniCnicFieldsViaMlKit(
+        imagePath: imagePath,
+        backendError: backendError,
+        backendRawResponse: backendRawResponse,
+        expectedSide: expectedSide,
       );
     }
+
+    return CnicExtractionResult(
+      success: false,
+      errorMessage: _mapCnicErrorToSafeMessage(backendError),
+      rawResponse: backendRawResponse,
+      pipeline: 'backend',
+    );
+  }
+
+  CnicExtractionResult _buildBackendCnicResult(Map<String, dynamic> response) {
+    final name = (response['name'] ?? '').toString().trim();
+    final fatherName = (response['fatherName'] ?? '').toString().trim();
+    final normalizedCnic = _normalizeCnic(
+      (response['cnicNumber'] ?? '').toString(),
+    );
+    final detectedSide = _normalizeDetectedSide(
+      (response['detectedSide'] ?? '').toString(),
+    );
+    final isCnicDocument = response['isCnicDocument'] == true;
+    final dateOfBirth = (response['dateOfBirth'] ?? '').toString().trim();
+    final expiryDate = (response['expiryDate'] ?? '').toString().trim();
+    final confidence = (response['confidence'] ?? 'medium')
+        .toString()
+        .toLowerCase()
+        .trim();
+
+    debugPrint(
+      '[CNIC_AI] extract_parsed_fields | name=$name | fatherName=$fatherName | cnicNumber=$normalizedCnic | detectedSide=$detectedSide | isCnicDocument=$isCnicDocument | dob=$dateOfBirth | expiry=$expiryDate | confidence=$confidence',
+    );
+
+    if (!isCnicDocument || detectedSide == 'unknown') {
+      debugPrint(
+        '[CNIC_AI] extract_rejected_document_or_side | isCnicDocument=$isCnicDocument | detectedSide=$detectedSide',
+      );
+      return CnicExtractionResult(
+        success: false,
+        errorMessage:
+            'Could not read CNIC clearly. Please retake the image.\nشناختی کارڈ واضح نہیں پڑھا جا سکا۔ براہ کرم دوبارہ تصویر لیں۔',
+        rawResponse: (response['rawResponse'] ?? '').toString(),
+        pipeline: 'backend',
+      );
+    }
+
+    final needsReview =
+        confidence == 'low' || name.isEmpty || normalizedCnic.isEmpty;
+
+    return CnicExtractionResult(
+      success: true,
+      name: name,
+      fatherName: fatherName,
+      cnicNumber: normalizedCnic,
+      detectedSide: detectedSide,
+      isCnicDocument: isCnicDocument,
+      dateOfBirth: dateOfBirth,
+      expiryDate: expiryDate,
+      confidence: confidence.isEmpty ? 'medium' : confidence,
+      needsReview: needsReview,
+      rawResponse: (response['rawResponse'] ?? '').toString(),
+      pipeline: 'backend',
+    );
+  }
+
+  Future<CnicExtractionResult> _extractPakistaniCnicFieldsViaMlKit({
+    required String imagePath,
+    required String backendError,
+    required String backendRawResponse,
+    String? expectedSide,
+  }) async {
+    debugPrint('[CNIC] mlkit_started path=$imagePath');
+    TextRecognizer? recognizer;
+
+    try {
+      recognizer = TextRecognizer(script: TextRecognitionScript.latin);
+      debugPrint('[CNIC] mlkit_recognizer_initialized');
+      
+      final inputImage = InputImage.fromFilePath(imagePath);
+      final recognizedText = await recognizer.processImage(inputImage);
+      final rawText = recognizedText.text.trim();
+      debugPrint('[CNIC] mlkit_raw_text=$rawText');
+
+      if (rawText.isEmpty) {
+        debugPrint(
+          '[CNIC] ERROR stage=mlkit code=EMPTY_TEXT message=Text recognizer returned empty output',
+        );
+        return CnicExtractionResult(
+          success: false,
+          errorMessage: _mapCnicErrorToSafeMessage(backendError),
+          rawResponse: backendRawResponse,
+          pipeline: 'mlkit',
+          rawOcrText: rawText,
+        );
+      }
+
+      final result = _parsePakistaniCnicRawText(
+        rawText,
+        expectedSide: expectedSide,
+      );
+      _logCnicParsedResult(result);
+      if (!result.success) {
+        debugPrint(
+          '[CNIC] ERROR stage=parser code=CNIC_PARSE_FAILED message=Could not derive a valid Pakistani CNIC payload from OCR text',
+        );
+        return CnicExtractionResult(
+          success: false,
+          errorMessage: _mapCnicErrorToSafeMessage(backendError),
+          rawResponse: backendRawResponse,
+          pipeline: 'mlkit',
+          rawOcrText: rawText,
+        );
+      }
+      return result;
+    } catch (e) {
+      debugPrint(
+        '[CNIC] ERROR stage=mlkit code=TEXT_RECOGNIZER_EXCEPTION message=${e.toString()}',
+      );
+      return CnicExtractionResult(
+        success: false,
+        errorMessage: _mapCnicErrorToSafeMessage(backendError),
+        rawResponse: backendRawResponse,
+        pipeline: 'mlkit',
+      );
+    } finally {
+      if (recognizer != null) {
+        await recognizer.close();
+      }
+    }
+  }
+
+  CnicExtractionResult _parsePakistaniCnicRawText(
+    String rawText, {
+    String? expectedSide,
+  }) {
+    final lines = rawText
+        .split(RegExp(r'[\r\n]+'))
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .toList(growable: false);
+    final normalizedText = lines.join('\n');
+    final cnicNumber = _extractCnicNumberFromText(normalizedText);
+    final dates = RegExp(r'\b\d{2}[./-]\d{2}[./-]\d{4}\b')
+        .allMatches(normalizedText)
+        .map((match) => _normalizeDateString(match.group(0) ?? ''))
+        .where((value) => value.isNotEmpty)
+        .toList(growable: false);
+    final fatherName = _extractLabeledValue(lines, <RegExp>[
+      RegExp(r'^father\s*name\b', caseSensitive: false),
+      RegExp(r'^husband\s*name\b', caseSensitive: false),
+    ]);
+    final name = _extractLabeledValue(
+      lines,
+      <RegExp>[RegExp(r'^name\b', caseSensitive: false)],
+      excludedPatterns: <RegExp>[
+        RegExp(r'father\s*name', caseSensitive: false),
+        RegExp(r'husband\s*name', caseSensitive: false),
+      ],
+    );
+    final dateOfBirth =
+        _extractLabeledDate(lines, <RegExp>[
+          RegExp(r'date\s*of\s*birth', caseSensitive: false),
+          RegExp(r'\bdob\b', caseSensitive: false),
+        ]) ??
+        (dates.isNotEmpty ? dates.first : '');
+    final expiryDate =
+        _extractLabeledDate(lines, <RegExp>[
+          RegExp(r'date\s*of\s*expiry', caseSensitive: false),
+          RegExp(r'expiry', caseSensitive: false),
+          RegExp(r'valid\s*thru', caseSensitive: false),
+        ]) ??
+        (dates.length > 1 ? dates.last : '');
+    final detectedSide = _determineDetectedSideFromOcrText(normalizedText);
+    final normalizedExpectedSide = _normalizeDetectedSide(expectedSide ?? '');
+    final effectiveSide = detectedSide == 'unknown' &&
+            (normalizedExpectedSide == 'front' || normalizedExpectedSide == 'back')
+        ? normalizedExpectedSide
+        : detectedSide;
+    final isCnicDocument = _looksLikePakistaniCnic(
+      normalizedText,
+      cnicNumber: cnicNumber,
+    );
+    final hasUsefulExtraction =
+        cnicNumber.isNotEmpty ||
+        name.isNotEmpty ||
+        fatherName.isNotEmpty ||
+        dateOfBirth.isNotEmpty ||
+        expiryDate.isNotEmpty;
+    final success =
+        isCnicDocument &&
+        effectiveSide != 'unknown' &&
+        hasUsefulExtraction;
+    final needsReview =
+        cnicNumber.isEmpty || (effectiveSide == 'front' && name.isEmpty);
+
+    return CnicExtractionResult(
+      success: success,
+      name: name,
+      fatherName: fatherName,
+      cnicNumber: cnicNumber,
+      detectedSide: effectiveSide,
+      isCnicDocument: isCnicDocument,
+      dateOfBirth: dateOfBirth,
+      expiryDate: expiryDate,
+      confidence: needsReview ? 'medium' : 'high',
+      errorMessage: success
+          ? ''
+          : 'Could not read CNIC clearly. Please retake the image.\nشناختی کارڈ واضح نہیں پڑھا جا سکا۔ براہ کرم دوبارہ تصویر لیں۔',
+      needsReview: needsReview,
+      pipeline: 'mlkit',
+      rawOcrText: rawText,
+    );
+  }
+
+  void _logCnicParsedResult(CnicExtractionResult result) {
+    debugPrint('[CNIC] parsed_name=${result.name}');
+    debugPrint('[CNIC] parsed_father_name=${result.fatherName}');
+    debugPrint('[CNIC] parsed_cnic=${result.cnicNumber}');
+    debugPrint('[CNIC] parsed_dob=${result.dateOfBirth}');
+    debugPrint('[CNIC] parsed_expiry=${result.expiryDate}');
+  }
+
+  String _extractCnicNumberFromText(String rawText) {
+    final match = RegExp(
+      r'(?<!\d)(\d{5})\s*[- ]?\s*(\d{7})\s*[- ]?\s*(\d)(?!\d)',
+    ).firstMatch(rawText);
+    if (match == null) {
+      return '';
+    }
+    return _normalizeCnic(match.group(0) ?? '');
+  }
+
+  String? _extractLabeledDate(List<String> lines, List<RegExp> labels) {
+    final value = _extractLabeledValue(lines, labels);
+    if (value.isEmpty) {
+      return null;
+    }
+    final match = RegExp(r'\b\d{2}[./-]\d{2}[./-]\d{4}\b').firstMatch(value);
+    if (match == null) {
+      return null;
+    }
+    return _normalizeDateString(match.group(0) ?? '');
+  }
+
+  String _extractLabeledValue(
+    List<String> lines,
+    List<RegExp> labels, {
+    List<RegExp> excludedPatterns = const <RegExp>[],
+  }) {
+    for (var index = 0; index < lines.length; index++) {
+      final originalLine = lines[index];
+      final normalizedLine = _normalizeOcrLine(originalLine);
+      if (excludedPatterns.any((pattern) => pattern.hasMatch(normalizedLine))) {
+        continue;
+      }
+      if (!labels.any((pattern) => pattern.hasMatch(normalizedLine))) {
+        continue;
+      }
+
+      final inlineValue = _sanitizePotentialFieldValue(
+        originalLine.replaceFirst(RegExp(r'^[^:：]*[:：]?'), '').trim(),
+      );
+      if (inlineValue.isNotEmpty && !_looksLikeLabelOnly(inlineValue)) {
+        return inlineValue;
+      }
+
+      for (var nextIndex = index + 1; nextIndex < lines.length; nextIndex++) {
+        final candidate = _sanitizePotentialFieldValue(lines[nextIndex]);
+        if (candidate.isEmpty || _looksLikeLabelOnly(candidate)) {
+          continue;
+        }
+        return candidate;
+      }
+    }
+    return '';
+  }
+
+  String _normalizeOcrLine(String value) {
+    return value
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9:/ .-]'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
+  String _sanitizePotentialFieldValue(String value) {
+    return value
+        .replaceAll(RegExp(r'^[\s:：-]+'), '')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
+  bool _looksLikeLabelOnly(String value) {
+    final normalized = _normalizeOcrLine(value);
+    return normalized.isEmpty ||
+        normalized == 'name' ||
+        normalized == 'father name' ||
+        normalized == 'husband name' ||
+        normalized == 'identity number' ||
+        normalized == 'date of birth' ||
+        normalized == 'date of expiry';
+  }
+
+  String _normalizeDateString(String input) {
+    final match = RegExp(r'(\d{2})[./-](\d{2})[./-](\d{4})').firstMatch(input);
+    if (match == null) {
+      return input.trim();
+    }
+    return '${match.group(1)}/${match.group(2)}/${match.group(3)}';
+  }
+
+  String _determineDetectedSideFromOcrText(String rawText) {
+    final normalized = _normalizeOcrLine(rawText);
+    final hasFrontSignals =
+        normalized.contains('identity number') ||
+        normalized.contains('father name') ||
+        normalized.contains('date of birth') ||
+        normalized.contains('name');
+    final hasBackSignals =
+        normalized.contains('date of expiry') ||
+        normalized.contains('expiry') ||
+        normalized.contains('place of issue');
+
+    if (hasFrontSignals && !hasBackSignals) {
+      return 'front';
+    }
+    if (hasBackSignals && !hasFrontSignals) {
+      return 'back';
+    }
+    if (hasFrontSignals) {
+      return 'front';
+    }
+    if (hasBackSignals) {
+      return 'back';
+    }
+    return 'unknown';
+  }
+
+  bool _looksLikePakistaniCnic(String rawText, {required String cnicNumber}) {
+    final normalized = _normalizeOcrLine(rawText);
+    return cnicNumber.isNotEmpty ||
+        normalized.contains('identity number') ||
+        normalized.contains('national identity card') ||
+        normalized.contains('pakistan');
   }
 
   String _normalizeDetectedSide(String rawSide) {
@@ -927,6 +1296,8 @@ class CnicExtractionResult {
     this.errorMessage = '',
     this.needsReview = false,
     this.rawResponse = '',
+    this.pipeline = 'backend',
+    this.rawOcrText = '',
   });
 
   final bool success;
@@ -941,4 +1312,6 @@ class CnicExtractionResult {
   final String errorMessage;
   final bool needsReview;
   final String rawResponse;
+  final String pipeline;
+  final String rawOcrText;
 }

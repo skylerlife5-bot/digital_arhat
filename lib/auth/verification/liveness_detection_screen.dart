@@ -156,6 +156,78 @@ class _LivenessDetectionScreenState extends State<LivenessDetectionScreen> {
     );
   }
 
+  InputImage _buildInputImage(CameraImage image, CameraController controller) {
+    if (Platform.isIOS) {
+      final WriteBuffer allBytes = WriteBuffer();
+      for (final Plane plane in image.planes) {
+        allBytes.putUint8List(plane.bytes);
+      }
+      return InputImage.fromBytes(
+        bytes: allBytes.done().buffer.asUint8List(),
+        metadata: InputImageMetadata(
+          size: Size(image.width.toDouble(), image.height.toDouble()),
+          rotation:
+              InputImageRotationValue.fromRawValue(
+                controller.description.sensorOrientation,
+              ) ??
+              InputImageRotation.rotation0deg,
+          format: InputImageFormat.bgra8888,
+          bytesPerRow: image.planes.first.bytesPerRow,
+        ),
+      );
+    }
+
+    final Uint8List nv21Bytes = _convertYuv420ToNv21(image);
+    return InputImage.fromBytes(
+      bytes: nv21Bytes,
+      metadata: InputImageMetadata(
+        size: Size(image.width.toDouble(), image.height.toDouble()),
+        rotation:
+            InputImageRotationValue.fromRawValue(
+              controller.description.sensorOrientation,
+            ) ??
+            InputImageRotation.rotation0deg,
+        format: InputImageFormat.nv21,
+        bytesPerRow: image.width,
+      ),
+    );
+  }
+
+  Uint8List _convertYuv420ToNv21(CameraImage image) {
+    final int width = image.width;
+    final int height = image.height;
+    final int ySize = width * height;
+    final int uvSize = width * height ~/ 2;
+    final Uint8List nv21 = Uint8List(ySize + uvSize);
+
+    final Plane yPlane = image.planes[0];
+    final Plane uPlane = image.planes[1];
+    final Plane vPlane = image.planes[2];
+
+    int dstIndex = 0;
+    for (int row = 0; row < height; row++) {
+      final int rowOffset = row * yPlane.bytesPerRow;
+      for (int col = 0; col < width; col++) {
+        nv21[dstIndex++] = yPlane.bytes[rowOffset + col];
+      }
+    }
+
+    final int chromaHeight = height ~/ 2;
+    final int chromaWidth = width ~/ 2;
+    for (int row = 0; row < chromaHeight; row++) {
+      final int uRowOffset = row * uPlane.bytesPerRow;
+      final int vRowOffset = row * vPlane.bytesPerRow;
+      for (int col = 0; col < chromaWidth; col++) {
+        final int uIndex = uRowOffset + (col * uPlane.bytesPerPixel!);
+        final int vIndex = vRowOffset + (col * vPlane.bytesPerPixel!);
+        nv21[dstIndex++] = vPlane.bytes[vIndex];
+        nv21[dstIndex++] = uPlane.bytes[uIndex];
+      }
+    }
+
+    return nv21;
+  }
+
   Future<void> _processImage(CameraImage image) async {
     final FaceDetector? detector = _faceDetector;
     final CameraController? controller = _controller;
@@ -164,28 +236,7 @@ class _LivenessDetectionScreenState extends State<LivenessDetectionScreen> {
     _isBusy = true;
 
     try {
-      final WriteBuffer allBytes = WriteBuffer();
-      for (final Plane plane in image.planes) {
-        allBytes.putUint8List(plane.bytes);
-      }
-      final Uint8List bytes = allBytes.done().buffer.asUint8List();
-
-      final InputImage inputImage = InputImage.fromBytes(
-        bytes: bytes,
-        metadata: InputImageMetadata(
-          size: Size(image.width.toDouble(), image.height.toDouble()),
-          rotation:
-              InputImageRotationValue.fromRawValue(
-                controller.description.sensorOrientation,
-              ) ??
-              InputImageRotation.rotation0deg,
-          format:
-              InputImageFormatValue.fromRawValue(image.format.raw) ??
-              InputImageFormat.yuv420,
-          bytesPerRow: image.planes.first.bytesPerRow,
-        ),
-      );
-
+      final InputImage inputImage = _buildInputImage(image, controller);
       final List<Face> faces = await detector.processImage(inputImage);
       if (!mounted) return;
 

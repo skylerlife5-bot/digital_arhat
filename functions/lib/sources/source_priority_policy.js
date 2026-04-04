@@ -24,17 +24,27 @@ function reviewStatus(record) {
     return record.reviewStatus ?? (record.confidenceScore >= 0.8 ? "accepted" : "needs_review");
 }
 function priorityRankForRecord(record) {
-    if (isOfficial(record) && record.verificationStatus == "Official Verified")
+    if (record.sourceId == "fscpd_official")
         return 1;
-    if (isOfficial(record) && record.verificationStatus == "Cross-Checked")
+    if (record.sourceId == "amis_official")
         return 2;
-    if (isVerifiedHuman(record) && hasStrongCorroboration(record))
+    if (record.sourceId == "lahore_official_market_rates")
         return 3;
-    if (isTrustedLocal(record) && hasStrongCorroboration(record))
+    if (record.sourceId == "karachi_official_price_lists")
         return 4;
-    if (!isOfficial(record) && reviewStatus(record) != "rejected")
+    if (record.sourceId == "pbs_spi")
         return 5;
-    return 6;
+    if (isOfficial(record) && record.verificationStatus == "Official Verified")
+        return 6;
+    if (isOfficial(record) && record.verificationStatus == "Cross-Checked")
+        return 7;
+    if (isVerifiedHuman(record) && hasStrongCorroboration(record))
+        return 8;
+    if (isTrustedLocal(record) && hasStrongCorroboration(record))
+        return 9;
+    if (!isOfficial(record) && reviewStatus(record) != "rejected")
+        return 10;
+    return 11;
 }
 function canPromoteOnHome(record, options) {
     if (reviewStatus(record) == "rejected")

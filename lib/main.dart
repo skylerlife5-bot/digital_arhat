@@ -24,6 +24,23 @@ import 'theme/app_theme.dart';
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 bool _appCheckActivated = false;
 
+Future<void> _logRuntimeFirebaseIdentity() async {
+  try {
+    final PackageInfo packageInfo = await PackageInfo.fromPlatform();
+    final FirebaseOptions options = Firebase.app().options;
+    debugPrint(
+      '[FirebaseIdentity] package=${packageInfo.packageName} appName=${packageInfo.appName} '
+      'version=${packageInfo.version} build=${packageInfo.buildNumber}',
+    );
+    debugPrint(
+      '[FirebaseIdentity] appId=${options.appId} projectId=${options.projectId} '
+      'messagingSenderId=${options.messagingSenderId} apiKeySuffix=${options.apiKey.length >= 6 ? options.apiKey.substring(options.apiKey.length - 6) : options.apiKey}',
+    );
+  } catch (e) {
+    debugPrint('[FirebaseIdentity] runtime identity log failed: $e');
+  }
+}
+
 Future<void> _activateAppCheckSafely() async {
   if (_appCheckActivated) {
     debugPrint('APP START AFTER APP CHECK (already activated)');
@@ -31,12 +48,17 @@ Future<void> _activateAppCheckSafely() async {
     return;
   }
 
-  // Allow forcing debug provider in QA builds with --dart-define=APP_CHECK_DEBUG=true.
+  // Allow forcing debug provider in special QA runs with
+  // --dart-define=APP_CHECK_DEBUG=true.
   const forceDebugAppCheck = bool.fromEnvironment(
     'APP_CHECK_DEBUG',
     defaultValue: false,
   );
-  final useDebugProvider = kDebugMode || forceDebugAppCheck;
+  // Use debug App Check provider for debug and profile builds (flutter run /
+  // ADB installs). Only use Play Integrity for true Play Store release builds.
+  // This prevents App Check token failures from compounding Phone Auth issues
+  // in development environments where Play Integrity is unavailable.
+  final useDebugProvider = kDebugMode || kProfileMode || forceDebugAppCheck;
 
   debugPrint(
     '[AppCheck] Branch selected: ${useDebugProvider ? 'DEBUG provider' : 'RELEASE Play Integrity provider'} '
@@ -62,6 +84,7 @@ Future<void> main() async {
   debugPrint('APP START BEFORE FIREBASE INIT');
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   debugPrint('APP START AFTER FIREBASE INIT');
+  await _logRuntimeFirebaseIdentity();
   debugPrint('APP START BEFORE APP CHECK');
   await _activateAppCheckSafely();
   debugPrint('APP START AFTER APP CHECK');
@@ -152,8 +175,10 @@ void _handleMessage(RemoteMessage message) {
 void _handleMessageData(Map<String, dynamic> messageData) {
   final listingId = messageData['listingId']?.toString() ?? '';
   final type = (messageData['type'] ?? '').toString().toUpperCase();
-  final targetRole =
-      (messageData['targetRole'] ?? '').toString().trim().toLowerCase();
+  final targetRole = (messageData['targetRole'] ?? '')
+      .toString()
+      .trim()
+      .toLowerCase();
 
   unawaited(
     AnalyticsService().logJoinAttribution(
@@ -221,10 +246,8 @@ class DigitalArhatApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       navigatorKey: navigatorKey,
       theme: AppTheme.darkTheme,
-      routes: <String, WidgetBuilder>{
-        ...Routes.getRoutes(),
-      },
-      initialRoute: Routes.splash,
+      routes: <String, WidgetBuilder>{...Routes.getRoutes()},
+        initialRoute: Routes.authWrapper,
       onUnknownRoute: (_) => MaterialPageRoute(
         builder: (_) => const Scaffold(
           body: Center(child: Text('Mandi Band Hai (Route Not Found)')),

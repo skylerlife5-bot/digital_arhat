@@ -1,0 +1,32 @@
+[
+    {
+        "action":  "approve_seller",
+        "status":  "UNKNOWN",
+        "logs":  ""
+    },
+    {
+        "action":  "reject_seller",
+        "status":  "UNKNOWN",
+        "logs":  ""
+    },
+    {
+        "action":  "mark_pending",
+        "status":  "UNKNOWN",
+        "logs":  ""
+    },
+    {
+        "action":  "mark_trusted",
+        "status":  "UNKNOWN",
+        "logs":  ""
+    },
+    {
+        "action":  "suspend_user",
+        "status":  "UNKNOWN",
+        "logs":  ""
+    },
+    {
+        "action":  "reactivate_user",
+        "status":  "UNKNOWN",
+        "logs":  ""
+    }
+]

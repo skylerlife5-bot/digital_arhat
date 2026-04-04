@@ -8,7 +8,9 @@ import '../theme/app_colors.dart';
 import 'package:flutter/services.dart';
 
 import '../core/assets.dart';
+import '../core/widgets/premium_ui_kit.dart';
 import '../routes.dart';
+import '../services/auth_service.dart';
 import '../services/startup_bootstrap_service.dart';
 
 class LoginScreen extends SignInScreen {
@@ -29,6 +31,7 @@ class _SignInScreenState extends State<SignInScreen> {
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
   final TextEditingController _mobileController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
+  final AuthService _authService = AuthService();
 
   bool _isLoading = false;
   bool _obscurePassword = true;
@@ -57,17 +60,6 @@ class _SignInScreenState extends State<SignInScreen> {
   }
 
   String _digitsOnly(String value) => value.replaceAll(RegExp(r'[^0-9]'), '');
-
-  String _normalizePhoneDigits(String input) {
-    String digits = _digitsOnly(input);
-    if (digits.startsWith('0')) {
-      digits = digits.substring(1);
-    }
-    return digits;
-  }
-
-  String phoneToEmail(String phoneDigitsOnly) =>
-      'u_92$phoneDigitsOnly@digitalarhat.app';
 
   void _onStartupStateChanged() {
     if (!mounted) return;
@@ -112,14 +104,8 @@ class _SignInScreenState extends State<SignInScreen> {
         await StartupBootstrapService.instance.start();
       }
 
-      final String digits = _normalizePhoneDigits(
-        _mobileController.text.trim(),
-      );
-      final String email = phoneToEmail(digits);
-      debugPrint('login email = $email');
-
-      await FirebaseAuth.instance.signInWithEmailAndPassword(
-        email: email,
+      await _authService.loginWithPhoneAndPassword(
+        phone: _mobileController.text.trim(),
         password: _passwordController.text.trim(),
       );
 
@@ -136,12 +122,16 @@ class _SignInScreenState extends State<SignInScreen> {
           content: Text(e.message ?? 'Sign in failed.'),
         ),
       );
-    } catch (_) {
+    } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           duration: Duration(seconds: 5),
-          content: Text('Unable to sign in right now.'),
+          content: Text(
+            error is Exception
+                ? error.toString().replaceFirst('Exception: ', '')
+                : 'Unable to sign in right now.',
+          ),
         ),
       );
     } finally {
@@ -207,7 +197,12 @@ class _SignInScreenState extends State<SignInScreen> {
           const Positioned.fill(child: _DigitalBackground()),
           SafeArea(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(18, 20, 18, 16),
+              padding: const EdgeInsets.fromLTRB(
+                PremiumSpacing.screenHorizontal,
+                PremiumSpacing.s3,
+                PremiumSpacing.screenHorizontal,
+                PremiumSpacing.s2,
+              ),
               child: Center(
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 460),
@@ -215,10 +210,10 @@ class _SignInScreenState extends State<SignInScreen> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: <Widget>[
                       _buildBrandHeader(),
-                      const SizedBox(height: 12),
-                      _buildHadithCard(),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: PremiumSpacing.s2),
                       _buildLoginFormCard(context),
+                      const SizedBox(height: PremiumSpacing.s2),
+                      _buildHadithCard(),
                     ],
                   ),
                 ),
@@ -234,26 +229,36 @@ class _SignInScreenState extends State<SignInScreen> {
     return Column(
       children: <Widget>[
         _buildLogo(),
-        const SizedBox(height: 12),
+        const SizedBox(height: PremiumSpacing.s1_5),
         const Text(
-          'Digital Aarhat',
+          'Digital Arhat',
           textAlign: TextAlign.center,
           style: TextStyle(
             color: Colors.white,
-            fontSize: 24,
+            fontSize: 28,
             fontWeight: FontWeight.w800,
             letterSpacing: 0.2,
           ),
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 6),
         const Text(
-          'ڈیجیٹل آرہت',
+          'اپنی منڈی، اپنی ڈیل',
           textAlign: TextAlign.center,
           style: TextStyle(
             color: AppColors.primaryText,
-            fontSize: 30,
-            fontFamily: 'JameelNoori',
-            height: 1.0,
+            fontSize: 22,
+            fontWeight: FontWeight.w700,
+            height: 1.35,
+          ),
+        ),
+        const SizedBox(height: 4),
+        const Text(
+          'Sign in to continue your mandi buying and bidding flow',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: AppColors.secondaryText,
+            fontSize: 13,
+            height: 1.35,
           ),
         ),
       ],
@@ -359,15 +364,15 @@ class _SignInScreenState extends State<SignInScreen> {
                     ),
                   ),
                   validator: (value) {
-                    final String digits = _normalizePhoneDigits(value ?? '');
+                    final String digits = _digitsOnly(value ?? '');
                     if (digits.isEmpty) {
                       return 'موبائل نمبر درج کریں';
                     }
-                    if (digits.length != 10) {
+                    final String normalized = _authService.normalizePhone(
+                      digits,
+                    );
+                    if (normalized.isEmpty) {
                       return '10 ہندسے ضروری ہیں';
-                    }
-                    if (!digits.startsWith('3')) {
-                      return 'درست پاکستانی نمبر درج کریں';
                     }
                     return null;
                   },
@@ -399,87 +404,56 @@ class _SignInScreenState extends State<SignInScreen> {
                     return null;
                   },
                 ),
-                SizedBox(
-                  width: double.infinity,
-                  height: 48,
+                Align(
+                  alignment: Alignment.centerRight,
                   child: TextButton(
                     onPressed: () =>
                         Navigator.pushNamed(context, Routes.forgotPasswordOtp),
                     style: TextButton.styleFrom(
-                      alignment: Alignment.centerRight,
                       padding: const EdgeInsets.symmetric(horizontal: 8),
                       foregroundColor: _gold,
-                      textStyle: const TextStyle(
-                        fontSize: 14.5,
-                        fontWeight: FontWeight.w700,
-                      ),
                     ),
                     child: const Text('Forgot password? / پاس ورڈ بھول گئے؟'),
                   ),
                 ),
-                const SizedBox(height: 2),
-                FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: _gold,
-                    foregroundColor: Colors.black,
-                    minimumSize: const Size.fromHeight(54),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+                const SizedBox(height: PremiumSpacing.s1),
+                SizedBox(
+                  height: PremiumSpacing.buttonHeight,
+                  child: FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: _gold,
+                      foregroundColor: Colors.black,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(
+                          PremiumSpacing.cardRadius,
+                        ),
+                      ),
                     ),
-                  ),
-                  onPressed: _isLoading ? null : _signIn,
-                  icon: _isLoading
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.login_rounded),
-                  label: Text(
-                    _isLoading
-                        ? 'Logging in... / لاگ ان ہو رہا ہے'
-                        : 'Login / لاگ ان کریں',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
+                    onPressed: _isLoading ? null : _signIn,
+                    icon: _isLoading
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.login_rounded),
+                    label: Text(
+                      _isLoading
+                          ? 'لاگ اِن ہو رہا ہے... / Signing in...'
+                          : 'لاگ اِن کریں / Login',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                 ),
-                const SizedBox(height: 10),
-                SizedBox(
-                  width: double.infinity,
-                  height: 48,
-                  child: TextButton(
-                    onPressed: () =>
-                        Navigator.pushNamed(context, Routes.createAccount),
-                    style: TextButton.styleFrom(
-                      alignment: Alignment.center,
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
-                    ),
-                    child: Wrap(
-                      alignment: WrapAlignment.center,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      spacing: 4,
-                      children: const <Widget>[
-                        Text(
-                          'New here? / نئے ہیں؟',
-                          style: TextStyle(
-                            color: AppColors.secondaryText,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        Text(
-                          'Create Account / اکاؤنٹ بنائیں',
-                          style: TextStyle(
-                            color: _gold,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                const SizedBox(height: PremiumSpacing.s1),
+                PremiumSecondaryButton(
+                  label: 'اکاؤنٹ بنائیں / Create Account',
+                  icon: Icons.person_add_alt_1_rounded,
+                  onPressed: () =>
+                      Navigator.pushNamed(context, Routes.createAccount),
                 ),
               ],
             ),

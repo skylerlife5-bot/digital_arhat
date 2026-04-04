@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../routes.dart';
+import '../../services/analytics_service.dart';
 import '../../theme/app_colors.dart';
 
 class BakraMandiEntryScreen extends StatefulWidget {
@@ -14,18 +15,47 @@ class BakraMandiEntryScreen extends StatefulWidget {
 
 class _BakraMandiEntryScreenState extends State<BakraMandiEntryScreen> {
   final TextEditingController _searchController = TextEditingController();
+  final AnalyticsService _analytics = AnalyticsService();
 
   static const List<_AnimalType> _animals = <_AnimalType>[
-    _AnimalType('bakray', 'بکرے / Bakray', Icons.pets_rounded),
-    _AnimalType('gaye', 'گائے / Gaye', Icons.agriculture_rounded),
-    _AnimalType('dumba', 'دنبہ / Dumba', Icons.cruelty_free_rounded),
-    _AnimalType('oont', 'اونٹ / Oont', Icons.terrain_rounded),
+    _AnimalType(
+      'bakray',
+      'بکرے / Bakray',
+      Icons.pets_rounded,
+      'assets/bakra_mandi/bakray.png',
+    ),
+    _AnimalType(
+      'gaye',
+      'گائے / Gaye',
+      Icons.agriculture_rounded,
+      'assets/bakra_mandi/gaye.png',
+    ),
+    _AnimalType(
+      'dumba',
+      'دنبہ / Dumba',
+      Icons.cruelty_free_rounded,
+      'assets/bakra_mandi/dumba.png',
+    ),
+    _AnimalType(
+      'oont',
+      'اونٹ / Oont',
+      Icons.terrain_rounded,
+      'assets/bakra_mandi/oont.png',
+    ),
   ];
 
   @override
   void initState() {
     super.initState();
     _searchController.text = widget.initialAnimalType ?? '';
+    Future<void>.microtask(() {
+      _analytics.logEvent(
+        event: 'bakra_mandi_entry_open',
+        data: <String, dynamic>{
+          'initialAnimalType': widget.initialAnimalType ?? 'all',
+        },
+      );
+    });
   }
 
   @override
@@ -59,6 +89,71 @@ class _BakraMandiEntryScreenState extends State<BakraMandiEntryScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 10, 16, 22),
         children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: Stack(
+              children: [
+                SizedBox(
+                  height: 160,
+                  width: double.infinity,
+                  child: Image.asset(
+                    'assets/bakra_mandi/bakray.png',
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) => Container(
+                      color: AppColors.cardSurface,
+                      alignment: Alignment.center,
+                      child: const Icon(
+                        Icons.pets_rounded,
+                        size: 56,
+                        color: AppColors.accentGold,
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned.fill(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.black.withValues(alpha: 0.12),
+                          Colors.black.withValues(alpha: 0.56),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const Positioned(
+                  left: 16,
+                  right: 16,
+                  bottom: 16,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'قربانی کے جانور ایک نظر میں',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      SizedBox(height: 4),
+                      Text(
+                        'Browse Bakray, Gaye, Dumba aur Oont with direct seller contact',
+                        style: TextStyle(
+                          color: Colors.white70,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
           TextField(
             controller: _searchController,
             style: const TextStyle(color: AppColors.primaryText),
@@ -82,7 +177,7 @@ class _BakraMandiEntryScreenState extends State<BakraMandiEntryScreen> {
               crossAxisCount: 2,
               crossAxisSpacing: 10,
               mainAxisSpacing: 10,
-              childAspectRatio: 1.4,
+              childAspectRatio: 1.08,
             ),
             itemCount: _animals.length,
             itemBuilder: (context, index) {
@@ -96,9 +191,54 @@ class _BakraMandiEntryScreenState extends State<BakraMandiEntryScreen> {
                 ),
                 onPressed: () => _openListings(animalType: animal.value),
                 child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Icon(animal.icon, color: AppColors.accentGold, size: 28),
+                    Expanded(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            Image.asset(
+                              animal.assetPath,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) => Container(
+                                color: AppColors.cardSurface,
+                                alignment: Alignment.center,
+                                child: Icon(
+                                  animal.icon,
+                                  color: AppColors.accentGold,
+                                  size: 40,
+                                ),
+                              ),
+                            ),
+                            Positioned.fill(
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topCenter,
+                                    end: Alignment.bottomCenter,
+                                    colors: [
+                                      Colors.black.withValues(alpha: 0.06),
+                                      Colors.black.withValues(alpha: 0.45),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                            Positioned(
+                              top: 8,
+                              left: 8,
+                              child: Icon(
+                                animal.icon,
+                                color: Colors.white,
+                                size: 20,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                     const SizedBox(height: 8),
                     Text(
                       animal.label,
@@ -149,9 +289,10 @@ class _BakraMandiEntryScreenState extends State<BakraMandiEntryScreen> {
 }
 
 class _AnimalType {
-  const _AnimalType(this.value, this.label, this.icon);
+  const _AnimalType(this.value, this.label, this.icon, this.assetPath);
 
   final String value;
   final String label;
   final IconData icon;
+  final String assetPath;
 }

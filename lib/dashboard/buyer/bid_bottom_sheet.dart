@@ -41,6 +41,7 @@ class _BidBottomSheetState extends State<BidBottomSheet> {
   final TextEditingController _bidController = TextEditingController();
 
   bool _submitting = false;
+  bool _agreementChecked = false;
 
   @override
   void dispose() {
@@ -270,12 +271,12 @@ class _BidBottomSheetState extends State<BidBottomSheet> {
       final blockStatus = TrustSafetyService.evaluateBidBlock(
         userData: userData,
       );
-      if (blockStatus.isBlocked) {
+        if (blockStatus.isBlocked) {
         final untilText = blockStatus.blockedUntil == null
             ? ''
-            : ' (until ${blockStatus.blockedUntil!.toLocal()})';
+            : ' (${blockStatus.blockedUntil!.toLocal().toString().substring(0, 16)} تک)';
         _snack(
-          '${blockStatus.reason} ${blockStatus.reasonUr}$untilText'.trim(),
+          '${blockStatus.reasonUr}$untilText'.trim(),
         );
         return;
       }
@@ -508,7 +509,47 @@ class _BidBottomSheetState extends State<BidBottomSheet> {
                         ),
                       ),
                     ],
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 10),
+                    // ── Bid Agreement Checkbox ──────────────────────────────
+                    InkWell(
+                      onTap: () => setState(
+                        () => _agreementChecked = !_agreementChecked,
+                      ),
+                      borderRadius: BorderRadius.circular(8),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Checkbox(
+                            value: _agreementChecked,
+                            onChanged: (v) => setState(
+                              () => _agreementChecked = v ?? false,
+                            ),
+                            activeColor: _gold,
+                            checkColor: AppColors.ctaTextDark,
+                            materialTapTargetSize:
+                                MaterialTapTargetSize.shrinkWrap,
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          const SizedBox(width: 4),
+                          const Expanded(
+                            child: Padding(
+                              padding: EdgeInsets.symmetric(vertical: 10),
+                              child: Text(
+                                'میں سمجھتا/سمجھتی ہوں کہ یہ ایک سنجیدہ بولی ہے۔ '
+                                'اگر میں جیت کر مُکر گیا/گئی تو میری کمپلیشن ریٹ کم ہو گی '
+                                'اور میرا اکاؤنٹ عارضی طور پر بند ہو سکتا ہے۔',
+                                style: TextStyle(
+                                  color: AppColors.secondaryText,
+                                  fontSize: 11.5,
+                                  height: 1.35,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 8),
                     Row(
                       children: [
                         Expanded(
@@ -532,7 +573,9 @@ class _BidBottomSheetState extends State<BidBottomSheet> {
                               backgroundColor: _gold,
                               foregroundColor: AppColors.ctaTextDark,
                             ),
-                            onPressed: _submitting ? null : _submitBid,
+                            onPressed: _submitting
+                                ? null
+                                : (_agreementChecked ? _submitBid : null),
                             child: _submitting
                                 ? const SizedBox(
                                     width: 16,

@@ -12,15 +12,22 @@ import {
 } from "./sources/types";
 import {getEnabledOfficialSources} from "./sources/source_registry";
 import {AmisOfficialAdapter} from "./sources/amis_official_adapter";
+import {FscpdOfficialAdapter} from "./sources/fscpd_official_adapter";
 import {LahoreOfficialAdapter} from "./sources/lahore_official_adapter";
 import {KarachiOfficialAdapter} from "./sources/karachi_official_adapter";
-import {toUnifiedBase} from "./sources/normalization";
+import {normalizeCommodityName, normalizeLocationToken, toUnifiedBase} from "./sources/normalization";
 import {dedupeAndAnnotate} from "./sources/dedup";
 import {scoreConfidence} from "./sources/confidence_engine";
 import {buildCityCoverageStatus} from "./sources/source_coverage_status";
 import {TOP_25_MANDI_TARGETS} from "./sources/top25_mandi_registry";
 import {BlockedCityEntry, getBlockedCityRegistry} from "./sources/blocked_city_registry";
 import {priorityRankForRecord} from "./sources/source_priority_policy";
+import {
+  checkUnitForCommodity,
+  detectRawUnitConflict,
+  isCriticalUnitViolation,
+  sanityRejectReason,
+} from "./sources/unit_rules";
 
 type IngestionStats = {
   runStartedAt: string;
@@ -65,7 +72,13 @@ function logger(event: string, data: Record<string, unknown>): void {
   console.log(`mandi_phase_a_${event}`, data);
 }
 
+function mandiPulseLog(message: string): void {
+  console.log(`[MandiPulse] ${message}`);
+}
+
 function adapterFor(definition: SourceDefinition): OfficialSourceAdapter | null {
+  mandiPulseLog(`source_selected=${definition.sourceId}`);
+  if (definition.adapterClass === "FscpdOfficialAdapter") return new FscpdOfficialAdapter();
   if (definition.adapterClass === "AmisOfficialAdapter") return new AmisOfficialAdapter();
   if (definition.adapterClass === "LahoreOfficialAdapter") return new LahoreOfficialAdapter();
   if (definition.adapterClass === "KarachiOfficialAdapter") return new KarachiOfficialAdapter();
@@ -96,9 +109,11 @@ function extractSourceUrls(rows: RawSourceRow[]): string[] {
 }
 
 function reliabilityBySource(sourceId: string): number {
-  if (sourceId === "amis_official") return 0.18;
-  if (sourceId === "lahore_official_market_rates") return 0.2;
-  if (sourceId === "karachi_official_price_lists") return 0.2;
+  // FS&CPD: highest reliability — district-wise official daily rate
+  if (sourceId === "fscpd_official") return 0.25;
+  if (sourceId === "amis_official") return 0.22;
+  if (sourceId === "lahore_official_market_rates") return 0.18;
+  if (sourceId === "karachi_official_price_lists") return 0.16;
   return 0.08;
 }
 
@@ -176,6 +191,10 @@ function toFirestorePayload(rate: UnifiedMandiRate): Record<string, unknown> {
     isAiCleaned: rate.isAiCleaned,
     metadata: rate.metadata,
     updatedAt: FieldValue.serverTimestamp(),
+    // Market Pulse confidence fields
+    rowConfidence: rate.rowConfidence ?? "low",
+    sourceReliabilityLevel: rate.sourceReliabilityLevel ?? "low",
+    flags: rate.flags ?? [],
   };
 }
 
@@ -234,16 +253,91 @@ async function runIngestion(): Promise<IngestionStats> {
 
       const parsedRows: UnifiedMandiRate[] = [];
       for (const row of rows) {
-        if (!row || !Number.isFinite(row.price) || row.price <= 0) {
+        const normalizedCity = normalizeLocationToken(String(row.city ?? row.mandiName ?? ""));
+        mandiPulseLog(`normalized_city=${normalizedCity}`);
+
+        const normalizedCommodity = normalizeCommodityName(String(row.commodityName ?? ""));
+        mandiPulseLog(`normalized_commodity=${normalizedCommodity}`);
+        if (normalizedCommodity === "unknown") {
           sourceStats.rejectedRows += 1;
+          mandiPulseLog("row_rejected_reason=unknown_commodity");
           continue;
         }
 
+        if (!row || !Number.isFinite(row.price) || row.price <= 0) {
+          sourceStats.rejectedRows += 1;
+          mandiPulseLog("row_rejected_reason=invalid_price");
+          continue;
+        }
+
+        // Unit validation gate: reject impossible commodity-unit combos
+        // before they enter the normalization pipeline.
+        const unitCheck = checkUnitForCommodity(
+          row.unit ?? "",
+          normalizedCommodity,
+        );
+        mandiPulseLog(`normalized_unit=${unitCheck.normalizedUnit || String(row.unit ?? "").trim().toLowerCase()}`);
+        if (!unitCheck.allowed) {
+          sourceStats.rejectedRows += 1;
+          mandiPulseLog(`row_rejected_reason=${unitCheck.reason}`);
+          logger("unit_rejected", {
+            sourceId: source.sourceId,
+            commodity: row.commodityName,
+            unit: row.unit,
+            reason: unitCheck.reason,
+          });
+          continue;
+        }
+
+        const rawUnitConflictReason = detectRawUnitConflict(
+          unitCheck.normalizedUnit,
+          String(row.metadata?.rawPriceText ?? row.metadata?.priceText ?? ""),
+        );
+        if (rawUnitConflictReason) {
+          sourceStats.rejectedRows += 1;
+          mandiPulseLog(`row_rejected_reason=${rawUnitConflictReason}`);
+          continue;
+        }
+
+        const sanityReason = sanityRejectReason(
+          normalizedCommodity,
+          unitCheck.normalizedUnit,
+          row.price,
+        );
+        if (sanityReason) {
+          sourceStats.rejectedRows += 1;
+          mandiPulseLog(`row_rejected_reason=${sanityReason}`);
+          continue;
+        }
+
+        // Pre-annotate critical unit violation flag (belt-and-suspenders)
+        const isCritical = isCriticalUnitViolation(
+          normalizedCommodity,
+          row.unit ?? "",
+        );
+
         try {
           const unified = toUnifiedBase(row as RawSourceRow, now);
-          parsedRows.push(unified);
+          if (unified.freshnessStatus === "stale") {
+            sourceStats.rejectedRows += 1;
+            mandiPulseLog("row_rejected_reason=stale_row");
+            continue;
+          }
+
+          // Embed unit validation result into metadata for confidence engine
+          parsedRows.push({
+            ...unified,
+            metadata: {
+              ...unified.metadata,
+              unitValidated: unitCheck.allowed,
+              unitCheckReason: unitCheck.reason,
+              unitNormalized: unitCheck.normalizedUnit,
+              criticalUnitViolation: isCritical,
+            },
+          });
         } catch (_error) {
           sourceStats.rejectedRows += 1;
+          mandiPulseLog("row_rejected_reason=normalization_failed");
         }
       }
 
@@ -271,6 +365,15 @@ async function runIngestion(): Promise<IngestionStats> {
   }
 
   const deduped = dedupeAndAnnotate(collected).map((item) => {
+    // Carry any pre-ingestion flags from metadata into confidence scoring
+    const preFlags: import("./sources/types").MandiRateFlag[] = [];
+    if (item.metadata?.criticalUnitViolation === true) {
+      preFlags.push("critical_unit_violation");
+    }
+    if (item.sourceId === "pbs_spi") {
+      preFlags.push("pbs_spi_trend_only");
+    }
+
     const confidence = scoreConfidence(item, {
       sourceReliability: reliabilityBySource(item.sourceId),
       corroborationCount: item.corroborationCount,
@@ -280,13 +383,35 @@ async function runIngestion(): Promise<IngestionStats> {
       suspiciousSpike: item.suspiciousSpike,
       sparseData: item.sparseData,
       incompleteMetadata: item.incompleteMetadata,
+      weakLocationMatch:
+        !String(item.city ?? "").trim() ||
+        !String(item.district ?? "").trim() ||
+        String(item.city ?? "").trim().toLowerCase() ===
+          String(item.province ?? "").trim().toLowerCase(),
+      ocrWeakParse:
+        String(item.metadata?.parseMethod ?? "").toLowerCase().includes("ocr") &&
+        item.duplicateAgreement < 0.55,
+      flags: preFlags,
     });
+
+    mandiPulseLog(
+      `confidence=${confidence.score.toFixed(3)} source=${item.sourceId} rowConfidence=${confidence.rowConfidence}`,
+    );
+    mandiPulseLog(`source_selected=${item.sourceId}`);
+    if (preFlags.includes("pbs_spi_trend_only") || confidence.rowConfidence !== "high") {
+      mandiPulseLog("fallback_used=true");
+    } else {
+      mandiPulseLog("fallback_used=false");
+    }
 
     return {
       ...item,
       confidenceScore: confidence.score,
       confidenceReason: confidence.reason,
       verificationStatus: confidence.verificationStatus,
+      rowConfidence: confidence.rowConfidence,
+      sourceReliabilityLevel: confidence.sourceReliabilityLevel,
+      flags: confidence.flags,
       reviewStatus: confidence.verificationStatus === "Needs Review" ? "needs_review" : "accepted",
       acceptedBySystem: confidence.verificationStatus !== "Needs Review",
       acceptedByAdmin: false,

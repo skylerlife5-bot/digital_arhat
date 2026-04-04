@@ -27,13 +27,18 @@ function reviewStatus(record: UnifiedMandiRate): ContributionReviewStatus {
 }
 
 export function priorityRankForRecord(record: UnifiedMandiRate): number {
-  if (isOfficial(record) && record.verificationStatus == "Official Verified") return 1;
-  if (isOfficial(record) && record.verificationStatus == "Cross-Checked") return 2;
+  if (record.sourceId == "fscpd_official") return 1;
+  if (record.sourceId == "amis_official") return 2;
+  if (record.sourceId == "lahore_official_market_rates") return 3;
+  if (record.sourceId == "karachi_official_price_lists") return 4;
+  if (record.sourceId == "pbs_spi") return 5;
 
-  if (isVerifiedHuman(record) && hasStrongCorroboration(record)) return 3;
-  if (isTrustedLocal(record) && hasStrongCorroboration(record)) return 4;
-  if (!isOfficial(record) && reviewStatus(record) != "rejected") return 5;
-  return 6;
+  if (isOfficial(record) && record.verificationStatus == "Official Verified") return 6;
+  if (isOfficial(record) && record.verificationStatus == "Cross-Checked") return 7;
+  if (isVerifiedHuman(record) && hasStrongCorroboration(record)) return 8;
+  if (isTrustedLocal(record) && hasStrongCorroboration(record)) return 9;
+  if (!isOfficial(record) && reviewStatus(record) != "rejected") return 10;
+  return 11;
 }
 
 export function canPromoteOnHome(

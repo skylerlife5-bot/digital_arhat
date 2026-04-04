@@ -124,6 +124,8 @@ class NotificationService {
     switch (type) {
       case Phase1NotificationType.listingApproved:
         return 'Listing Approved / لسٹنگ منظور ہوگئی';
+      case Phase1NotificationType.listingRejected:
+        return 'Listing Rejected / لسٹنگ مسترد ہوگئی';
       case Phase1NotificationType.newBidReceived:
         return 'New Bid / نئی بولی';
       case Phase1NotificationType.bidPlacedConfirmation:
@@ -147,6 +149,8 @@ class NotificationService {
     switch (type) {
       case Phase1NotificationType.listingApproved:
         return 'Your listing is now live. / آپ کی لسٹنگ اب لائیو ہے';
+      case Phase1NotificationType.listingRejected:
+        return 'Your listing was rejected in admin review. / آپ کی لسٹنگ ایڈمن ریویو میں مسترد ہوگئی';
       case Phase1NotificationType.newBidReceived:
         return 'A buyer placed a new bid on your listing. / آپ کی لسٹنگ پر نئی بولی آئی ہے';
       case Phase1NotificationType.bidPlacedConfirmation:

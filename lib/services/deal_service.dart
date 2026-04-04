@@ -8,6 +8,14 @@ class DealService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final String _uid = FirebaseAuth.instance.currentUser?.uid ?? '';
   final EscrowService _escrowService = EscrowService();
+  static const Set<String> _sellerOnlyOutcomeStatuses = <String>{
+    'successful',
+    'failed',
+    'cancelled',
+    'disputed',
+    'pending_contact',
+    'no_bids',
+  };
 
   // 1. Create a New Deal with Escrow Logic ✅
   // Note: Isay BiddingService se call kiya jata hai jab seller bid accept kare
@@ -68,12 +76,33 @@ class DealService {
   // 3. Update Deal Status & Trigger Admin Alerts ✅
   Future<void> updateDealStatus(String dealId, String newStatus) async {
     try {
+      if (_uid.isEmpty) {
+        throw Exception('Please sign in first.');
+      }
+
+      final dealRef = _db.collection('deals').doc(dealId);
+      final dealSnap = await dealRef.get();
+      if (!dealSnap.exists) {
+        throw Exception('Deal record not found');
+      }
+
+      final dealData = dealSnap.data() ?? <String, dynamic>{};
+      final sellerId = (dealData['sellerId'] ?? '').toString().trim();
+      final buyerId = (dealData['buyerId'] ?? '').toString().trim();
+      if (_uid != sellerId && _uid != buyerId) {
+        throw Exception('Only deal participants can update deal status.');
+      }
+
       final normalizedStatus = newStatus.trim().toLowerCase();
+      if (_sellerOnlyOutcomeStatuses.contains(normalizedStatus) &&
+          (sellerId.isEmpty || _uid != sellerId)) {
+        throw Exception('Only seller can update deal outcome.');
+      }
 
       if (normalizedStatus == 'escrow_locked') {
         await _lockFundsInEscrow(dealId);
       } else {
-        await _db.collection('deals').doc(dealId).update({
+        await dealRef.update({
           'status': newStatus,
           'lastUpdated': FieldValue.serverTimestamp(),
         });

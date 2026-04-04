@@ -1,20 +1,25 @@
-﻿import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+
+import 'auth/auth_state.dart';
 import 'auth/auth_wrapper.dart';
+import 'auth/verification_pending_screen.dart';
+import 'dashboard/admin/admin_dashboard.dart';
 import 'dashboard/buyer/buyer_dashboard.dart';
 import 'dashboard/seller/seller_dashboard.dart';
-import 'auth/verification_pending_screen.dart';
+import 'services/admin_access_service.dart';
 
 class AppEntry extends StatelessWidget {
   const AppEntry({super.key});
+
+  static final AdminAccessService _adminAccessService = AdminAccessService();
 
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
-        // 1. Loading State
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
             backgroundColor: Color(0xFF011A0A),
@@ -24,17 +29,17 @@ class AppEntry extends StatelessWidget {
           );
         }
 
-        // 2. Not Logged In -> Welcome Screen
         if (!snapshot.hasData) {
+          AuthState.clearSelectedRoleCache();
+          debugPrint('[APP_ENTRY] firebaseAuthUid=empty finalRoute=auth_wrapper');
           return const AuthWrapper();
         }
 
-        // 3. Logged In -> Check Firestore for Role
-        return FutureBuilder<DocumentSnapshot>(
-          future: FirebaseFirestore.instance
-              .collection('users')
-              .doc(snapshot.data!.uid)
-              .get(),
+        final String uid = snapshot.data!.uid;
+        debugPrint('[APP_ENTRY] firebaseAuthUid=$uid');
+
+        return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+          future: FirebaseFirestore.instance.collection('users').doc(uid).get(),
           builder: (context, userSnap) {
             if (userSnap.connectionState == ConnectionState.waiting) {
               return const Scaffold(
@@ -45,46 +50,85 @@ class AppEntry extends StatelessWidget {
               );
             }
 
-            // User document doesn't exist yet -> return to auth
             if (!userSnap.hasData || !userSnap.data!.exists) {
+              debugPrint('[APP_ENTRY] uid=$uid usersDocMissing finalRoute=auth_wrapper');
               return const AuthWrapper();
             }
 
-            // Extract User Data
-            var userData = userSnap.data!.data() as Map<String, dynamic>;
-            String role =
-                (userData['userRole'] ??
-                        userData['role'] ??
-                        userData['userType'] ??
-                        '')
+            final Map<String, dynamic> userData =
+                userSnap.data!.data() ?? <String, dynamic>{};
+            final String usersRoleField =
+                (userData['role'] ?? '').toString().trim().toLowerCase();
+            final String usersUserRoleField =
+                (userData['userRole'] ?? '').toString().trim().toLowerCase();
+            final String usersUserTypeField =
+                (userData['userType'] ?? '').toString().trim().toLowerCase();
+            final String role =
+                (userData['userRole'] ?? userData['role'] ?? userData['userType'] ?? '')
                     .toString()
                     .trim()
                     .toLowerCase();
-            bool isApproved = userData['isApproved'] ?? false;
+            final bool isApproved = userData['isApproved'] == true;
 
-            // 4. Role-Based Routing
-            if (role == 'buyer') {
-              // �S& FIX: BuyerDashboard ko userData pass kar diya aur 'const' hata diya
-              return BuyerDashboard(userData: userData);
-            } else if (role == 'seller' || role == 'arhat') {
-              final String verificationStatus =
-                  (userData['verificationStatus'] ?? '')
-                      .toString()
-                      .trim()
-                      .toLowerCase();
-              final bool isVerified =
-                  userData['is_verified'] == true ||
-                  userData['isVerified'] == true;
-              if (!isApproved && role == 'arhat') {
-                return const VerificationPendingScreen();
-              }
-              if (!isVerified || verificationStatus == 'pending_review') {
-                return const VerificationPendingScreen();
-              }
-              return SellerDashboard(userData: userData);
-            }
+            debugPrint(
+              '[APP_ENTRY] usersDocId=${userSnap.data!.id} role=$usersRoleField userRole=$usersUserRoleField userType=$usersUserTypeField resolvedUsersRole=$role',
+            );
 
-            return const AuthWrapper();
+            return FutureBuilder<bool>(
+              future: _adminAccessService.isAdminUser(uid),
+              builder: (context, adminSnap) {
+                if (adminSnap.connectionState == ConnectionState.waiting) {
+                  return const Scaffold(
+                    backgroundColor: Color(0xFF011A0A),
+                    body: Center(
+                      child: CircularProgressIndicator(color: Color(0xFFFFD700)),
+                    ),
+                  );
+                }
+
+                final bool isAdminByService = adminSnap.data == true;
+                final bool isAdminByUsersRole = role == 'admin';
+                final bool isAdmin = isAdminByService || isAdminByUsersRole;
+                debugPrint(
+                  '[APP_ENTRY] uid=$uid adminsLookupComplete=true isAdminByService=$isAdminByService isAdminByUsersRole=$isAdminByUsersRole isAdmin=$isAdmin',
+                );
+
+                if (isAdmin) {
+                  AuthState.setSelectedRole('admin');
+                  debugPrint('[APP_ENTRY] uid=$uid finalRoute=admin_dashboard');
+                  return const AdminDashboard();
+                }
+
+                if (role == 'buyer') {
+                  AuthState.setSelectedRole('buyer');
+                  debugPrint('[APP_ENTRY] uid=$uid finalRoute=buyer_dashboard');
+                  return BuyerDashboard(userData: userData);
+                }
+
+                if (role == 'seller' || role == 'arhat') {
+                  AuthState.setSelectedRole('seller');
+                  final String verificationStatus =
+                      (userData['verificationStatus'] ?? '')
+                          .toString()
+                          .trim()
+                          .toLowerCase();
+                  if (!isApproved && role == 'arhat') {
+                    debugPrint('[APP_ENTRY] uid=$uid finalRoute=verification_pending');
+                    return const VerificationPendingScreen();
+                  }
+                  debugPrint('[APP_ENTRY] uid=$uid finalRoute=seller_dashboard');
+                  if (verificationStatus == 'pending_review' ||
+                      verificationStatus == 'pending' ||
+                      verificationStatus.isEmpty) {
+                    return SellerDashboard(userData: userData);
+                  }
+                  return SellerDashboard(userData: userData);
+                }
+
+                debugPrint('[APP_ENTRY] uid=$uid finalRoute=auth_wrapper');
+                return const AuthWrapper();
+              },
+            );
           },
         );
       },

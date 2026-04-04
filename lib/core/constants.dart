@@ -255,7 +255,13 @@ class CategoryConstants {
     'Sheep / بھیڑ',
     'Camel / اونٹ',
     'Calf / بچھڑا',
-    'Poultry / مرغی',
+  ];
+
+  static const List<String> poultry = [
+    'Broiler / برائلر',
+    'Desi Chicken / دیسی مرغی',
+    'Layer / لیئر',
+    'Chicks / چوزے',
     'Eggs / انڈے',
   ];
 
@@ -368,6 +374,39 @@ class CategoryConstants {
     }
   }
 
+  static List<String> itemsForCategoryId(String categoryId) {
+    switch (categoryId) {
+      case 'crops':
+        return crops;
+      case 'fruit':
+        return fruits;
+      case 'vegetables':
+        return vegetables;
+      case 'flowers':
+        return flowers;
+      case 'livestock':
+        return livestock;
+      case 'poultry':
+        return poultry;
+      case 'milk':
+        return milkAndDairy;
+      case 'seeds':
+        return seeds;
+      case 'fertilizer':
+        return fertilizer;
+      case 'machinery':
+        return machinery;
+      case 'tools':
+        return tools;
+      case 'dry_fruits':
+        return dryFruits;
+      case 'spices':
+        return spices;
+      default:
+        return crops;
+    }
+  }
+
   static UnitType defaultUnitForMandiType(MandiType type) {
     switch (type) {
       case MandiType.crops:
@@ -391,6 +430,18 @@ class CategoryConstants {
     }
   }
 
+  static UnitType defaultUnitForCategoryId(
+    String categoryId, {
+    required MandiType fallbackType,
+  }) {
+    switch (categoryId) {
+      case 'poultry':
+        return UnitType.perHead;
+      default:
+        return defaultUnitForMandiType(fallbackType);
+    }
+  }
+
   static List<UnitType> allowedUnitsForMandiType(MandiType type) {
     switch (type) {
       case MandiType.crops:
@@ -410,6 +461,18 @@ class CategoryConstants {
       case MandiType.machinery:
       case MandiType.tools:
         return const [UnitType.peti, UnitType.kg];
+    }
+  }
+
+  static List<UnitType> allowedUnitsForCategoryId(
+    String categoryId, {
+    required MandiType fallbackType,
+  }) {
+    switch (categoryId) {
+      case 'poultry':
+        return const [UnitType.perHead, UnitType.kg, UnitType.peti];
+      default:
+        return allowedUnitsForMandiType(fallbackType);
     }
   }
 

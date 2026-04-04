@@ -41,6 +41,7 @@ const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-admin/firestore");
 const source_registry_1 = require("./sources/source_registry");
 const amis_official_adapter_1 = require("./sources/amis_official_adapter");
+const fscpd_official_adapter_1 = require("./sources/fscpd_official_adapter");
 const lahore_official_adapter_1 = require("./sources/lahore_official_adapter");
 const karachi_official_adapter_1 = require("./sources/karachi_official_adapter");
 const normalization_1 = require("./sources/normalization");
@@ -50,6 +51,7 @@ const source_coverage_status_1 = require("./sources/source_coverage_status");
 const top25_mandi_registry_1 = require("./sources/top25_mandi_registry");
 const blocked_city_registry_1 = require("./sources/blocked_city_registry");
 const source_priority_policy_1 = require("./sources/source_priority_policy");
+const unit_rules_1 = require("./sources/unit_rules");
 const COLLECTION = "mandi_rates";
 function getApp() {
     if (admin.apps.length > 0) {
@@ -67,7 +69,13 @@ function nowIso() {
 function logger(event, data) {
     console.log(`mandi_phase_a_${event}`, data);
 }
+function mandiPulseLog(message) {
+    console.log(`[MandiPulse] ${message}`);
+}
 function adapterFor(definition) {
+    mandiPulseLog(`source_selected=${definition.sourceId}`);
+    if (definition.adapterClass === "FscpdOfficialAdapter")
+        return new fscpd_official_adapter_1.FscpdOfficialAdapter();
     if (definition.adapterClass === "AmisOfficialAdapter")
         return new amis_official_adapter_1.AmisOfficialAdapter();
     if (definition.adapterClass === "LahoreOfficialAdapter")
@@ -99,12 +107,15 @@ function extractSourceUrls(rows) {
     return uniqueSample(rows.map((row) => String(row.metadata?.sourceUrl ?? "").trim()).filter((item) => !!item), 3);
 }
 function reliabilityBySource(sourceId) {
+    // FS&CPD: highest reliability — district-wise official daily rate
+    if (sourceId === "fscpd_official")
+        return 0.25;
     if (sourceId === "amis_official")
-        return 0.18;
+        return 0.22;
     if (sourceId === "lahore_official_market_rates")
-        return 0.2;
+        return 0.18;
     if (sourceId === "karachi_official_price_lists")
-        return 0.2;
+        return 0.16;
     return 0.08;
 }
 function toSourceStats(source) {
@@ -180,6 +191,10 @@ function toFirestorePayload(rate) {
         isAiCleaned: rate.isAiCleaned,
         metadata: rate.metadata,
         updatedAt: firestore_1.FieldValue.serverTimestamp(),
+        // Market Pulse confidence fields
+        rowConfidence: rate.rowConfidence ?? "low",
+        sourceReliabilityLevel: rate.sourceReliabilityLevel ?? "low",
+        flags: rate.flags ?? [],
     };
 }
 async function runIngestion() {
@@ -230,16 +245,71 @@ async function runIngestion() {
             stats.totalFetchedRows += rows.length;
             const parsedRows = [];
             for (const row of rows) {
-                if (!row || !Number.isFinite(row.price) || row.price <= 0) {
+                const normalizedCity = (0, normalization_1.normalizeLocationToken)(String(row.city ?? row.mandiName ?? ""));
+                mandiPulseLog(`normalized_city=${normalizedCity}`);
+                const normalizedCommodity = (0, normalization_1.normalizeCommodityName)(String(row.commodityName ?? ""));
+                mandiPulseLog(`normalized_commodity=${normalizedCommodity}`);
+                if (normalizedCommodity === "unknown") {
                     sourceStats.rejectedRows += 1;
+                    mandiPulseLog("row_rejected_reason=unknown_commodity");
                     continue;
                 }
+                if (!row || !Number.isFinite(row.price) || row.price <= 0) {
+                    sourceStats.rejectedRows += 1;
+                    mandiPulseLog("row_rejected_reason=invalid_price");
+                    continue;
+                }
+                // Unit validation gate: reject impossible commodity-unit combos
+                // before they enter the normalization pipeline.
+                const unitCheck = (0, unit_rules_1.checkUnitForCommodity)(row.unit ?? "", normalizedCommodity);
+                mandiPulseLog(`normalized_unit=${unitCheck.normalizedUnit || String(row.unit ?? "").trim().toLowerCase()}`);
+                if (!unitCheck.allowed) {
+                    sourceStats.rejectedRows += 1;
+                    mandiPulseLog(`row_rejected_reason=${unitCheck.reason}`);
+                    logger("unit_rejected", {
+                        sourceId: source.sourceId,
+                        commodity: row.commodityName,
+                        unit: row.unit,
+                        reason: unitCheck.reason,
+                    });
+                    continue;
+                }
+                const rawUnitConflictReason = (0, unit_rules_1.detectRawUnitConflict)(unitCheck.normalizedUnit, String(row.metadata?.rawPriceText ?? row.metadata?.priceText ?? ""));
+                if (rawUnitConflictReason) {
+                    sourceStats.rejectedRows += 1;
+                    mandiPulseLog(`row_rejected_reason=${rawUnitConflictReason}`);
+                    continue;
+                }
+                const sanityReason = (0, unit_rules_1.sanityRejectReason)(normalizedCommodity, unitCheck.normalizedUnit, row.price);
+                if (sanityReason) {
+                    sourceStats.rejectedRows += 1;
+                    mandiPulseLog(`row_rejected_reason=${sanityReason}`);
+                    continue;
+                }
+                // Pre-annotate critical unit violation flag (belt-and-suspenders)
+                const isCritical = (0, unit_rules_1.isCriticalUnitViolation)(normalizedCommodity, row.unit ?? "");
                 try {
                     const unified = (0, normalization_1.toUnifiedBase)(row, now);
-                    parsedRows.push(unified);
+                    if (unified.freshnessStatus === "stale") {
+                        sourceStats.rejectedRows += 1;
+                        mandiPulseLog("row_rejected_reason=stale_row");
+                        continue;
+                    }
+                    // Embed unit validation result into metadata for confidence engine
+                    parsedRows.push({
+                        ...unified,
+                        metadata: {
+                            ...unified.metadata,
+                            unitValidated: unitCheck.allowed,
+                            unitCheckReason: unitCheck.reason,
+                            unitNormalized: unitCheck.normalizedUnit,
+                            criticalUnitViolation: isCritical,
+                        },
+                    });
                 }
                 catch (_error) {
                     sourceStats.rejectedRows += 1;
+                    mandiPulseLog("row_rejected_reason=normalization_failed");
                 }
             }
             sourceStats.parsedRows = parsedRows.length;
@@ -265,6 +335,14 @@ async function runIngestion() {
         }
     }
     const deduped = (0, dedup_1.dedupeAndAnnotate)(collected).map((item) => {
+        // Carry any pre-ingestion flags from metadata into confidence scoring
+        const preFlags = [];
+        if (item.metadata?.criticalUnitViolation === true) {
+            preFlags.push("critical_unit_violation");
+        }
+        if (item.sourceId === "pbs_spi") {
+            preFlags.push("pbs_spi_trend_only");
+        }
         const confidence = (0, confidence_engine_1.scoreConfidence)(item, {
             sourceReliability: reliabilityBySource(item.sourceId),
             corroborationCount: item.corroborationCount,
@@ -274,12 +352,30 @@ async function runIngestion() {
             suspiciousSpike: item.suspiciousSpike,
             sparseData: item.sparseData,
             incompleteMetadata: item.incompleteMetadata,
+            weakLocationMatch: !String(item.city ?? "").trim() ||
+                !String(item.district ?? "").trim() ||
+                String(item.city ?? "").trim().toLowerCase() ===
+                    String(item.province ?? "").trim().toLowerCase(),
+            ocrWeakParse: String(item.metadata?.parseMethod ?? "").toLowerCase().includes("ocr") &&
+                item.duplicateAgreement < 0.55,
+            flags: preFlags,
         });
+        mandiPulseLog(`confidence=${confidence.score.toFixed(3)} source=${item.sourceId} rowConfidence=${confidence.rowConfidence}`);
+        mandiPulseLog(`source_selected=${item.sourceId}`);
+        if (preFlags.includes("pbs_spi_trend_only") || confidence.rowConfidence !== "high") {
+            mandiPulseLog("fallback_used=true");
+        }
+        else {
+            mandiPulseLog("fallback_used=false");
+        }
         return {
             ...item,
             confidenceScore: confidence.score,
             confidenceReason: confidence.reason,
             verificationStatus: confidence.verificationStatus,
+            rowConfidence: confidence.rowConfidence,
+            sourceReliabilityLevel: confidence.sourceReliabilityLevel,
+            flags: confidence.flags,
             reviewStatus: confidence.verificationStatus === "Needs Review" ? "needs_review" : "accepted",
             acceptedBySystem: confidence.verificationStatus !== "Needs Review",
             acceptedByAdmin: false,

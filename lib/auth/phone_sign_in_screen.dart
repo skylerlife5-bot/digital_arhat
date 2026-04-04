@@ -11,8 +11,10 @@ import 'package:intl_phone_field/intl_phone_field.dart';
 import 'package:local_auth/local_auth.dart';
 
 import '../core/widgets/glass_button.dart';
+import '../auth/auth_state.dart';
 import '../dashboard/role_router.dart';
 import '../routes.dart';
+import '../services/admin_access_service.dart';
 import '../services/startup_bootstrap_service.dart';
 import 'forgot_password_otp.dart';
 
@@ -28,10 +30,13 @@ class _PhoneSignInScreenState extends State<PhoneSignInScreen>
   static const Color _forestTop = Color(0xFF004D40);
   static const Color _emeraldBottom = Color(0xFF00695C);
   static const Color _goldBright = Color(0xFFFFD700);
+  static const String _otpVerificationIssueMessage =
+      'تصدیق میں مسئلہ ہے، دوبارہ کوشش کریں';
 
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
   final TextEditingController _passwordController = TextEditingController();
   final LocalAuthentication _localAuth = LocalAuthentication();
+  final AdminAccessService _adminAccessService = AdminAccessService();
 
   AnimationController? _pulseController;
 
@@ -93,6 +98,9 @@ class _PhoneSignInScreenState extends State<PhoneSignInScreen>
     if (!mounted || _isRedirecting) return;
     if (FirebaseAuth.instance.currentUser == null) return;
 
+    final String authUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    AuthState.clearSelectedRoleCache();
+    debugPrint('[PHONE_SIGNIN] firebaseAuthUid=$authUid action=redirect_to_role_router');
     _isRedirecting = true;
     Navigator.of(context).pushReplacement(_buildFadeRoute(const RoleRouter()));
   }
@@ -109,6 +117,16 @@ class _PhoneSignInScreenState extends State<PhoneSignInScreen>
   }
 
   Future<void> _startPhoneSignIn() async {
+    if (kIsWeb) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          duration: Duration(seconds: 5),
+          content: Text(_otpVerificationIssueMessage),
+        ),
+      );
+      return;
+    }
+
     FocusScope.of(context).unfocus();
     if (!_formKey.currentState!.validate()) return;
 
@@ -120,11 +138,21 @@ class _PhoneSignInScreenState extends State<PhoneSignInScreen>
         await StartupBootstrapService.instance.start();
       }
 
+      await FirebaseAuth.instance.setSettings(
+        appVerificationDisabledForTesting: false,
+        forceRecaptchaFlow: false,
+      );
+
       await FirebaseAuth.instance.verifyPhoneNumber(
         phoneNumber: _phoneNumber,
         timeout: const Duration(seconds: 60),
         verificationCompleted: (credential) async {
           await FirebaseAuth.instance.signInWithCredential(credential);
+          final String authUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+          AuthState.clearSelectedRoleCache();
+          debugPrint(
+            '[PHONE_SIGNIN] firebaseAuthUid=$authUid source=verificationCompleted action=push_role_router',
+          );
           if (!mounted) return;
           _isRedirecting = true;
           Navigator.of(context).pushAndRemoveUntil(
@@ -135,9 +163,9 @@ class _PhoneSignInScreenState extends State<PhoneSignInScreen>
         verificationFailed: (error) {
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              duration: const Duration(seconds: 5),
-              content: Text(error.message ?? 'Phone verification failed.'),
+            const SnackBar(
+              duration: Duration(seconds: 5),
+              content: Text(_otpVerificationIssueMessage),
             ),
           );
         },
@@ -155,7 +183,7 @@ class _PhoneSignInScreenState extends State<PhoneSignInScreen>
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           duration: Duration(seconds: 5),
-          content: Text('Unable to start sign in right now.'),
+          content: Text(_otpVerificationIssueMessage),
         ),
       );
     } finally {
@@ -258,6 +286,11 @@ class _PhoneSignInScreenState extends State<PhoneSignInScreen>
                             smsCode: otpCode,
                           );
                           await FirebaseAuth.instance.signInWithCredential(credential);
+                          final String authUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+                          AuthState.clearSelectedRoleCache();
+                          debugPrint(
+                            '[PHONE_SIGNIN] firebaseAuthUid=$authUid source=otpBottomSheet action=push_role_router',
+                          );
                           if (!context.mounted) return;
                           Navigator.of(context).pop();
                           if (!mounted) return;
@@ -355,10 +388,22 @@ class _PhoneSignInScreenState extends State<PhoneSignInScreen>
             .toString()
             .trim()
             .toLowerCase();
+    final bool isAdmin = await _adminAccessService.isAdminUser(user.uid);
+    final String usersRoleField =
+        (userData['role'] ?? '').toString().trim().toLowerCase();
+    final String usersUserRoleField =
+        (userData['userRole'] ?? '').toString().trim().toLowerCase();
+    final String usersUserTypeField =
+        (userData['userType'] ?? '').toString().trim().toLowerCase();
+    debugPrint(
+      '[PHONE_SIGNIN] firebaseAuthUid=${FirebaseAuth.instance.currentUser?.uid ?? ''} usersDocId=${userDoc.id} role=$usersRoleField userRole=$usersUserRoleField userType=$usersUserTypeField resolvedUsersRole=$role isAdmin=$isAdmin',
+    );
 
     if (!mounted) return;
 
-    if (role == 'admin') {
+    if (isAdmin) {
+      AuthState.setSelectedRole('admin');
+      debugPrint('[PHONE_SIGNIN] uid=${user.uid} finalRoute=admin_dashboard');
       Navigator.of(context).pushNamedAndRemoveUntil(
         Routes.adminDashboard,
         (route) => false,
@@ -367,6 +412,8 @@ class _PhoneSignInScreenState extends State<PhoneSignInScreen>
     }
 
     if (role == 'seller' || role == 'arhat') {
+      AuthState.setSelectedRole('seller');
+      debugPrint('[PHONE_SIGNIN] uid=${user.uid} finalRoute=seller_dashboard');
       Navigator.of(context).pushNamedAndRemoveUntil(
         Routes.sellerDashboard,
         (route) => false,
@@ -375,6 +422,8 @@ class _PhoneSignInScreenState extends State<PhoneSignInScreen>
       return;
     }
 
+    AuthState.setSelectedRole('buyer');
+    debugPrint('[PHONE_SIGNIN] uid=${user.uid} finalRoute=buyer_dashboard');
     Navigator.of(context).pushNamedAndRemoveUntil(
       Routes.buyerDashboard,
       (route) => false,

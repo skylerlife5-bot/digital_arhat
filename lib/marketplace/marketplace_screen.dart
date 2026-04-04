@@ -3,11 +3,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../theme/app_colors.dart';
+import '../core/widgets/premium_ui_kit.dart';
 import '../core/widgets/customer_support_button.dart';
-import '../core/widgets/ethical_verse_banner.dart';
 import '../core/widgets/media_preview_widget.dart';
 import '../dashboard/buyer/bid_bottom_sheet.dart';
-import '../dashboard/components/rate_ticker.dart';
 import '../models/deal_status.dart';
 import '../services/bid_eligibility_service.dart';
 import '../services/trust_safety_service.dart';
@@ -33,31 +32,78 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
         appBar: AppBar(
           title: Image.asset(
             'assets/logo.png',
-            height: 34,
+            height: 28,
             fit: BoxFit.contain,
           ),
-          backgroundColor: AppColors.accentGold,
-          foregroundColor: AppColors.ctaTextDark,
+          backgroundColor: const Color(0xFF0E3B2E),
+          foregroundColor: AppColors.primaryText,
           centerTitle: true,
-          elevation: 4,
+          elevation: 0,
           actions: [
             const CustomerSupportIconAction(),
             IconButton(
               onPressed: () {},
-              icon: const Icon(Icons.search_rounded),
+              icon: const Icon(
+                Icons.search_rounded,
+                color: AppColors.accentGold,
+              ),
             ),
           ],
         ),
         body: Column(
           children: [
-            const RateTicker(),
-            const Padding(
-              padding: EdgeInsets.fromLTRB(12, 8, 12, 0),
-              child: EthicalVerseBanner(maxItems: 1),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(
+                PremiumSpacing.screenHorizontal,
+                PremiumSpacing.s1,
+                PremiumSpacing.screenHorizontal,
+                PremiumSpacing.s2,
+              ),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    const Color(0xFF145A41).withValues(alpha: 0.45),
+                    const Color(0xFF0E3B2E).withValues(alpha: 0.18),
+                  ],
+                ),
+                border: Border(
+                  bottom: BorderSide(
+                    color: AppColors.primaryText12,
+                  ),
+                ),
+              ),
+              child: const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  PremiumSectionHeader(
+                    titleUr: 'سلام، آج کی منڈی ڈیلز دیکھیں',
+                    titleEn: 'Salam, explore today\'s mandi deals',
+                  ),
+                  SizedBox(height: PremiumSpacing.s1_5),
+                  PremiumSearchBar(
+                    hintText: 'فصل، شہر یا منڈی تلاش کریں / Search crop, city, mandi',
+                  ),
+                  SizedBox(height: PremiumSpacing.s1),
+                  PremiumFilterChipRow(
+                    labels: ['Punjab', 'Crops', 'Lahore', 'Filters'],
+                  ),
+                ],
+              ),
             ),
             const Padding(
-              padding: EdgeInsets.fromLTRB(12, 6, 12, 0),
-              child: _CategoryChipsRow(),
+              padding: EdgeInsets.fromLTRB(
+                PremiumSpacing.screenHorizontal,
+                PremiumSpacing.s1_5,
+                PremiumSpacing.screenHorizontal,
+                PremiumSpacing.s1,
+              ),
+              child: PremiumSectionHeader(
+                titleUr: 'فعال لسٹنگز',
+                titleEn: 'Active marketplace listings',
+              ),
             ),
             Expanded(
               child: StreamBuilder<QuerySnapshot>(
@@ -133,8 +179,8 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
                     });
                   return ListView.builder(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 10,
+                      horizontal: PremiumSpacing.screenHorizontal,
+                      vertical: PremiumSpacing.s1,
                     ),
                     itemCount: listings.length,
                     itemBuilder: (context, index) {
@@ -727,20 +773,20 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
 
   Widget _buildEmptyState() {
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(
-            Icons.eco_outlined,
-            size: 80,
-            color: AppColors.secondaryText,
+      child: Padding(
+        padding: const EdgeInsets.all(PremiumSpacing.s2),
+        child: PremiumEmptyState(
+          icon: Icons.storefront_outlined,
+          titleUr: 'ابھی کوئی منڈی آفر موجود نہیں',
+          titleEn: 'No mandi offers yet',
+          helperUr: 'سب سے پہلا آفر پوسٹ کریں یا فلٹر بدل کر دوبارہ دیکھیں',
+          helperEn: 'Post the first offer or adjust filters to explore more',
+          primaryAction: const PremiumSecondaryButton(
+            label: 'Explore Listings / لسٹنگز دیکھیں',
+            onPressed: null,
+            icon: Icons.travel_explore_rounded,
           ),
-          const SizedBox(height: 10),
-          const Text(
-            'Mandi mein abhi koi maal dastiyab nahi hai.',
-            style: TextStyle(color: AppColors.secondaryText, fontSize: 16),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -771,47 +817,6 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> {
     }
 
     return urls.take(4).toList();
-  }
-}
-
-class _CategoryChipsRow extends StatelessWidget {
-  const _CategoryChipsRow();
-
-  @override
-  Widget build(BuildContext context) {
-    const labels = <String>['All', 'Crops', 'Livestock', 'Fruits'];
-
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: labels
-            .map(
-              (label) => Container(
-                margin: const EdgeInsets.only(right: 8),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  color: AppColors.cardSurface,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: AppColors.divider,
-                  ),
-                ),
-                child: Text(
-                  label,
-                  style: const TextStyle(
-                    color: AppColors.primaryText,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 12,
-                  ),
-                ),
-              ),
-            )
-            .toList(),
-      ),
-    );
   }
 }
 

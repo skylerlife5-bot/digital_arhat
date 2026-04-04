@@ -1,0 +1,51 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "flutter build debug apk",
+			"type": "shell",
+			"command": "flutter",
+			"args": [
+				"build",
+				"apk",
+				"--debug"
+			],
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "flutter-run-device-smoke",
+			"type": "shell",
+			"command": "flutter",
+			"args": [
+				"run",
+				"-d",
+				"RF8RC1LNGAW",
+				"--target",
+				"lib/main.dart"
+			],
+			"isBackground": true
+		},
+		{
+			"label": "run-android-device",
+			"type": "shell",
+			"command": "flutter",
+			"args": [
+				"run",
+				"-d",
+				"RF8RC1LNGAW"
+			],
+			"isBackground": true
+		},
+		{
+			"label": "flutter-analyze-buyer-polish",
+			"type": "shell",
+			"command": "flutter",
+			"args": [
+				"analyze"
+			],
+			"isBackground": false,
+			"group": "build"
+		}
+	]
+}

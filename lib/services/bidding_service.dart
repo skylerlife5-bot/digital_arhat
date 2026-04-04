@@ -71,33 +71,34 @@ class BiddingService {
     );
 
     final String sellerId = (listingData['sellerId'] ?? bid.sellerId)
-      .toString()
-      .trim();
+        .toString()
+        .trim();
     if (sellerId.isNotEmpty && sellerId == buyerId) {
       throw Exception('Seller apni listing par bid nahi laga sakta.');
     }
 
-    final double minimumAllowed = BidEligibilityService.calculateMinimumAllowedBid(
-      listingData,
-    );
+    final double minimumAllowed =
+        BidEligibilityService.calculateMinimumAllowedBid(listingData);
 
     if (bid.bidAmount < minimumAllowed) {
       throw Exception(
-      'Validation Failed: Bid must be at least Rs. ${minimumAllowed.toStringAsFixed(0)}.',
+        'Validation Failed: Bid must be at least Rs. ${minimumAllowed.toStringAsFixed(0)}.',
       );
     }
 
     final sameBidSnap = await _firestore
-      .collection('listings')
-      .doc(listingId)
-      .collection('bids')
-      .where('buyerId', isEqualTo: buyerId)
-      .where('bidAmount', isEqualTo: bid.bidAmount)
-      .where('status', whereIn: const <String>['pending', 'warned'])
-      .limit(1)
-      .get();
+        .collection('listings')
+        .doc(listingId)
+        .collection('bids')
+        .where('buyerId', isEqualTo: buyerId)
+        .where('bidAmount', isEqualTo: bid.bidAmount)
+        .where('status', whereIn: const <String>['pending', 'warned'])
+        .limit(1)
+        .get();
     if (sameBidSnap.docs.isNotEmpty) {
-      throw Exception('Same bid amount already submitted. Please increase your bid.');
+      throw Exception(
+        'Same bid amount already submitted. Please increase your bid.',
+      );
     }
 
     final normalizedBid = BidModel(
@@ -124,49 +125,136 @@ class BiddingService {
 
   /// Accept bid for Phase-1 flow (no escrow/payment/admin-deal-approval).
   Future<void> acceptBid(String bidId, String listingId) async {
+    String stage = 'init';
+    final User? currentUser = FirebaseAuth.instance.currentUser;
+    final String sellerUid = currentUser?.uid ?? '';
+
+    debugPrint(
+      '[AcceptBid] start seller=$sellerUid listing=$listingId bid=$bidId',
+    );
+    debugPrint('[AcceptBid] write_mode=batch');
+
     try {
-      WriteBatch batch = _firestore.batch();
-      DocumentReference listingRef = _firestore
+      if (currentUser == null || sellerUid.isEmpty) {
+        throw Exception('Seller must be signed in before accepting a bid');
+      }
+
+      final WriteBatch batch = _firestore.batch();
+      final DocumentReference<Map<String, dynamic>> listingRef = _firestore
           .collection('listings')
           .doc(listingId);
-      DocumentReference bidRef = listingRef.collection('bids').doc(bidId);
+      final DocumentReference<Map<String, dynamic>> bidRef = listingRef
+          .collection('bids')
+          .doc(bidId);
+      debugPrint('[AcceptBid] path listing=${listingRef.path}');
+      debugPrint('[AcceptBid] path bid=${bidRef.path}');
 
+      stage = 'read_listing';
       final listingSnap = await listingRef.get();
-      final listingData = listingSnap.data() as Map<String, dynamic>? ??
-          <String, dynamic>{};
+      final listingData = listingSnap.data() ?? <String, dynamic>{};
+      final String resolvedSellerId =
+          (listingData['sellerId'] ?? sellerUid).toString().trim().isEmpty
+          ? sellerUid
+          : (listingData['sellerId'] ?? sellerUid).toString().trim();
+      debugPrint('[AcceptBidContact] sellerId=$resolvedSellerId');
+
+      Map<String, dynamic> sellerProfile = <String, dynamic>{};
+      if (resolvedSellerId.isNotEmpty) {
+        final sellerSnap = await _firestore
+            .collection('users')
+            .doc(resolvedSellerId)
+            .get();
+        sellerProfile = sellerSnap.data() ?? <String, dynamic>{};
+      }
+      final String sellerPhone = _firstNonEmptyText(
+        sellerProfile,
+        const <String>[
+          'phone',
+          'phoneNumber',
+          'contact',
+          'mobile',
+          'contactPhone',
+          'sellerPhone',
+        ],
+      );
+      final String resolvedSellerPhone = sellerPhone.isNotEmpty
+          ? sellerPhone
+          : _firstNonEmptyText(listingData, const <String>[
+              'sellerPhone',
+              'phone',
+              'contactPhone',
+            ]);
+      final String sellerName = _firstNonEmptyText(
+        sellerProfile,
+        const <String>['name', 'fullName', 'displayName', 'sellerName'],
+      );
+      debugPrint('[AcceptBidContact] fetchedSellerPhone=$resolvedSellerPhone');
+
+      debugPrint('[AcceptBid] listing_snapshot_exists=${listingSnap.exists}');
+      debugPrint(
+        '[AcceptBid] listing_snapshot_status=${(listingData['status'] ?? '').toString()}',
+      );
+
       final nowUtc = DateTime.now().toUtc();
       final DateTime? endTime =
           _toDate(listingData['endTime'])?.toUtc() ??
           _toDate(listingData['bidExpiryTime'])?.toUtc();
       final bool forceClosed = listingData['isBidForceClosed'] == true;
       if (endTime != null && nowUtc.isBefore(endTime) && !forceClosed) {
-        throw Exception('Auction ابھی ختم نہیں ہوئی، قبولیت اختتام کے بعد ہوگی');
+        debugPrint(
+          '[AcceptBid] pre_end_accept_override=true endTime=$endTime now=$nowUtc',
+        );
       }
 
-      final existingAcceptedBidId =
-          (listingData['acceptedBidId'] ?? '').toString().trim();
+      final existingAcceptedBidId = (listingData['acceptedBidId'] ?? '')
+          .toString()
+          .trim();
       if (existingAcceptedBidId.isNotEmpty && existingAcceptedBidId != bidId) {
         throw Exception('Is listing par ek bid pehle hi accept ho chuki hai');
       }
 
-      final topBidSnap = await listingRef
+      stage = 'top_bid_scan';
+      final QuerySnapshot<Map<String, dynamic>> allBidsSnap = await listingRef
           .collection('bids')
-          .orderBy('bidAmount', descending: true)
-          .orderBy('timestamp', descending: true)
-          .limit(1)
           .get();
-      if (topBidSnap.docs.isEmpty) {
+      debugPrint(
+        '[AcceptBid] top_bid_scan_count=${allBidsSnap.docs.length} requested_bid=$bidId',
+      );
+      if (allBidsSnap.docs.isEmpty) {
         throw Exception('Accept karne ke liye koi valid top bid mojood nahi');
       }
-      if (topBidSnap.docs.first.id != bidId) {
+
+      final sortedBids = allBidsSnap.docs.toList()
+        ..sort((a, b) {
+          final double amountA = _toDouble(a.data()['bidAmount']) ?? 0.0;
+          final double amountB = _toDouble(b.data()['bidAmount']) ?? 0.0;
+          final int amountCompare = amountB.compareTo(amountA);
+          if (amountCompare != 0) return amountCompare;
+
+          final DateTime timeA =
+              _toDate(a.data()['timestamp']) ??
+              _toDate(a.data()['createdAt']) ??
+              DateTime.fromMillisecondsSinceEpoch(0);
+          final DateTime timeB =
+              _toDate(b.data()['timestamp']) ??
+              _toDate(b.data()['createdAt']) ??
+              DateTime.fromMillisecondsSinceEpoch(0);
+          final int timeCompare = timeB.compareTo(timeA);
+          if (timeCompare != 0) return timeCompare;
+
+          return b.id.compareTo(a.id);
+        });
+
+      if (sortedBids.first.id != bidId) {
         throw Exception('Sirf sab se unchi bid ko accept kiya ja sakta hai');
       }
 
-      DocumentSnapshot bidSnap = await bidRef.get();
-      if (!bidSnap.exists) throw Exception("Boli ka record nahi mila");
+      stage = 'read_selected_bid';
+      final bidSnap = await bidRef.get();
+      if (!bidSnap.exists) throw Exception('Boli ka record nahi mila');
 
       final Map<String, dynamic> bidData =
-          bidSnap.data() as Map<String, dynamic>? ?? <String, dynamic>{};
+          bidSnap.data() ?? <String, dynamic>{};
       final double bidAmount =
           _toDouble(
             bidData.containsKey('bidAmount') ? bidData['bidAmount'] : null,
@@ -180,26 +268,32 @@ class BiddingService {
         throw Exception('Bid data invalid hai. دوبارہ کوشش کریں');
       }
 
-      final currentBidStatus =
-          (bidData['status'] ?? '').toString().trim().toLowerCase();
+      final currentBidStatus = (bidData['status'] ?? '')
+          .toString()
+          .trim()
+          .toLowerCase();
       if (currentBidStatus == 'rejected') {
-        throw Exception('Rejection ke baad is bid ko accept nahi kiya ja sakta');
+        throw Exception(
+          'Rejection ke baad is bid ko accept nahi kiya ja sakta',
+        );
       }
 
-      // �x� Commission Logic (1% from Buyer + 1% from Seller)
-      double commissionPerSide = bidAmount * 0.01;
-      double buyerTotal = bidAmount + commissionPerSide;
-      double sellerReceivable = bidAmount - commissionPerSide;
-      double totalAppCommission = commissionPerSide * 2;
+      debugPrint(
+        '[AcceptBid] bid_snapshot buyerId=$buyerId bidAmount=$bidAmount status=$currentBidStatus sellerInBid=${(bidData['sellerId'] ?? '').toString()}',
+      );
 
-      // Create deal record with a simple accepted state for Phase-1.
-      DocumentReference dealRef = _firestore.collection('deals').doc();
+      final double commissionPerSide = bidAmount * 0.01;
+      final double buyerTotal = bidAmount + commissionPerSide;
+      final double sellerReceivable = bidAmount - commissionPerSide;
+      final double totalAppCommission = commissionPerSide * 2;
+
+      final DocumentReference<Map<String, dynamic>> dealRef = _firestore
+          .collection('deals')
+          .doc();
       final newDeal = DealModel(
         dealId: dealRef.id,
         listingId: listingId,
-        sellerId: bidData.containsKey('sellerId')
-            ? (bidData['sellerId']?.toString() ?? '')
-            : '',
+        sellerId: resolvedSellerId,
         buyerId: buyerId,
         productName: bidData.containsKey('productName')
             ? (bidData['productName']?.toString() ?? 'Fasal')
@@ -212,7 +306,7 @@ class BiddingService {
         createdAt: DateTime.now(),
       );
 
-      batch.set(dealRef, {
+      final Map<String, dynamic> dealPayload = {
         ...newDeal.toMap(),
         'status': 'bid_accepted',
         'dealStatus': 'bid_accepted',
@@ -220,18 +314,20 @@ class BiddingService {
         'acceptedBuyerUid': buyerId,
         'acceptedAt': FieldValue.serverTimestamp(),
         'contactUnlocked': true,
+        'sellerPhone': resolvedSellerPhone,
+        'sellerName': sellerName,
         'buyerNextAction': 'contact_seller',
         'currentStep': 'BID_ACCEPTED',
         'lastUpdated': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
-      });
-      batch.update(bidRef, {
+      };
+
+      final Map<String, dynamic> bidUpdatePayload = {
         'status': 'accepted',
         'acceptedAt': FieldValue.serverTimestamp(),
-      });
+      };
 
-      // Update listing to accepted state and unlock direct contact.
-      batch.update(listingRef, {
+      final Map<String, dynamic> listingUpdatePayload = {
         'status': 'bid_accepted',
         'listingStatus': 'bid_accepted',
         'auctionStatus': 'bid_accepted',
@@ -244,40 +340,82 @@ class BiddingService {
         'acceptedAt': FieldValue.serverTimestamp(),
         'contactUnlocked': true,
         'dealId': dealRef.id,
+        'sellerPhone': resolvedSellerPhone,
+        'sellerName': sellerName,
         'buyerId': buyerId,
         'finalPrice': bidAmount,
         'updatedAt': FieldValue.serverTimestamp(),
-      });
+      };
 
-      // Reject all non-winning bids so only one accepted bidder remains actionable.
-      QuerySnapshot otherBids = await _firestore
-          .collection('listings')
-          .doc(listingId)
+      debugPrint('[AcceptBid] deal_create_payload=$dealPayload');
+      debugPrint('[AcceptBid] bid_update_payload=$bidUpdatePayload');
+      debugPrint('[AcceptBid] listing_update_payload=$listingUpdatePayload');
+
+      stage = 'queue_deal_create';
+      debugPrint('[AcceptBid] write_stage=$stage path=${dealRef.path}');
+      batch.set(dealRef, dealPayload);
+
+      stage = 'queue_bid_update';
+      debugPrint('[AcceptBid] write_stage=$stage path=${bidRef.path}');
+      batch.update(bidRef, bidUpdatePayload);
+
+      stage = 'queue_listing_update';
+      debugPrint('[AcceptBid] write_stage=$stage path=${listingRef.path}');
+      batch.update(listingRef, listingUpdatePayload);
+
+      stage = 'read_other_bids';
+      final QuerySnapshot<Map<String, dynamic>> otherBids = await listingRef
           .collection('bids')
           .get();
+      debugPrint('[AcceptBid] other_bids_count=${otherBids.docs.length}');
 
-      for (var doc in otherBids.docs) {
+      for (final doc in otherBids.docs) {
         if (doc.id != bidId) {
-          final data = doc.data() as Map<String, dynamic>? ??
-              <String, dynamic>{};
+          final data = doc.data();
           final status = (data['status'] ?? '').toString().trim().toLowerCase();
-          if (status != 'rejected' && status != 'accepted' && status != 'bid_accepted') {
+          if (status != 'rejected' &&
+              status != 'accepted' &&
+              status != 'bid_accepted') {
+            stage = 'queue_other_bid_reject';
+            debugPrint(
+              '[AcceptBid] write_stage=$stage path=${doc.reference.path} payload={status: rejected}',
+            );
             batch.update(doc.reference, {'status': 'rejected'});
           }
         }
       }
 
+      stage = 'batch_commit';
+      debugPrint('[AcceptBid] write_stage=$stage');
       await batch.commit();
+      debugPrint(
+        '[AcceptBid] batch_commit_success listing=$listingId bid=$bidId',
+      );
 
-      final sellerId = (bidData['sellerId'] ?? '').toString().trim();
+      final sellerId = resolvedSellerId;
+      stage = 'notifications';
+      debugPrint(
+        '[AcceptBid] notification_payload={buyerId: $buyerId, sellerId: $sellerId, listingId: $listingId, bidId: $bidId}',
+      );
       await _sendBidAcceptedNotifications(
         listingId: listingId,
         bidId: bidId,
         buyerId: buyerId,
         sellerId: sellerId,
       );
-    } catch (e) {
-      throw Exception("Deal process fail: ${e.toString()}");
+      debugPrint(
+        '[AcceptBid] success seller=$sellerUid listing=$listingId bid=$bidId',
+      );
+    } on FirebaseException catch (e, st) {
+      debugPrint(
+        '[AcceptBid] ERROR stage=$stage code=${e.code} message=${e.message ?? ''} details=${e.toString()}',
+      );
+      debugPrint('[AcceptBid] STACKTRACE $st');
+      throw Exception('Deal process fail: ${e.toString()}');
+    } catch (e, st) {
+      debugPrint('[AcceptBid] ERROR stage=$stage message=${e.toString()}');
+      debugPrint('[AcceptBid] STACKTRACE $st');
+      throw Exception('Deal process fail: ${e.toString()}');
     }
   }
 
@@ -289,6 +427,9 @@ class BiddingService {
     required String buyerId,
     required String sellerId,
   }) async {
+    debugPrint(
+      '[AcceptBid] write_stage=notification_buyer_create path=notifications/{eventKey} payload={toUid: $buyerId, type: ${Phase1NotificationType.bidAccepted}, listingId: $listingId, bidId: $bidId, targetRole: buyer}',
+    );
     await _phase1Notifications.createOnce(
       userId: buyerId,
       type: Phase1NotificationType.bidAccepted,
@@ -298,6 +439,9 @@ class BiddingService {
     );
 
     if (sellerId.isNotEmpty) {
+      debugPrint(
+        '[AcceptBid] write_stage=notification_seller_create path=notifications/{eventKey} payload={toUid: $sellerId, type: ${Phase1NotificationType.bidAcceptedConfirmation}, listingId: $listingId, bidId: $bidId, targetRole: seller}',
+      );
       await _phase1Notifications.createOnce(
         userId: sellerId,
         type: Phase1NotificationType.bidAcceptedConfirmation,
@@ -333,5 +477,12 @@ class BiddingService {
     if (value is DateTime) return value;
     return null;
   }
-}
 
+  String _firstNonEmptyText(Map<String, dynamic> data, List<String> keys) {
+    for (final key in keys) {
+      final value = (data[key] ?? '').toString().trim();
+      if (value.isNotEmpty) return value;
+    }
+    return '';
+  }
+}

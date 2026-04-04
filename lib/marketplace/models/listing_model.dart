@@ -1,5 +1,6 @@
 ﻿import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/constants.dart';
+import '../../core/mandi_unit_mapper.dart';
 
 class ListingModel {
   final String? id;
@@ -127,16 +128,6 @@ class ListingModel {
       );
     }
 
-    UnitType? parseUnitType(dynamic value) {
-      final text = (value ?? '').toString().toLowerCase();
-      for (final unit in UnitType.values) {
-        if (unit.wireValue.toLowerCase() == text) {
-          return unit;
-        }
-      }
-      return null;
-    }
-
     ListingGrade? parseGrade(dynamic value) {
       final text = (value ?? '').toString().toUpperCase();
       for (final grade in ListingGrade.values) {
@@ -155,6 +146,20 @@ class ListingModel {
     final videoUrl = (map['videoUrl'] ?? map['video'] ?? '').toString().trim();
     final isVerifiedSource =
         map['isVerifiedSource'] == true && videoUrl.isNotEmpty;
+    final mandiType = parseMandiType(map['mandiType']);
+    final categoryId = (map['category'] ?? '').toString().trim();
+    final subcategoryLabel = (map['subcategoryLabel'] ??
+        map['subcategory'] ??
+        map['productName'] ??
+        map['product'] ??
+        '')
+      .toString();
+    final normalizedUnitType = MandiUnitMapper.normalizeUnitType(
+      rawUnit: map['unitType'] ?? map['unit'],
+      categoryId: categoryId,
+      fallbackType: mandiType,
+      subcategoryLabel: subcategoryLabel,
+    );
 
     return ListingModel(
       id: id ?? map['id']?.toString(),
@@ -165,8 +170,8 @@ class ListingModel {
       weight: parseDouble(map['weight']),
       fatPercentage: parseDouble(map['fatPercentage']),
       grade: parseGrade(map['grade']),
-      unitType: parseUnitType(map['unitType'] ?? map['unit']),
-      mandiType: parseMandiType(map['mandiType']),
+      unitType: normalizedUnitType,
+      mandiType: mandiType,
       isSuspicious: map['isSuspicious'] == true,
       videoUrl: videoUrl,
       isVerifiedSource: isVerifiedSource,

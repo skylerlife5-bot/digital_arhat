@@ -9,6 +9,43 @@ class MyDealsScreen extends StatelessWidget {
   final bool isSeller;
   const MyDealsScreen({super.key, required this.isSeller});
 
+  String _formatCurrency(double value) {
+    final rounded = value.round();
+    final raw = rounded.toString();
+    final withCommas = raw.replaceAllMapped(
+      RegExp(r'\B(?=(\d{3})+(?!\d))'),
+      (_) => ',',
+    );
+    return 'Rs. $withCommas';
+  }
+
+  String _statusLabel(String rawStatus) {
+    final normalized = rawStatus.trim().toLowerCase();
+    if (normalized == 'bid_accepted' ||
+        normalized == 'payment_submitted' ||
+        normalized == 'pending_contact') {
+      return 'Bid Accepted / بولی منظور';
+    }
+    if (_isAwaitingPaymentStatus(normalized)) {
+      return 'Awaiting Payment / ادائیگی کا انتظار';
+    }
+    if (normalized == 'escrow_locked' ||
+        normalized == 'shipped' ||
+        normalized == 'delivery_pending') {
+      return 'In Progress / جاری';
+    }
+    if (normalized == 'completed' ||
+        normalized == deal_status.DealStatus.dealCompleted.value) {
+      return 'Completed / مکمل';
+    }
+    if (normalized == 'cancelled' ||
+        normalized == 'failed' ||
+        normalized == 'disputed') {
+      return 'Cancelled / منسوخ';
+    }
+    return 'In Progress / جاری';
+  }
+
   @override
   Widget build(BuildContext context) {
     final DealService dealService = DealService();
@@ -17,7 +54,7 @@ class MyDealsScreen extends StatelessWidget {
       backgroundColor: AppColors.background,
       appBar: AppBar(
         title: Text(
-          isSeller ? "Meri Farokht (Sales)" : "Meri Khareedari (Purchases)",
+          isSeller ? 'Sales / میری فروخت' : 'Purchases / میری خریداری',
           style: const TextStyle(
             fontWeight: FontWeight.bold,
             color: AppColors.ctaTextDark,
@@ -99,23 +136,26 @@ class MyDealsScreen extends StatelessWidget {
                 Row(
                   children: [
                     _buildProductIcon(deal.status),
-                    const SizedBox(width: 15),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
                             deal.productName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
-                              fontSize: 18,
+                              fontSize: 17,
                               fontWeight: FontWeight.bold,
                               color: AppColors.primaryText,
                             ),
                           ),
+                          const SizedBox(height: 3),
                           Text(
                             "ID: #${deal.dealId.substring(0, 8).toUpperCase()}",
                             style: const TextStyle(
-                              fontSize: 10,
+                              fontSize: 10.5,
                               color: AppColors.secondaryText,
                               letterSpacing: 1,
                             ),
@@ -126,12 +166,12 @@ class MyDealsScreen extends StatelessWidget {
                     _buildChatButton(context, deal),
                   ],
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 16),
 
                 // Money Section
                 _buildMoneyContainer(deal),
 
-                const SizedBox(height: 20),
+                const SizedBox(height: 16),
 
                 // Action Buttons Logic
                 _buildConditionalAction(context, deal, service),
@@ -145,7 +185,7 @@ class MyDealsScreen extends StatelessWidget {
 
   Widget _buildCardHeader(DealModel deal) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       decoration: BoxDecoration(
         color: _getStatusColor(deal.status).withValues(alpha: 0.08),
         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
@@ -153,20 +193,27 @@ class MyDealsScreen extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Row(
-            children: [
-              Icon(
-                Icons.shield_outlined,
-                size: 14,
-                color: _getStatusColor(deal.status),
-              ),
-              const SizedBox(width: 5),
-              const Text(
-                "Digital Arhat Escrow Protected",
-                style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
-              ),
-            ],
+          Expanded(
+            child: Row(
+              children: [
+                Icon(
+                  Icons.shield_outlined,
+                  size: 14,
+                  color: _getStatusColor(deal.status),
+                ),
+                const SizedBox(width: 5),
+                const Expanded(
+                  child: Text(
+                    'Escrow Protected / محفوظ سودا',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ],
+            ),
           ),
+          const SizedBox(width: 8),
           _buildStatusChip(deal.status),
         ],
       ),
@@ -174,52 +221,37 @@ class MyDealsScreen extends StatelessWidget {
   }
 
   Widget _buildMoneyContainer(DealModel deal) {
-    double commission = deal.dealAmount * 0.01;
+    final sellerAmount = isSeller ? deal.sellerReceivable : deal.buyerTotal;
     return Container(
-      padding: const EdgeInsets.all(15),
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       decoration: BoxDecoration(
         color: AppColors.background.withValues(alpha: 0.35),
         borderRadius: BorderRadius.circular(15),
         border: Border.all(color: AppColors.divider),
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                isSeller
-                    ? "Net Payout (1% Fee Cut)"
-                    : "Total Bill (Inc. 1% Fee)",
-                style: const TextStyle(fontSize: 11, color: AppColors.dividerGrey),
-              ),
-              Text(
-                "Rs. ${isSeller ? deal.sellerReceivable : deal.buyerTotal}",
-                style: const TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w900,
-                  color: AppColors.accentGold,
-                ),
-              ),
-            ],
+          Text(
+            isSeller
+                ? 'Your Amount / آپ کی رقم'
+                : 'Total Amount / کل رقم',
+            style: const TextStyle(
+              fontSize: 11.5,
+              color: AppColors.secondaryText,
+              fontWeight: FontWeight.w600,
+            ),
           ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              const Text(
-                "Arhat Commission",
-                style: TextStyle(fontSize: 10, color: AppColors.secondaryText),
-              ),
-              Text(
-                "Rs. ${commission.toStringAsFixed(0)}",
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.urgencyRedAccent,
-                ),
-              ),
-            ],
+          const SizedBox(height: 4),
+          Text(
+            _formatCurrency(sellerAmount),
+            style: const TextStyle(
+              fontSize: 28,
+              fontWeight: FontWeight.w900,
+              color: AppColors.accentGold,
+              height: 1.05,
+            ),
           ),
         ],
       ),
@@ -371,7 +403,7 @@ class MyDealsScreen extends StatelessWidget {
             const Icon(Icons.lock_person_rounded, size: 50, color: AppColors.divider),
             const SizedBox(height: 15),
             Text(
-              "Total: Rs. ${deal.buyerTotal}",
+              "Total: ${_formatCurrency(deal.buyerTotal)}",
               style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 10),
@@ -408,17 +440,20 @@ class MyDealsScreen extends StatelessWidget {
   Widget _buildStatusChip(String status) {
     Color color = _getStatusColor(status);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(20),
+        color: color.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.7)),
       ),
       child: Text(
-        status.replaceAll('_', ' ').toUpperCase(),
-        style: const TextStyle(
-          color: AppColors.primaryText,
-          fontSize: 9,
-          fontWeight: FontWeight.bold,
+        _statusLabel(status),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: color,
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
         ),
       ),
     );
@@ -462,7 +497,7 @@ class MyDealsScreen extends StatelessWidget {
             color: AppColors.secondaryText,
           ),
           const Text(
-            "Abhi tak koi deal record nahi hui.",
+            'No sales found yet / ابھی تک کوئی فروخت ریکارڈ نہیں ہوئی',
             style: TextStyle(color: AppColors.secondaryText),
           ),
         ],

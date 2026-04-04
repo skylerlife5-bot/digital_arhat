@@ -1,23 +1,31 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:developer' as developer;
 import 'dart:io';
 import 'dart:ui';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:video_player/video_player.dart';
 
 import '../../core/constants.dart';
+import '../../core/location_display_helper.dart';
+import '../../core/mandi_unit_mapper.dart';
 import '../../core/market_hierarchy.dart';
 import '../../config/promotion_payment_config.dart';
 import '../../services/ai_generative_service.dart';
 import '../../services/layer2_market_intelligence_service.dart';
+import '../../services/auth_service.dart';
 import '../../services/marketplace_service.dart';
 import '../components/audio_recorder_widget.dart';
+import 'gemini_voice_helper.dart';
 import '../../theme/app_colors.dart';
+import 'components/featured_listing_payment_modal.dart';
 
 class FraudPrecheckResult {
   const FraudPrecheckResult({
@@ -29,6 +37,18 @@ class FraudPrecheckResult {
   final int riskScore;
   final List<String> flags;
   final String status;
+}
+
+class _VoiceApplyPlan {
+  const _VoiceApplyPlan({
+    required this.applied,
+    required this.suggestions,
+    required this.recognized,
+  });
+
+  final Map<String, dynamic> applied;
+  final Map<String, String> suggestions;
+  final Map<String, String> recognized;
 }
 
 class _LocationLeaf {
@@ -43,6 +63,20 @@ class _LocationLeaf {
   final String nameUr;
 }
 
+class _TehsilNode {
+  const _TehsilNode({
+    required this.id,
+    required this.nameEn,
+    required this.nameUr,
+    required this.cities,
+  });
+
+  final String id;
+  final String nameEn;
+  final String nameUr;
+  final List<_LocationLeaf> cities;
+}
+
 class _DistrictNode {
   const _DistrictNode({
     required this.id,
@@ -54,7 +88,7 @@ class _DistrictNode {
   final String id;
   final String nameEn;
   final String nameUr;
-  final List<_LocationLeaf> tehsils;
+  final List<_TehsilNode> tehsils;
 }
 
 class _ProvinceNode {
@@ -88,13 +122,16 @@ class _AddListingScreenState extends State<AddListingScreen> {
 
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
   final ImagePicker _picker = ImagePicker();
+  final AuthService _authService = AuthService();
   final MarketplaceService _marketplaceService = MarketplaceService();
   final MandiIntelligenceService _intelligenceService =
       MandiIntelligenceService();
   final Layer2MarketIntelligenceService _layer2Service =
       Layer2MarketIntelligenceService();
+  final stt.SpeechToText _speechToText = stt.SpeechToText();
 
   MandiType _selectedMandiType = MandiType.crops;
+  String _selectedCategoryOptionId = 'crops';
   String? _selectedProduct;
   String? _selectedRiceVariety;
   UnitType _selectedUnitType = UnitType.kg;
@@ -107,6 +144,7 @@ class _AddListingScreenState extends State<AddListingScreen> {
   final TextEditingController _priceController = TextEditingController();
   final TextEditingController _quantityController = TextEditingController();
   final TextEditingController _weightController = TextEditingController();
+  final TextEditingController _cityController = TextEditingController();
   final TextEditingController _localAreaController = TextEditingController();
   final TextEditingController _villageController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
@@ -138,11 +176,18 @@ class _AddListingScreenState extends State<AddListingScreen> {
   String? _verificationInlineError;
 
   bool _isSubmitting = false;
+  bool _approvalCheckInProgress = true;
+  bool _approvalLocked = false;
+  String _approvalLockMessage =
+      'آپ کی سیلر منظوری زیرِ جائزہ ہے۔ منظوری کے بعد ہی آپ لسٹنگ پوسٹ کر سکیں گے۔';
+  bool _isVoiceAssistLoading = false;
+  bool _isVoiceListening = false;
   bool _isMediaUploading = false;
   double _mediaUploadProgress = 0;
   bool _isLoadingMarket = false;
   bool _featuredListing = false;
-  bool _featuredAuctionUpgrade = false;
+  FeaturedListingPaymentData? _featuredPaymentData;
+  String _selectedSaleType = 'auction';
 
   double? _marketAverage;
   double? _recommendedPrice;
@@ -150,16 +195,19 @@ class _AddListingScreenState extends State<AddListingScreen> {
   String _sellerPriceInsight = '';
   bool _isLocationAssetReady = false;
   List<_ProvinceNode> _locationAssetProvinces = const <_ProvinceNode>[];
+  Map<String, String> _voiceAssistSuggestions = const <String, String>{};
 
   final Map<String, String> _provinceUrduByEn = <String, String>{};
   final Map<String, String> _districtUrduByEn = <String, String>{};
   final Map<String, String> _tehsilUrduByEn = <String, String>{};
+  final Map<String, String> _cityUrduByEn = <String, String>{};
 
   FraudPrecheckResult _fraudPrecheck = const FraudPrecheckResult(
     riskScore: 0,
     flags: <String>[],
     status: 'Low Risk',
   );
+  String _lastSubmitGateLogSignature = '';
 
   Map<String, String> get _districtToProvince {
     if (_isLocationAssetReady && _locationAssetProvinces.isNotEmpty) {
@@ -253,40 +301,45 @@ class _AddListingScreenState extends State<AddListingScreen> {
     final tehsil = (_selectedTehsil ?? '').trim();
     if (district.isEmpty || tehsil.isEmpty) return const <String>[];
     if (_isLocationAssetReady && _locationAssetProvinces.isNotEmpty) {
-      return <String>[tehsil, district];
+      for (final province in _locationAssetProvinces) {
+        for (final districtNode in province.districts) {
+          if (districtNode.nameEn.toLowerCase() != district.toLowerCase()) {
+            continue;
+          }
+          for (final tehsilNode in districtNode.tehsils) {
+            if (tehsilNode.nameEn.toLowerCase() != tehsil.toLowerCase()) {
+              continue;
+            }
+            final cities = tehsilNode.cities
+                .map((e) => e.nameEn.trim())
+                .where((e) => e.isNotEmpty)
+                .toList(growable: false);
+            return cities;
+          }
+        }
+      }
     }
 
     return PakistanLocationHierarchy.citiesForTehsil(
       district: district,
       tehsil: tehsil,
-    );
-  }
-
-  List<String> get _localAreaSuggestions {
-    final set = <String>{..._cityOptions};
-    final selectedCity = (_selectedCity ?? '').trim();
-    if (selectedCity.isNotEmpty) {
-      set.add(selectedCity);
-    }
-    final list = set.toList()..sort();
-    return list;
+    ).where((e) => e.trim().isNotEmpty).toList(growable: false);
   }
 
   List<String> get _productOptions =>
-      CategoryConstants.itemsForMandiType(_selectedMandiType);
+      CategoryConstants.itemsForCategoryId(_selectedCategoryOptionId);
 
-  List<String> get _categoryOptions => MandiType.values
-      .map(MarketHierarchy.categoryLabelForMandiType)
+  List<String> get _categoryOptions => MarketHierarchy.listingCategories
+      .map((option) => option.bilingualLabel)
       .toList(growable: false);
 
   String get _selectedCategoryDisplay =>
-      MarketHierarchy.categoryLabelForMandiType(_selectedMandiType);
+      MarketHierarchy.listingCategoryLabelForId(_selectedCategoryOptionId);
 
-  String get _selectedCategoryId =>
-      MarketHierarchy.categoryIdForMandiType(_selectedMandiType);
+  String get _selectedCategoryId => _selectedCategoryOptionId;
 
   String get _selectedCategoryLabel =>
-      MarketHierarchy.categoryLabelForMandiType(_selectedMandiType);
+      MarketHierarchy.listingCategoryLabelForId(_selectedCategoryOptionId);
 
   String get _selectedSubcategoryId =>
       MarketHierarchy.subcategoryIdFromProduct(_selectedProduct ?? '');
@@ -294,8 +347,11 @@ class _AddListingScreenState extends State<AddListingScreen> {
   String get _selectedSubcategoryLabel =>
       MarketHierarchy.subcategoryDisplayFromProduct(_selectedProduct ?? '');
 
-  List<UnitType> get _allowedUnits =>
-      CategoryConstants.allowedUnitsForMandiType(_selectedMandiType);
+  List<UnitType> get _allowedUnits => MandiUnitMapper.resolve(
+    categoryId: _selectedCategoryOptionId,
+    fallbackType: _selectedMandiType,
+    subcategoryLabel: _selectedProduct,
+  ).allowedUnits;
 
   bool get _isLivestock => _selectedMandiType == MandiType.livestock;
   bool get _isMilk => _selectedMandiType == MandiType.milk;
@@ -353,20 +409,51 @@ class _AddListingScreenState extends State<AddListingScreen> {
         : 'Rice Variety: $variety\n$base';
   }
 
-  MandiType? _mandiTypeFromCategoryLabel(String selected) {
-    for (final type in MandiType.values) {
-      if (MarketHierarchy.categoryLabelForMandiType(type) == selected) {
-        return type;
-      }
-    }
-    return null;
+  MarketCategoryOption? _listingCategoryFromLabel(String selected) {
+    return MarketHierarchy.listingCategoryFromLabel(selected);
   }
 
   bool get _hasRequiredTrustPhoto {
+    // Keep trust requirement aligned with what seller sees in UI:
+    // selected trust photo + GPS coordinates.
     return _trustPhoto != null &&
         _trustPhotoLat != null &&
-        _trustPhotoLng != null &&
-        _trustPhotoCapturedAt != null;
+        _trustPhotoLng != null;
+  }
+
+  List<String> _submitDisabledReasons() {
+    final List<String> reasons = <String>[];
+    if (_isSubmitting) reasons.add('isSubmitting');
+    if (_approvalCheckInProgress) reasons.add('approvalCheckInProgress');
+    if (_approvalLocked) reasons.add('approvalLocked');
+    if (!_hasRequiredTrustPhoto) reasons.add('missingTrustPhotoOrGps');
+    if (_hardFraudBlock) reasons.add('hardFraudBlock');
+    return reasons;
+  }
+
+  void _logSubmitGateStatus(String source) {
+    final String signature = [
+      _trustPhoto != null ? '1' : '0',
+      _trustPhotoLat != null ? '1' : '0',
+      _trustPhotoLng != null ? '1' : '0',
+      _trustPhotoCapturedAt != null ? '1' : '0',
+      _isSubmitting ? '1' : '0',
+      _isMediaUploading ? '1' : '0',
+      _approvalCheckInProgress ? '1' : '0',
+      _approvalLocked ? '1' : '0',
+      _hardFraudBlock ? '1' : '0',
+      _hasRequiredTrustPhoto ? '1' : '0',
+      _hasAllRequiredForSubmit ? '1' : '0',
+      _submitDisabledReasons().join(','),
+    ].join('|');
+    if (signature == _lastSubmitGateLogSignature) {
+      return;
+    }
+    _lastSubmitGateLogSignature = signature;
+
+    debugPrint(
+      '[ADD_LISTING_GATE][$source] trustPhotoFilePresent=${_trustPhoto != null} gpsPresent=${_trustPhotoLat != null && _trustPhotoLng != null} latitude=${_trustPhotoLat?.toStringAsFixed(6) ?? 'null'} longitude=${_trustPhotoLng?.toStringAsFixed(6) ?? 'null'} uploadFlag=$_isMediaUploading isSubmitting=$_isSubmitting approvalCheckInProgress=$_approvalCheckInProgress approvalLocked=$_approvalLocked hardFraudBlock=$_hardFraudBlock hasRequiredTrustPhoto=$_hasRequiredTrustPhoto hasAllRequiredForSubmit=$_hasAllRequiredForSubmit disabledReasons=${_submitDisabledReasons().join(',')}',
+    );
   }
 
   List<XFile> get _allListingImages {
@@ -382,22 +469,76 @@ class _AddListingScreenState extends State<AddListingScreen> {
     return _fraudPrecheck.riskScore > 85 && !_hasRequiredTrustPhoto;
   }
 
+  String get _sellerDocUid => (widget.userData['uid'] ?? '').toString().trim();
+
+  Future<void> _logAuthSnapshot(
+    String stage, {
+    required String finalDecision,
+    required String reason,
+  }) async {
+    final String firebaseUid = (FirebaseAuth.instance.currentUser?.uid ?? '')
+        .trim();
+    final String localSessionUid =
+        (await _authService.getPersistedSessionUid() ?? '').trim();
+    debugPrint(
+      '[AddListingAuth] stage=$stage '
+      'firebaseUid=${firebaseUid.isEmpty ? 'null' : firebaseUid} '
+      'localSessionUid=${localSessionUid.isEmpty ? 'null' : localSessionUid} '
+      'sellerDocUid=${_sellerDocUid.isEmpty ? 'null' : _sellerDocUid} '
+      'finalDecision=$finalDecision '
+      'reason=$reason',
+    );
+  }
+
+  Future<bool> _ensureListingAuthSession(String stage) async {
+    final String firebaseUid = (FirebaseAuth.instance.currentUser?.uid ?? '')
+        .trim();
+    if (firebaseUid.isNotEmpty) {
+      await _logAuthSnapshot(
+        '${stage}_auth_present',
+        finalDecision: 'inspect',
+        reason: 'firebase_session_already_present',
+      );
+      return true;
+    }
+
+    final bool restored = await _authService.restoreFirebaseSessionForUserData(
+      widget.userData,
+      flowLabel: 'add_listing_$stage',
+    );
+    await _logAuthSnapshot(
+      '${stage}_after_restore',
+      finalDecision: restored ? 'inspect' : 'pending',
+      reason: restored
+          ? 'firebase_session_restored'
+          : 'firebase_session_restore_failed',
+    );
+    return restored;
+  }
+
   bool get _hasAllRequiredForSubmit {
     // Keep button state lightweight; full validation still runs inside _submitListing.
-    return !_isSubmitting && _hasRequiredTrustPhoto && !_hardFraudBlock;
+    return !_isSubmitting &&
+        !_approvalCheckInProgress &&
+        !_approvalLocked &&
+        _hasRequiredTrustPhoto &&
+        !_hardFraudBlock;
   }
 
   @override
   void initState() {
     super.initState();
-    _selectedUnitType = CategoryConstants.defaultUnitForMandiType(
-      _selectedMandiType,
-    );
+    _selectedUnitType = MandiUnitMapper.resolve(
+      categoryId: _selectedCategoryOptionId,
+      fallbackType: _selectedMandiType,
+      subcategoryLabel: _selectedProduct,
+    ).defaultUnit;
 
     final listeners = <TextEditingController>[
       _priceController,
       _quantityController,
       _weightController,
+      _cityController,
       _localAreaController,
       _descriptionController,
       _villageController,
@@ -409,14 +550,144 @@ class _AddListingScreenState extends State<AddListingScreen> {
       c.addListener(_onFormChange);
     }
     _fraudPrecheck = _runFraudPrecheck();
+    unawaited(
+      _logAuthSnapshot(
+        'screen_open',
+        finalDecision: 'inspect',
+        reason: 'screen_initialized',
+      ),
+    );
+    unawaited(_ensureListingAuthSession('screen_open'));
     unawaited(_loadPakistanLocationsAsset());
+    unawaited(_enforceSellerApprovalPolicy());
+  }
+
+  Future<void> _enforceSellerApprovalPolicy() async {
+    await _ensureListingAuthSession('approval_check');
+    final User? user = FirebaseAuth.instance.currentUser;
+    final String firebaseUid = (user?.uid ?? '').trim();
+    if (firebaseUid.isEmpty) {
+      await _logAuthSnapshot(
+        'approval_check_blocked',
+        finalDecision: 'block',
+        reason: 'firebase_auth_session_missing',
+      );
+      if (!mounted) return;
+      setState(() {
+        _approvalCheckInProgress = false;
+        _approvalLocked = true;
+        _approvalLockMessage =
+            'لاگ اِن ضروری ہے۔ براہِ کرم دوبارہ سائن اِن کریں تاکہ لسٹنگ پوسٹ ہو سکے۔';
+      });
+      return;
+    }
+
+    if (_sellerDocUid.isNotEmpty && _sellerDocUid != firebaseUid) {
+      await _logAuthSnapshot(
+        'approval_check_blocked',
+        finalDecision: 'block',
+        reason: 'seller_doc_uid_mismatch_firebase_uid',
+      );
+      if (!mounted) return;
+      setState(() {
+        _approvalCheckInProgress = false;
+        _approvalLocked = true;
+        _approvalLockMessage =
+            'سیشن میں تضاد ہے۔ براہِ کرم دوبارہ سائن اِن کریں۔';
+      });
+      return;
+    }
+
+    final String sellerDocUid = firebaseUid;
+
+    try {
+      final DocumentSnapshot<Map<String, dynamic>> snap =
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(sellerDocUid)
+              .get();
+
+      final Map<String, dynamic> profile = <String, dynamic>{
+        ...widget.userData,
+        ...(snap.data() ?? const <String, dynamic>{}),
+      };
+
+      final String verificationStatus = (profile['verificationStatus'] ?? '')
+          .toString()
+          .trim()
+          .toLowerCase();
+      final bool approved =
+          profile['isApproved'] == true ||
+          verificationStatus == 'approved' ||
+          verificationStatus == 'verified';
+      final bool suspended = profile['isSuspended'] == true;
+      final bool restricted = profile['listingRestricted'] == true;
+
+      String message = _approvalLockMessage;
+      bool locked = !approved;
+
+      if (suspended) {
+        locked = true;
+        message =
+            'آپ کا اکاؤنٹ عارضی طور پر معطل ہے۔ براہِ کرم ایڈمن سپورٹ سے رابطہ کریں۔';
+      } else if (restricted) {
+        locked = true;
+        message =
+            'آپ کی لسٹنگ رسائی محدود ہے۔ براہِ کرم ایڈمن سے منظوری کے بعد دوبارہ کوشش کریں۔';
+      } else if (verificationStatus == 'rejected') {
+        locked = true;
+        message =
+            'آپ کی سیلر تصدیق مسترد ہوئی ہے۔ پروفائل درست کر کے دوبارہ جائزہ کے لیے بھیجیں۔';
+      } else if (!approved) {
+        message =
+            'آپ کی سیلر منظوری زیرِ جائزہ ہے۔ منظوری کے بعد ہی آپ لسٹنگ پوسٹ کر سکیں گے۔';
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _approvalCheckInProgress = false;
+        _approvalLocked = locked;
+        _approvalLockMessage = message;
+      });
+      await _logAuthSnapshot(
+        'approval_check_complete',
+        finalDecision: locked ? 'block' : 'allow',
+        reason: locked ? 'seller_not_approved' : 'seller_approved',
+      );
+    } catch (_) {
+      await _logAuthSnapshot(
+        'approval_check_failed',
+        finalDecision: 'block',
+        reason: 'approval_doc_read_failed',
+      );
+      if (!mounted) return;
+      setState(() {
+        _approvalCheckInProgress = false;
+        _approvalLocked = true;
+        _approvalLockMessage =
+            'سیلر منظوری کی تصدیق اس وقت ممکن نہیں۔ انٹرنیٹ چیک کر کے دوبارہ کوشش کریں۔';
+      });
+    }
   }
 
   @override
   void dispose() {
+    // Remove _onFormChange listeners before disposal to satisfy
+    // ChangeNotifier debug assertions and prevent use-after-dispose.
+    _priceController.removeListener(_onFormChange);
+    _quantityController.removeListener(_onFormChange);
+    _weightController.removeListener(_onFormChange);
+    _cityController.removeListener(_onFormChange);
+    _localAreaController.removeListener(_onFormChange);
+    _villageController.removeListener(_onFormChange);
+    _descriptionController.removeListener(_onFormChange);
+    _breedController.removeListener(_onFormChange);
+    _ageController.removeListener(_onFormChange);
+    _fatController.removeListener(_onFormChange);
     _priceController.dispose();
     _quantityController.dispose();
     _weightController.dispose();
+    _cityController.dispose();
     _localAreaController.dispose();
     _villageController.dispose();
     _descriptionController.dispose();
@@ -432,7 +703,1869 @@ class _AddListingScreenState extends State<AddListingScreen> {
     if (!mounted) return;
     setState(() {
       _fraudPrecheck = _runFraudPrecheck();
+      _logSubmitGateStatus('form_change');
     });
+  }
+
+  String _formatDecimalForField(double value) {
+    if (value == value.roundToDouble()) {
+      return value.toStringAsFixed(0);
+    }
+    return value.toString();
+  }
+
+  String _normalizeVoiceToken(String raw) {
+    return raw
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9\u0600-\u06FF]+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
+  bool get _isAuctionSale => _selectedSaleType == 'auction';
+
+  static const List<String> _voiceAuctionTerms = <String>[
+    'auction',
+    'boli',
+    'بولی',
+    'bid',
+    'bidding',
+  ];
+
+  static const List<String> _voiceFixedTerms = <String>[
+    'fixed price',
+    'fixed rate',
+    'direct price',
+    'seedhi qeemat',
+    'seedha rate',
+    'سیدھی قیمت',
+  ];
+
+  String? _detectSaleTypeFromVoice(String transcript) {
+    final normalized = _normalizeVoiceToken(transcript);
+    if (normalized.isEmpty) return null;
+
+    final hasAuction = _voiceAuctionTerms.any(
+      (term) => _voiceTokenContains(normalized, term),
+    );
+    final hasFixed = _voiceFixedTerms.any(
+      (term) => _voiceTokenContains(normalized, term),
+    );
+
+    if (hasFixed && !hasAuction) return 'fixed';
+    if (hasAuction && !hasFixed) return 'auction';
+    return null;
+  }
+
+  bool _voiceTokenMatches(String raw, String candidate) {
+    final a = _normalizeVoiceToken(raw);
+    final b = _normalizeVoiceToken(candidate);
+    if (a.isEmpty || b.isEmpty) return false;
+    return a == b;
+  }
+
+  bool _voiceTokenContains(String raw, String candidate) {
+    final a = _normalizeVoiceToken(raw);
+    final b = _normalizeVoiceToken(candidate);
+    if (a.isEmpty || b.isEmpty) return false;
+    if (a == b || a.contains(b) || b.contains(a)) return true;
+    final compactA = a.replaceAll(' ', '');
+    final compactB = b.replaceAll(' ', '');
+    return compactA.contains(compactB) || compactB.contains(compactA);
+  }
+
+  static const Map<String, List<String>> _voiceLocationAliases =
+      <String, List<String>>{
+        'Lahore': <String>['lahore', 'لاہور'],
+        'Kasur': <String>['kasur', 'قصور'],
+        'Faisalabad': <String>['faisalabad', 'فیصل آباد', 'فیصلاباد'],
+        'Karachi': <String>['karachi', 'کراچی'],
+        'Multan': <String>['multan', 'ملتان'],
+        'Gujranwala': <String>['gujranwala', 'گوجرانوالہ'],
+        'Sahiwal': <String>['sahiwal', 'ساہیوال'],
+        'Okara': <String>['okara', 'اوکاڑہ'],
+        'Sheikhupura': <String>['sheikhupura', 'شیخوپورہ'],
+        'Punjab': <String>['punjab', 'پنجاب'],
+        'Sindh': <String>['sindh', 'سندھ'],
+        'Khyber Pakhtunkhwa (KPK)': <String>[
+          'kpk',
+          'kp',
+          'khyber pakhtunkhwa',
+          'خیبر پختونخوا',
+          'پختونخوا',
+        ],
+        'Balochistan': <String>['balochistan', 'بلوچستان'],
+      };
+
+  List<String> _locationSearchTerms(String option) {
+    final label = _locationOptionLabel(option);
+    final terms = <String>{
+      option.trim(),
+      label.trim(),
+      ..._splitBilingual(option).map((e) => e.trim()),
+      ..._splitBilingual(label).map((e) => e.trim()),
+      ...(_voiceLocationAliases[option] ?? const <String>[]),
+    }..removeWhere((e) => e.isEmpty);
+    final list = terms.toList()..sort((a, b) => b.length.compareTo(a.length));
+    return list;
+  }
+
+  String? _safeMatchLocationOption(String raw, List<String> options) {
+    final value = raw.trim();
+    if (value.isEmpty) return null;
+    for (final option in options) {
+      for (final term in _locationSearchTerms(option)) {
+        if (_voiceTokenMatches(value, term) ||
+            _voiceTokenContains(value, term)) {
+          return option;
+        }
+      }
+    }
+    return null;
+  }
+
+  String? _findBestTranscriptLocationOption(
+    String transcript,
+    List<String> options,
+  ) {
+    final source = transcript.trim();
+    if (source.isEmpty) return null;
+
+    String? bestOption;
+    var bestScore = 0;
+    for (final option in options) {
+      for (final term in _locationSearchTerms(option)) {
+        final normalizedTerm = _normalizeVoiceToken(term).replaceAll(' ', '');
+        if (normalizedTerm.isEmpty) continue;
+        if (_voiceTokenContains(source, term) &&
+            normalizedTerm.length > bestScore) {
+          bestScore = normalizedTerm.length;
+          bestOption = option;
+        }
+      }
+    }
+    return bestOption;
+  }
+
+  List<String> _cityOptionsForSelection({
+    required String district,
+    required String tehsil,
+  }) {
+    final safeDistrict = district.trim();
+    final safeTehsil = tehsil.trim();
+    if (safeDistrict.isEmpty || safeTehsil.isEmpty) {
+      return const <String>[];
+    }
+
+    if (_isLocationAssetReady && _locationAssetProvinces.isNotEmpty) {
+      for (final province in _locationAssetProvinces) {
+        for (final districtNode in province.districts) {
+          if (districtNode.nameEn.toLowerCase() != safeDistrict.toLowerCase()) {
+            continue;
+          }
+          for (final tehsilNode in districtNode.tehsils) {
+            if (tehsilNode.nameEn.toLowerCase() != safeTehsil.toLowerCase()) {
+              continue;
+            }
+            final cities = tehsilNode.cities
+                .map((e) => e.nameEn.trim())
+                .where((e) => e.isNotEmpty)
+                .toList(growable: false);
+            return cities;
+          }
+        }
+      }
+    }
+
+    return PakistanLocationHierarchy.citiesForTehsil(
+      district: safeDistrict,
+      tehsil: safeTehsil,
+    ).where((e) => e.trim().isNotEmpty).toList(growable: false);
+  }
+
+  bool _isDistinctLocalArea(
+    String value, {
+    String province = '',
+    String district = '',
+    String tehsil = '',
+  }) {
+    final local = value.trim();
+    if (local.isEmpty) return false;
+    return !_voiceTokenContains(local, province) &&
+        !_voiceTokenContains(local, district) &&
+        !_voiceTokenContains(local, tehsil);
+  }
+
+  Map<String, String> _resolveTranscriptLocation({
+    required String transcript,
+    required GeminiVoiceDraft draft,
+  }) {
+    final result = <String, String>{};
+
+    var province =
+        _safeMatchLocationOption(draft.province, _provinceOptions) ??
+        _findBestTranscriptLocationOption(transcript, _provinceOptions);
+    if ((province ?? '').isNotEmpty) {
+      result['province'] = province!;
+    }
+
+    final districtPool = (province ?? '').isNotEmpty
+        ? _districtOptionsForProvince(province!)
+        : _allDistricts;
+    var district =
+        _safeMatchLocationOption(draft.district, districtPool) ??
+        _findBestTranscriptLocationOption(transcript, districtPool);
+
+    if ((district ?? '').isEmpty && transcript.trim().isNotEmpty) {
+      for (final token in _extractLocationTokens(transcript)) {
+        final hit = _resolveVoiceLocation(token);
+        if ((hit['district'] ?? '').isNotEmpty) {
+          district = hit['district']!.trim();
+          province ??= hit['province']?.trim();
+          break;
+        }
+      }
+    }
+
+    if ((district ?? '').isNotEmpty) {
+      result['district'] = district!;
+      province ??= _findProvinceForDistrict(district);
+      if ((province ?? '').isNotEmpty) {
+        result['province'] = province!;
+      }
+    }
+
+    final tehsilPool = (district ?? '').isNotEmpty
+        ? _tehsilOptionsForDistrict(district!)
+        : const <String>[];
+    var tehsil =
+        _safeMatchLocationOption(draft.tehsil, tehsilPool) ??
+        _findBestTranscriptLocationOption(transcript, tehsilPool);
+    if ((tehsil ?? '').isEmpty && tehsilPool.length == 1) {
+      tehsil = tehsilPool.first;
+    }
+    if ((tehsil ?? '').isNotEmpty) {
+      result['tehsil'] = tehsil!;
+    }
+
+    final cityPool = (district ?? '').isNotEmpty && (tehsil ?? '').isNotEmpty
+        ? _cityOptionsForSelection(district: district!, tehsil: tehsil!)
+        : const <String>[];
+    final matchedLocalArea =
+        _safeMatchLocationOption(draft.localArea, cityPool) ??
+        _findBestTranscriptLocationOption(transcript, cityPool);
+    if ((matchedLocalArea ?? '').isNotEmpty &&
+        _isDistinctLocalArea(
+          matchedLocalArea!,
+          province: result['province'] ?? '',
+          district: result['district'] ?? '',
+          tehsil: result['tehsil'] ?? '',
+        )) {
+      result['localArea'] = matchedLocalArea;
+    } else if (_isDistinctLocalArea(
+      draft.localArea,
+      province: result['province'] ?? '',
+      district: result['district'] ?? '',
+      tehsil: result['tehsil'] ?? '',
+    )) {
+      result['localArea'] = draft.localArea.trim();
+    }
+
+    return result;
+  }
+
+  String? _safeMatchOption(
+    String raw,
+    List<String> options, {
+    String Function(String)? labelBuilder,
+  }) {
+    final value = raw.trim();
+    if (value.isEmpty) return null;
+    for (final option in options) {
+      final label = labelBuilder?.call(option) ?? option;
+      if (_voiceTokenMatches(value, option) ||
+          _voiceTokenMatches(value, label)) {
+        return option;
+      }
+      final parts = _splitBilingual(label);
+      if (_voiceTokenMatches(value, parts[0]) ||
+          _voiceTokenMatches(value, parts[1])) {
+        return option;
+      }
+    }
+    return null;
+  }
+
+  MarketCategoryOption? _safeMatchCategory(String raw) {
+    final value = raw.trim();
+    if (value.isEmpty) return null;
+    for (final option in MarketHierarchy.listingCategories) {
+      if (_voiceTokenMatches(value, option.id) ||
+          _voiceTokenMatches(value, option.labelEn) ||
+          _voiceTokenMatches(value, option.labelUr) ||
+          _voiceTokenMatches(value, option.bilingualLabel)) {
+        return option;
+      }
+    }
+    return null;
+  }
+
+  UnitType? _safeMatchUnit(String raw, List<UnitType> options) {
+    final value = raw.trim();
+    if (value.isEmpty) return null;
+    for (final option in options) {
+      final aliases = <String>[
+        option.wireValue,
+        option.urduLabel,
+        switch (option) {
+          UnitType.mann => 'man',
+          UnitType.kg => 'kilo',
+          UnitType.litre => 'liter',
+          UnitType.perHead => 'per head',
+          UnitType.peti => 'peti',
+        },
+      ];
+      for (final alias in aliases) {
+        if (_voiceTokenMatches(value, alias)) {
+          return option;
+        }
+      }
+    }
+    return null;
+  }
+
+  // Alias -> exact in-app taxonomy subcategory label (source of truth).
+  static const Map<String, String> _voiceAliasToTaxonomySubcategory =
+      <String, String>{
+        'aalu': 'Potato / آلو',
+        'aloo': 'Potato / آلو',
+        'alu': 'Potato / آلو',
+        'potato': 'Potato / آلو',
+        'آلو': 'Potato / آلو',
+        'pyaz': 'Onion / پیاز',
+        'onion': 'Onion / پیاز',
+        'پیاز': 'Onion / پیاز',
+        'tamatar': 'Tomato / ٹماٹر',
+        'tomato': 'Tomato / ٹماٹر',
+        'ٹماٹر': 'Tomato / ٹماٹر',
+        'shimla mirch': 'Capsicum / شملہ مرچ',
+        'capsicum': 'Capsicum / شملہ مرچ',
+        'شملہ مرچ': 'Capsicum / شملہ مرچ',
+        'mirch': 'Chili / مرچ',
+        'chili': 'Chili / مرچ',
+        'مرچ': 'Chili / مرچ',
+        'gandum': 'Wheat / گندم',
+        'gehun': 'Wheat / گندم',
+        'wheat': 'Wheat / گندم',
+        'گندم': 'Wheat / گندم',
+        'chawal': 'Processed Rice / چاول',
+        'rice': 'Processed Rice / چاول',
+        'چاول': 'Processed Rice / چاول',
+        'dhan': 'Rice Crop (Paddy) / دھان',
+        'paddy': 'Rice Crop (Paddy) / دھان',
+        'دھان': 'Rice Crop (Paddy) / دھان',
+        'broiler': 'Broiler / برائلر',
+        'برائلر': 'Broiler / برائلر',
+        'desi chicken': 'Desi Chicken / دیسی مرغی',
+        'دیسی مرغی': 'Desi Chicken / دیسی مرغی',
+        'bakra': 'Goat / بکری',
+        'goat': 'Goat / بکری',
+        'بکرا': 'Goat / بکری',
+        'بکری': 'Goat / بکری',
+      };
+
+  ({MarketCategoryOption? category, String? subcategory})
+  _findTaxonomyMatchFromTranscript(String transcript) {
+    final normalizedTranscript = _normalizeVoiceToken(transcript);
+    if (normalizedTranscript.isEmpty) {
+      return (category: null, subcategory: null);
+    }
+
+    final categoryById = <String, MarketCategoryOption>{
+      for (final c in MarketHierarchy.listingCategories) c.id: c,
+    };
+
+    MarketCategoryOption? matchedCategory;
+    String? matchedSubcategory;
+
+    final aliasKeys = _voiceAliasToTaxonomySubcategory.keys.toList()
+      ..sort((a, b) => b.length.compareTo(a.length));
+    for (final alias in aliasKeys) {
+      final aliasNorm = _normalizeVoiceToken(alias);
+      if (aliasNorm.isEmpty || !normalizedTranscript.contains(aliasNorm)) {
+        continue;
+      }
+      final targetSubLabel = _voiceAliasToTaxonomySubcategory[alias] ?? '';
+      if (targetSubLabel.isEmpty) continue;
+
+      for (final category in MarketHierarchy.listingCategories) {
+        final options = CategoryConstants.itemsForCategoryId(category.id);
+        final safe = _safeMatchOption(targetSubLabel, options);
+        if (safe != null) {
+          matchedCategory = categoryById[category.id];
+          matchedSubcategory = safe;
+          return (category: matchedCategory, subcategory: matchedSubcategory);
+        }
+      }
+    }
+
+    // Backup: direct spoken match against existing in-app options.
+    var bestScore = 0;
+    for (final category in MarketHierarchy.listingCategories) {
+      final options = CategoryConstants.itemsForCategoryId(category.id);
+      for (final option in options) {
+        final parts = _splitBilingual(option);
+        final candidates = <String>[option, parts[0], parts[1]];
+        for (final candidate in candidates) {
+          final norm = _normalizeVoiceToken(candidate);
+          if (norm.isEmpty) continue;
+          if (normalizedTranscript.contains(norm) && norm.length > bestScore) {
+            bestScore = norm.length;
+            matchedCategory = categoryById[category.id];
+            matchedSubcategory = option;
+          }
+        }
+      }
+    }
+
+    return (category: matchedCategory, subcategory: matchedSubcategory);
+  }
+
+  static const Set<String> _descriptionHintKeywords = <String>{
+    'fresh',
+    'quality',
+    'achi',
+    'zabardast',
+    'delivery',
+    'available',
+    'ready',
+    'behtareen',
+    'maal',
+    'seedha',
+    'direct',
+    'mandi',
+  };
+
+  static const Set<String> _descriptionFillerWords = <String>{
+    'mein',
+    'main',
+    'ma',
+    'se',
+    'ka',
+    'ki',
+    'ke',
+    'wala',
+    'wali',
+    'walay',
+    'waliyan',
+    'from',
+    'ye',
+    'yeh',
+    'tha',
+    'the',
+    'hain',
+  };
+
+  String _extractDescriptionCandidateWindow(String source) {
+    final normalized = GeminiVoiceHelper.normalizeVoiceText(source);
+    if (normalized.isEmpty) return '';
+
+    final tokens = normalized
+        .split(' ')
+        .where((token) => token.trim().isNotEmpty)
+        .toList(growable: false);
+    if (tokens.isEmpty) return '';
+
+    var hitIndex = -1;
+    for (var i = 0; i < tokens.length; i++) {
+      final token = tokens[i];
+      final matched = _descriptionHintKeywords.any(
+        (keyword) =>
+            token == keyword ||
+            token.contains(keyword) ||
+            keyword.contains(token),
+      );
+      if (matched) {
+        hitIndex = i;
+        break;
+      }
+    }
+
+    if (hitIndex < 0) {
+      return normalized;
+    }
+
+    final start = hitIndex - 2 < 0 ? 0 : hitIndex - 2;
+    final end = hitIndex + 2 >= tokens.length
+        ? tokens.length - 1
+        : hitIndex + 2;
+    return tokens.sublist(start, end + 1).join(' ');
+  }
+
+  Set<String> _allLocationTermsForDescription() {
+    final terms = <String>{};
+
+    for (final province in _provinceOptions) {
+      terms.add(province);
+      terms.add(_locationOptionLabel(province));
+      terms.addAll(_splitBilingual(_locationOptionLabel(province)));
+      terms.addAll(_voiceLocationAliases[province] ?? const <String>[]);
+    }
+
+    for (final district in _allDistricts) {
+      terms.add(district);
+      terms.add(_locationOptionLabel(district));
+      terms.addAll(_splitBilingual(_locationOptionLabel(district)));
+      terms.addAll(_voiceLocationAliases[district] ?? const <String>[]);
+    }
+
+    if (_isLocationAssetReady && _locationAssetProvinces.isNotEmpty) {
+      for (final province in _locationAssetProvinces) {
+        for (final district in province.districts) {
+          for (final tehsil in district.tehsils) {
+            terms.add(tehsil.nameEn);
+            terms.add(_locationOptionLabel(tehsil.nameEn));
+            terms.addAll(_splitBilingual(_locationOptionLabel(tehsil.nameEn)));
+            terms.addAll(
+              _voiceLocationAliases[tehsil.nameEn] ?? const <String>[],
+            );
+          }
+        }
+      }
+    } else {
+      for (final district in _allDistricts) {
+        for (final tehsil in PakistanLocationHierarchy.tehsilsForDistrict(
+          district,
+        )) {
+          terms.add(tehsil);
+          terms.add(_locationOptionLabel(tehsil));
+          terms.addAll(_splitBilingual(_locationOptionLabel(tehsil)));
+          terms.addAll(_voiceLocationAliases[tehsil] ?? const <String>[]);
+        }
+      }
+    }
+
+    return terms
+      ..removeWhere((term) => term.trim().isEmpty)
+      ..addAll(<String>[
+        'punjab',
+        'sindh',
+        'kpk',
+        'balochistan',
+        'lahore',
+        'kasur',
+        'faisalabad',
+      ]);
+  }
+
+  Set<String> _allCategoryTermsForDescription() {
+    final terms = <String>{};
+
+    for (final category in MarketHierarchy.listingCategories) {
+      terms.add(category.id);
+      terms.add(category.labelEn);
+      terms.add(category.labelUr);
+      terms.add(category.bilingualLabel);
+      terms.addAll(_splitBilingual(category.bilingualLabel));
+      terms.addAll(CategoryConstants.itemsForCategoryId(category.id));
+      for (final option in CategoryConstants.itemsForCategoryId(category.id)) {
+        terms.addAll(_splitBilingual(option));
+      }
+    }
+
+    terms.addAll(_voiceAliasToTaxonomySubcategory.keys);
+    terms.addAll(_voiceAliasToTaxonomySubcategory.values);
+
+    return terms..removeWhere((term) => term.trim().isEmpty);
+  }
+
+  String _stripDescriptionTerms(String input, Set<String> stripTerms) {
+    var desc = input;
+    final sortedTerms = stripTerms.toList()
+      ..sort((a, b) => b.trim().length.compareTo(a.trim().length));
+
+    for (final term in sortedTerms) {
+      for (final token in _splitBilingual(term)) {
+        final normalizedToken = GeminiVoiceHelper.normalizeVoiceText(token);
+        if (normalizedToken.isEmpty) continue;
+        desc = desc.replaceAll(
+          RegExp(
+            r'\b' + RegExp.escape(normalizedToken) + r'\b',
+            caseSensitive: false,
+          ),
+          ' ',
+        );
+      }
+    }
+
+    return desc;
+  }
+
+  String _compactDescription(String input) {
+    final rawTokens = input
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim()
+        .split(' ')
+        .where((token) => token.trim().isNotEmpty)
+        .toList(growable: false);
+    if (rawTokens.isEmpty) return '';
+
+    final output = <String>[];
+    for (final token in rawTokens) {
+      if (_descriptionFillerWords.contains(token)) {
+        continue;
+      }
+      if (output.isNotEmpty && output.last == token) {
+        continue;
+      }
+      output.add(token);
+    }
+
+    if (output.isEmpty) return '';
+    if (output.length == 1 && output.first == 'hai') return '';
+    return output.join(' ').trim();
+  }
+
+  String _finalDescriptionSafetyPass(String input, Set<String> safetyTerms) {
+    var desc = input;
+
+    desc = desc.replaceAll(RegExp(r'\b\d+(?:[.,]\d+)?\b'), ' ');
+    desc = _stripDescriptionTerms(desc, safetyTerms);
+    desc = desc.replaceAll(
+      RegExp(
+        r'\b(kilo|kg|kilogram|mann|man|maund|litre|liter|ltr|peti|crate)\b',
+        caseSensitive: false,
+      ),
+      ' ',
+    );
+    desc = desc.replaceAll(
+      RegExp(r'\b(rupay|rupee|rupees|rs\.?|pkr|روپے)\b', caseSensitive: false),
+      ' ',
+    );
+
+    return _compactDescription(desc);
+  }
+
+  String _cleanVoiceDescription({
+    required String source,
+    required String quantity,
+    required String unit,
+    required String price,
+    required String category,
+    required String subcategory,
+    required String province,
+    required String district,
+    required String tehsil,
+    required String localArea,
+  }) {
+    final normalized = GeminiVoiceHelper.normalizeVoiceText(source);
+    if (normalized.isEmpty) return '';
+
+    final rawCandidate = _extractDescriptionCandidateWindow(normalized);
+    debugPrint('[VoiceListing] raw_description_candidate=$rawCandidate');
+
+    var desc = rawCandidate;
+    desc = desc.replaceAll(RegExp(r'\b\d+(?:[.,]\d+)?\b'), ' ');
+    desc = desc.replaceAll(
+      RegExp(
+        r'\b(kilo|kg|kilogram|mann|man|maund|litre|liter|ltr|peti|crate)\b',
+        caseSensitive: false,
+      ),
+      ' ',
+    );
+    desc = desc.replaceAll(
+      RegExp(r'\b(rupay|rupee|rupees|rs\.?|pkr|روپے)\b', caseSensitive: false),
+      ' ',
+    );
+
+    final numericFragments = <String>{
+      quantity.trim(),
+      quantity.replaceAll(RegExp(r'\s+'), ''),
+      price.trim(),
+      price.replaceAll(RegExp(r'\s+'), ''),
+      ...quantity.split(RegExp(r'\s+')),
+      ...price.split(RegExp(r'\s+')),
+    }..removeWhere((value) => value.trim().isEmpty);
+    for (final fragment in numericFragments) {
+      desc = desc.replaceAll(
+        RegExp(
+          r'\b' + RegExp.escape(fragment.trim()) + r'\b',
+          caseSensitive: false,
+        ),
+        ' ',
+      );
+    }
+
+    final stripTerms = <String>{
+      unit.trim(),
+      category.trim(),
+      ..._splitBilingual(category),
+      subcategory.trim(),
+      ..._splitBilingual(subcategory),
+      province.trim(),
+      district.trim(),
+      tehsil.trim(),
+      localArea.trim(),
+      ..._voiceLocationAliases[province] ?? const <String>[],
+      ..._voiceLocationAliases[district] ?? const <String>[],
+      ..._voiceLocationAliases[tehsil] ?? const <String>[],
+      ..._voiceLocationAliases[localArea] ?? const <String>[],
+      ..._allLocationTermsForDescription(),
+      ..._allCategoryTermsForDescription(),
+    }..removeWhere((term) => term.trim().isEmpty);
+
+    desc = _stripDescriptionTerms(desc, stripTerms);
+    desc = _compactDescription(desc);
+
+    final finalSafetyTerms = <String>{
+      province,
+      district,
+      tehsil,
+      localArea,
+      category,
+      subcategory,
+      ..._allLocationTermsForDescription(),
+      ..._allCategoryTermsForDescription(),
+    }..removeWhere((term) => term.trim().isEmpty);
+    final cleaned = _finalDescriptionSafetyPass(desc, finalSafetyTerms);
+
+    debugPrint('[VoiceListing] cleaned_description_final=$cleaned');
+    debugPrint('[VoiceListing] description_length=${cleaned.length}');
+
+    return cleaned;
+  }
+
+  List<String> _districtOptionsForProvince(String province) {
+    final p = province.trim();
+    if (p.isEmpty) return const <String>[];
+    if (_isLocationAssetReady && _locationAssetProvinces.isNotEmpty) {
+      final match = _locationAssetProvinces.where(
+        (e) => e.nameEn.toLowerCase() == p.toLowerCase(),
+      );
+      if (match.isNotEmpty) {
+        return match.first.districts
+            .map((e) => e.nameEn)
+            .toList(growable: false);
+      }
+    }
+    return PakistanLocationHierarchy.districtsForProvince(p);
+  }
+
+  List<String> _tehsilOptionsForDistrict(String district) {
+    final d = district.trim();
+    if (d.isEmpty) return const <String>[];
+    if (_isLocationAssetReady && _locationAssetProvinces.isNotEmpty) {
+      for (final province in _locationAssetProvinces) {
+        for (final districtNode in province.districts) {
+          if (districtNode.nameEn.toLowerCase() == d.toLowerCase()) {
+            return districtNode.tehsils
+                .map((e) => e.nameEn)
+                .toList(growable: false);
+          }
+        }
+      }
+    }
+    return PakistanLocationHierarchy.tehsilsForDistrict(d);
+  }
+
+  /// Returns the province name for a given district, searching loaded asset
+  /// first, then AppConstants.pakistanLocations.
+  String? _findProvinceForDistrict(String district) {
+    final dLower = district.trim().toLowerCase();
+    if (dLower.isEmpty) return null;
+
+    if (_isLocationAssetReady && _locationAssetProvinces.isNotEmpty) {
+      for (final province in _locationAssetProvinces) {
+        for (final d in province.districts) {
+          if (d.nameEn.toLowerCase() == dLower) return province.nameEn;
+        }
+      }
+    }
+
+    for (final entry in AppConstants.pakistanLocations.entries) {
+      for (final d in entry.value) {
+        if (d.toLowerCase() == dLower) return entry.key;
+      }
+    }
+    return null;
+  }
+
+  /// Resolves a location token (city / district / province alias) to
+  /// {province?, district?, tehsil?} using the app's existing location data.
+  Map<String, String> _resolveVoiceLocation(String token) {
+    final raw = token.trim();
+    final lower = raw.toLowerCase();
+    if (lower.isEmpty) return const {};
+    final result = <String, String>{};
+
+    // 1. Try loaded JSON asset (most complete data)
+    if (_isLocationAssetReady && _locationAssetProvinces.isNotEmpty) {
+      for (final province in _locationAssetProvinces) {
+        if (_voiceTokenMatches(raw, province.nameEn) ||
+            _voiceTokenContains(raw, province.nameEn) ||
+            _voiceTokenMatches(raw, _locationOptionLabel(province.nameEn)) ||
+            _voiceTokenContains(raw, _locationOptionLabel(province.nameEn))) {
+          result['province'] = province.nameEn;
+          return result;
+        }
+        for (final district in province.districts) {
+          if (_voiceTokenMatches(raw, district.nameEn) ||
+              _voiceTokenContains(raw, district.nameEn) ||
+              _voiceTokenMatches(raw, _locationOptionLabel(district.nameEn)) ||
+              _voiceTokenContains(raw, _locationOptionLabel(district.nameEn))) {
+            result['province'] = province.nameEn;
+            result['district'] = district.nameEn;
+            return result;
+          }
+          for (final tehsil in district.tehsils) {
+            if (_voiceTokenMatches(raw, tehsil.nameEn) ||
+                _voiceTokenContains(raw, tehsil.nameEn) ||
+                _voiceTokenMatches(raw, _locationOptionLabel(tehsil.nameEn)) ||
+                _voiceTokenContains(raw, _locationOptionLabel(tehsil.nameEn))) {
+              result['province'] = province.nameEn;
+              result['district'] = district.nameEn;
+              result['tehsil'] = tehsil.nameEn;
+              return result;
+            }
+          }
+        }
+      }
+    }
+
+    // 2. Fall back to AppConstants + PakistanLocationHierarchy static data
+    for (final entry in AppConstants.pakistanLocations.entries) {
+      for (final district in entry.value) {
+        if (_voiceTokenMatches(raw, district) ||
+            _voiceTokenContains(raw, district) ||
+            _voiceTokenMatches(raw, _locationOptionLabel(district)) ||
+            _voiceTokenContains(raw, _locationOptionLabel(district))) {
+          result['province'] = entry.key;
+          result['district'] = district;
+          // Try to get tehsils for this district
+          final tehsils = PakistanLocationHierarchy.tehsilsForDistrict(
+            district,
+          );
+          if (tehsils.length == 1) result['tehsil'] = tehsils.first;
+          return result;
+        }
+        final tehsils = PakistanLocationHierarchy.tehsilsForDistrict(district);
+        for (final tehsil in tehsils) {
+          if (_voiceTokenMatches(raw, tehsil) ||
+              _voiceTokenContains(raw, tehsil) ||
+              _voiceTokenMatches(raw, _locationOptionLabel(tehsil)) ||
+              _voiceTokenContains(raw, _locationOptionLabel(tehsil))) {
+            result['province'] = entry.key;
+            result['district'] = district;
+            result['tehsil'] = tehsil;
+            return result;
+          }
+        }
+      }
+    }
+
+    // 3. Province alias matching
+    const provinceAliasMap = <String, String>{
+      'punjab': 'Punjab',
+      'sindh': 'Sindh',
+      'balochistan': 'Balochistan',
+      'kpk': 'Khyber Pakhtunkhwa (KPK)',
+      'kp': 'Khyber Pakhtunkhwa (KPK)',
+      'khyber': 'Khyber Pakhtunkhwa (KPK)',
+      'gilgit': 'Gilgit-Baltistan',
+      'gb': 'Gilgit-Baltistan',
+      'ajk': 'Azad Jammu & Kashmir (AJK)',
+      'kashmir': 'Azad Jammu & Kashmir (AJK)',
+    };
+    if (provinceAliasMap.containsKey(lower)) {
+      result['province'] = provinceAliasMap[lower]!;
+    }
+
+    return result;
+  }
+
+  Future<String?> _captureVoiceTranscriptFromMic() async {
+    debugPrint('[VoiceListing] button_tapped');
+
+    try {
+      final ValueNotifier<String> transcriptNotifier = ValueNotifier<String>(
+        '',
+      );
+      final List<String> finalChunks = <String>[];
+      String currentPartial = '';
+      bool stopRequested = false;
+
+      String buildTranscript() {
+        final parts = <String>[...finalChunks];
+        final partial = currentPartial.trim();
+        if (partial.isNotEmpty) {
+          parts.add(partial);
+        }
+        return parts.join(' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+      }
+
+      Future<void> startListening({String? localeId}) async {
+        try {
+          await _speechToText.listen(
+            localeId: localeId,
+            listenFor: const Duration(seconds: 60),
+            pauseFor: const Duration(seconds: 5),
+            listenOptions: stt.SpeechListenOptions(
+              listenMode: stt.ListenMode.dictation,
+              partialResults: true,
+              cancelOnError: false,
+            ),
+            onResult: (result) {
+              final words = result.recognizedWords.trim();
+              currentPartial = words;
+              if (result.finalResult && words.isNotEmpty) {
+                if (finalChunks.isEmpty || finalChunks.last != words) {
+                  finalChunks.add(words);
+                }
+                currentPartial = '';
+              }
+              transcriptNotifier.value = buildTranscript();
+            },
+          );
+        } catch (e) {
+          debugPrint('[VoiceListing] ERROR stage=listen_start message=$e');
+          if (localeId != null) {
+            await startListening();
+          }
+        }
+      }
+
+      final ready = await _speechToText.initialize(
+        onError: (error) {
+          debugPrint(
+            '[VoiceListing] ERROR stage=speech_initialize message=${error.errorMsg}',
+          );
+        },
+        onStatus: (status) {
+          if (status == 'done' || status == 'notListening') {
+            debugPrint('[VoiceListing] recording_finished');
+            if (!stopRequested && _isVoiceListening) {
+              unawaited(startListening(localeId: 'ur_PK'));
+            }
+          }
+        },
+      );
+
+      if (!ready) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Microphone permission ya speech service unavailable. Manual form use karein.',
+              ),
+            ),
+          );
+        }
+        transcriptNotifier.dispose();
+        return null;
+      }
+
+      setState(() {
+        _isVoiceListening = true;
+      });
+      debugPrint('[VoiceListing] recording_started');
+      await startListening(localeId: 'ur_PK');
+
+      if (!mounted) {
+        await _speechToText.stop();
+        transcriptNotifier.dispose();
+        return null;
+      }
+
+      final action = await showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) {
+          return AlertDialog(
+            backgroundColor: _darkGreenMid,
+            title: const Text(
+              'Sunte Hain... / سن رہے ہیں...',
+              style: TextStyle(color: AppColors.primaryText),
+            ),
+            content: ValueListenableBuilder<String>(
+              valueListenable: transcriptNotifier,
+              builder: (context, value, _) {
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      'Boliye, phir Stop dabayein.\nبولیے، پھر اسٹاپ دبائیں۔',
+                      style: TextStyle(
+                        color: AppColors.primaryText.withValues(alpha: 0.86),
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: AppColors.primaryText.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: AppColors.primaryText.withValues(alpha: 0.2),
+                        ),
+                      ),
+                      child: Text(
+                        value.trim().isEmpty ? '...' : value,
+                        style: const TextStyle(color: AppColors.primaryText),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop('manual'),
+                child: const Text(
+                  'Manual Edit',
+                  style: TextStyle(color: AppColors.primaryText),
+                ),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.of(dialogContext).pop('stop'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _gold,
+                  foregroundColor: AppColors.ctaTextDark,
+                ),
+                child: const Text('Stop'),
+              ),
+            ],
+          );
+        },
+      );
+
+      stopRequested = true;
+      final pending = currentPartial.trim();
+      if (pending.isNotEmpty) {
+        if (finalChunks.isEmpty || finalChunks.last != pending) {
+          finalChunks.add(pending);
+        }
+      }
+      await _speechToText.stop();
+      final transcript = buildTranscript();
+      transcriptNotifier.dispose();
+      debugPrint('[VOICE] transcript_final=$transcript');
+      debugPrint('[VOICE] FINAL TRANSCRIPT = $transcript');
+
+      if (mounted) {
+        setState(() {
+          _isVoiceListening = false;
+        });
+      }
+
+      if (action != 'stop') {
+        debugPrint('[VoiceListing] manual_edit_selected');
+        return null;
+      }
+
+      if (transcript.isEmpty && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Transcript empty. Please speak clearly and try again.',
+            ),
+          ),
+        );
+        return null;
+      }
+      return transcript;
+    } catch (e) {
+      debugPrint('[VoiceListing] ERROR stage=speech_flow message=$e');
+      if (mounted) {
+        setState(() {
+          _isVoiceListening = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Voice recording fail hui. Manual form abhi bhi available hai.',
+            ),
+          ),
+        );
+      }
+      return null;
+    }
+  }
+
+  _VoiceApplyPlan _buildVoiceApplyPlan(
+    GeminiVoiceDraft draft, {
+    String transcript = '',
+  }) {
+    final normalizedTranscript = _normalizeVoiceToken(transcript);
+    debugPrint('[VoiceListing] normalized_transcript=$normalizedTranscript');
+
+    final applied = <String, dynamic>{};
+    final suggestions = <String, String>{};
+    final recognized = <String, String>{
+      if (draft.category.trim().isNotEmpty) 'category': draft.category.trim(),
+      if (draft.subcategory.trim().isNotEmpty)
+        'subcategory': draft.subcategory.trim(),
+      if (draft.quantity.trim().isNotEmpty) 'quantity': draft.quantity.trim(),
+      if (draft.unit.trim().isNotEmpty) 'unit': draft.unit.trim(),
+      if (draft.price.trim().isNotEmpty) 'price': draft.price.trim(),
+      if (draft.province.trim().isNotEmpty) 'province': draft.province.trim(),
+      if (draft.district.trim().isNotEmpty) 'district': draft.district.trim(),
+      if (draft.tehsil.trim().isNotEmpty) 'tehsil': draft.tehsil.trim(),
+      if (draft.localArea.trim().isNotEmpty)
+        'localArea': draft.localArea.trim(),
+      if (draft.description.trim().isNotEmpty)
+        'description': draft.description.trim(),
+    };
+
+    final detectedSaleType = _detectSaleTypeFromVoice(transcript);
+    if ((detectedSaleType ?? '').isNotEmpty) {
+      applied['saleType'] = detectedSaleType;
+      recognized['saleType'] = detectedSaleType == 'fixed'
+          ? 'Fixed Price / سیدھی قیمت'
+          : 'Auction / بولی';
+      debugPrint('[VoiceListing] matched_sale_type=$detectedSaleType');
+    }
+
+    // ── CATEGORY: try Gemini/fallback output first, then taxonomy transcript match ─────
+    var category = _safeMatchCategory(draft.category);
+
+    final taxonomyMatch = transcript.trim().isEmpty
+        ? (
+            category: null as MarketCategoryOption?,
+            subcategory: null as String?,
+          )
+        : _findTaxonomyMatchFromTranscript(transcript);
+
+    if (category == null && taxonomyMatch.category != null) {
+      category = taxonomyMatch.category;
+    }
+    if (category != null) {
+      applied['category'] = category;
+      debugPrint(
+        '[VoiceListing] matched_category=${category.id}|${category.bilingualLabel}',
+      );
+    } else if (draft.category.trim().isNotEmpty) {
+      suggestions['category'] = draft.category.trim();
+      debugPrint('[VoiceListing] skipped_field=category reason=no_exact_match');
+      debugPrint('[VoiceListing] matched_category=none');
+    } else {
+      debugPrint('[VoiceListing] matched_category=none');
+    }
+
+    // ── SUBCATEGORY: use Gemini/fallback label, then keyword scan ─────────
+    final targetCategoryId =
+        (applied['category'] as MarketCategoryOption?)?.id ??
+        _selectedCategoryOptionId;
+    var subcategoryMatch = _safeMatchOption(
+      draft.subcategory,
+      CategoryConstants.itemsForCategoryId(targetCategoryId),
+    );
+    if (subcategoryMatch == null && taxonomyMatch.subcategory != null) {
+      subcategoryMatch = _safeMatchOption(
+        taxonomyMatch.subcategory!,
+        CategoryConstants.itemsForCategoryId(targetCategoryId),
+      );
+    }
+    if (subcategoryMatch != null) {
+      applied['subcategory'] = subcategoryMatch;
+      debugPrint('[VoiceListing] matched_subcategory=$subcategoryMatch');
+    } else if (draft.subcategory.trim().isNotEmpty) {
+      suggestions['subcategory'] = draft.subcategory.trim();
+      debugPrint(
+        '[VoiceListing] skipped_field=subcategory reason=no_exact_match',
+      );
+      debugPrint('[VoiceListing] matched_subcategory=none');
+    } else {
+      debugPrint('[VoiceListing] matched_subcategory=none');
+    }
+
+    final parsedQty = GeminiVoiceHelper.parsePositiveNumber(draft.quantity);
+    if (parsedQty != null) {
+      applied['quantity'] = _formatDecimalForField(parsedQty);
+    } else if (draft.quantity.trim().isNotEmpty) {
+      suggestions['quantity'] = draft.quantity.trim();
+      debugPrint(
+        '[VoiceListing] skipped_field=quantity reason=invalid_numeric',
+      );
+    }
+
+    String? mergedPriceTokens;
+    if (transcript.trim().isEmpty) {
+      debugPrint('[VoiceListing] merged_price_tokens=none');
+    } else {
+      mergedPriceTokens = GeminiVoiceHelper.extractMergedPriceTokens(
+        transcript,
+      );
+    }
+    final parsedPrice = GeminiVoiceHelper.parsePositiveNumber(
+      (mergedPriceTokens ?? '').trim().isNotEmpty
+          ? mergedPriceTokens!
+          : draft.price,
+    );
+    debugPrint(
+      '[VoiceListing] parsed_price=${parsedPrice != null ? _formatDecimalForField(parsedPrice) : 'none'}',
+    );
+    if (parsedPrice != null) {
+      applied['price'] = _formatDecimalForField(parsedPrice);
+    } else if (draft.price.trim().isNotEmpty) {
+      suggestions['price'] = draft.price.trim();
+      debugPrint('[VoiceListing] skipped_field=price reason=invalid_numeric');
+    }
+
+    final categoryForUnit =
+        (applied['category'] as MarketCategoryOption?)?.id ??
+        _selectedCategoryOptionId;
+    final mandiForUnit =
+        (applied['category'] as MarketCategoryOption?)?.mandiType ??
+        _selectedMandiType;
+    final subcategoryForUnit =
+        (applied['subcategory'] as String?) ?? _selectedProduct;
+    final allowedUnits = MandiUnitMapper.resolve(
+      categoryId: categoryForUnit,
+      fallbackType: mandiForUnit,
+      subcategoryLabel: subcategoryForUnit,
+    ).allowedUnits;
+    final matchedUnit = _safeMatchUnit(draft.unit, allowedUnits);
+    if (matchedUnit != null) {
+      applied['unit'] = matchedUnit;
+    } else if (draft.unit.trim().isNotEmpty) {
+      suggestions['unit'] = draft.unit.trim();
+      debugPrint('[VoiceListing] skipped_field=unit reason=no_exact_match');
+    }
+
+    // ── PROVINCE: try draft value, then smart location from transcript ────
+    final resolvedLocation = _resolveTranscriptLocation(
+      transcript: transcript,
+      draft: draft,
+    );
+    final provinceMatch = resolvedLocation['province'];
+    if (provinceMatch != null) {
+      applied['province'] = provinceMatch;
+      debugPrint('[VoiceListing] matched_province=$provinceMatch');
+    } else if (draft.province.trim().isNotEmpty) {
+      suggestions['province'] = draft.province.trim();
+      debugPrint('[VoiceListing] skipped_field=province reason=no_exact_match');
+      debugPrint('[VoiceListing] matched_province=none');
+    } else {
+      debugPrint('[VoiceListing] matched_province=none');
+    }
+
+    // ── DISTRICT ─────────────────────────────────────────────────────────
+    // Prefer smart district resolved from transcript if available
+    final districtInput = resolvedLocation['district'] ?? draft.district.trim();
+    final districtMatch = (districtInput).trim().isEmpty ? null : districtInput;
+    if (districtMatch != null) {
+      applied['district'] = districtMatch;
+      final inferredProvince = _findProvinceForDistrict(districtMatch);
+      if ((applied['province'] as String? ?? '').isEmpty &&
+          (inferredProvince ?? '').trim().isNotEmpty) {
+        applied['province'] = inferredProvince!.trim();
+        debugPrint(
+          '[VoiceListing] matched_province=${inferredProvince.trim()}',
+        );
+      }
+      debugPrint('[VoiceListing] matched_district=$districtMatch');
+    } else if (districtInput.isNotEmpty) {
+      suggestions['district'] = districtInput;
+      debugPrint('[VoiceListing] skipped_field=district reason=no_exact_match');
+      debugPrint('[VoiceListing] matched_district=none');
+    } else {
+      debugPrint('[VoiceListing] matched_district=none');
+    }
+
+    // ── TEHSIL ────────────────────────────────────────────────────────────
+    final tehsilInput = resolvedLocation['tehsil'] ?? draft.tehsil.trim();
+    final tehsilMatch = tehsilInput.trim().isEmpty ? null : tehsilInput;
+    if (tehsilMatch != null) {
+      applied['tehsil'] = tehsilMatch;
+      debugPrint('[VoiceListing] matched_tehsil=$tehsilMatch');
+    } else if (tehsilInput.isNotEmpty) {
+      suggestions['tehsil'] = tehsilInput;
+      debugPrint('[VoiceListing] skipped_field=tehsil reason=no_exact_match');
+      debugPrint('[VoiceListing] matched_tehsil=none');
+    } else {
+      debugPrint('[VoiceListing] matched_tehsil=none');
+    }
+
+    // ── LOCAL AREA ────────────────────────────────────────────────────────
+    // If localArea is a district name, it was already set above as district;
+    // still keep a friendly localArea text for display.
+    final localAreaMatch = resolvedLocation['localArea'];
+    if ((localAreaMatch ?? '').trim().isNotEmpty) {
+      applied['localArea'] = localAreaMatch!.trim();
+      debugPrint('[VoiceListing] matched_local_area=${localAreaMatch.trim()}');
+    } else if (draft.localArea.trim().isNotEmpty) {
+      applied['localArea'] = draft.localArea.trim();
+      debugPrint('[VoiceListing] matched_local_area=${draft.localArea.trim()}');
+    } else if ((applied['district'] as String? ?? '').isNotEmpty) {
+      applied['localArea'] = applied['district'] as String;
+      debugPrint('[VoiceListing] matched_local_area=${applied['district']}');
+    } else {
+      debugPrint('[VoiceListing] matched_local_area=none');
+    }
+
+    final cleanedDescription = _cleanVoiceDescription(
+      source: draft.description.trim().isNotEmpty
+          ? draft.description.trim()
+          : transcript.trim(),
+      quantity: (applied['quantity'] ?? draft.quantity).toString(),
+      unit: (applied['unit'] as UnitType?)?.wireValue ?? draft.unit,
+      price: (applied['price'] ?? draft.price).toString(),
+      category:
+          (applied['category'] as MarketCategoryOption?)?.bilingualLabel ??
+          draft.category,
+      subcategory: (applied['subcategory'] ?? draft.subcategory).toString(),
+      province: (applied['province'] ?? draft.province).toString(),
+      district: (applied['district'] ?? draft.district).toString(),
+      tehsil: (applied['tehsil'] ?? draft.tehsil).toString(),
+      localArea: (applied['localArea'] ?? draft.localArea).toString(),
+    );
+    debugPrint('[VoiceListing] cleaned_description=$cleanedDescription');
+    if (cleanedDescription.isNotEmpty) {
+      applied['description'] = cleanedDescription;
+    }
+
+    // ── POPULATE recognized map with all resolved fields ─────────────────
+    if ((applied['category'] as MarketCategoryOption?) != null) {
+      final cat = applied['category'] as MarketCategoryOption;
+      recognized['category'] = cat.bilingualLabel;
+    }
+    if ((applied['subcategory'] as String? ?? '').isNotEmpty) {
+      recognized['subcategory'] = applied['subcategory'] as String;
+    }
+    if ((applied['province'] as String? ?? '').isNotEmpty) {
+      recognized['province'] = applied['province'] as String;
+    }
+    if ((applied['district'] as String? ?? '').isNotEmpty) {
+      recognized['district'] = applied['district'] as String;
+    }
+    if ((applied['tehsil'] as String? ?? '').isNotEmpty) {
+      recognized['tehsil'] = applied['tehsil'] as String;
+    }
+
+    return _VoiceApplyPlan(
+      applied: applied,
+      suggestions: suggestions,
+      recognized: recognized,
+    );
+  }
+
+  /// Extracts candidate location tokens (1–3 words each) from a transcript
+  /// for reverse lookup against the location database.
+  List<String> _extractLocationTokens(String transcript) {
+    final words = transcript
+        .replaceAll(RegExp(r'[,.،]'), ' ')
+        .split(RegExp(r'\s+'))
+        .where((w) => w.isNotEmpty)
+        .toList();
+    final tokens = <String>{};
+    for (var i = 0; i < words.length; i++) {
+      tokens.add(words[i]);
+      if (i + 1 < words.length) tokens.add('${words[i]} ${words[i + 1]}');
+      if (i + 2 < words.length) {
+        tokens.add('${words[i]} ${words[i + 1]} ${words[i + 2]}');
+      }
+    }
+    return tokens.toList();
+  }
+
+  Future<String?> _showVoiceApplyDialog({required _VoiceApplyPlan plan}) async {
+    return showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: _darkGreenMid,
+          title: const Text(
+            'Yeh details samjhi gayi hain / یہ تفصیلات سمجھی گئی ہیں',
+            style: TextStyle(color: AppColors.primaryText),
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                // ── Guided summary ─────────────────────────────────────
+                _buildVoiceGuidanceText(plan),
+                const SizedBox(height: 6),
+                if (plan.recognized.isEmpty)
+                  Text(
+                    'Koi detail samajh nahi aayi. Dobara bolen ya manual edit karein.',
+                    style: TextStyle(
+                      color: AppColors.primaryText.withValues(alpha: 0.9),
+                    ),
+                  )
+                else
+                  ...plan.recognized.entries.map(
+                    (row) => Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text(
+                        '${_fieldLabel(row.key)}: ${row.value}',
+                        style: TextStyle(
+                          color: AppColors.primaryText.withValues(alpha: 0.92),
+                        ),
+                      ),
+                    ),
+                  ),
+                if (plan.suggestions.isNotEmpty) ...<Widget>[
+                  const SizedBox(height: 10),
+                  Text(
+                    'Yeh fields baaki hain / These need manual input:',
+                    style: TextStyle(
+                      color: AppColors.primaryText.withValues(alpha: 0.82),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: plan.suggestions.entries
+                        .map(
+                          (entry) => Chip(
+                            backgroundColor: AppColors.primaryText.withValues(
+                              alpha: 0.08,
+                            ),
+                            side: BorderSide(
+                              color: AppColors.primaryText.withValues(
+                                alpha: 0.22,
+                              ),
+                            ),
+                            label: Text(
+                              '${entry.key}: ${entry.value}',
+                              style: const TextStyle(
+                                color: AppColors.primaryText,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ),
+                        )
+                        .toList(),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop('retry'),
+              child: const Text(
+                'Dobara Bolen',
+                style: TextStyle(color: AppColors.primaryText),
+              ),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop('manual'),
+              child: const Text(
+                'Khud Edit Karun',
+                style: TextStyle(color: AppColors.primaryText),
+              ),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(dialogContext).pop('apply'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _gold,
+                foregroundColor: AppColors.ctaTextDark,
+              ),
+              child: const Text('Haan (Apply)'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _runVoiceAssist() async {
+    if (_isSubmitting || _isVoiceAssistLoading) return;
+
+    final transcript = await _captureVoiceTranscriptFromMic();
+    if (!mounted) return;
+    if (transcript == null || transcript.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Transcript empty. Dobara bolen.')),
+      );
+      return;
+    }
+
+    setState(() {
+      _isVoiceAssistLoading = true;
+    });
+
+    try {
+      GeminiVoiceDraft draft;
+      try {
+        debugPrint('[VOICE] gemini_started');
+        draft = await GeminiVoiceHelper.extractDraft(
+          ai: _intelligenceService,
+          transcript: transcript,
+        );
+        debugPrint('[VOICE] gemini_response=${draft.rawResponse}');
+        if (draft.usedFallback) {
+          debugPrint('[VOICE] fallback_success');
+        }
+      } catch (e) {
+        debugPrint('[VOICE] gemini_failed=$e');
+        debugPrint('[VoiceListing] ERROR stage=gemini_extract message=$e');
+        rethrow;
+      }
+
+      debugPrint('[VoiceListing] apply_started');
+      final plan = _buildVoiceApplyPlan(draft, transcript: transcript);
+
+      if (!mounted) return;
+      final action = await _showVoiceApplyDialog(plan: plan);
+
+      if (!mounted) return;
+      if (action == 'retry') {
+        debugPrint('[VoiceListing] retry_selected');
+        setState(() {
+          _isVoiceAssistLoading = false;
+        });
+        await _runVoiceAssist();
+        return;
+      }
+
+      if (action == 'apply') {
+        var changed = false;
+
+        final matchedCategory =
+            plan.applied['category'] as MarketCategoryOption?;
+        final matchedSubcategory = plan.applied['subcategory'] as String?;
+        final matchedUnit = plan.applied['unit'] as UnitType?;
+        final matchedSaleType = plan.applied['saleType'] as String?;
+
+        setState(() {
+          if (matchedCategory != null) {
+            _selectedCategoryOptionId = matchedCategory.id;
+            _selectedMandiType = matchedCategory.mandiType;
+            _selectedProduct = null;
+            _selectedRiceVariety = null;
+            _selectedUnitType = MandiUnitMapper.resolve(
+              categoryId: matchedCategory.id,
+              fallbackType: matchedCategory.mandiType,
+              subcategoryLabel: null,
+            ).defaultUnit;
+            changed = true;
+            debugPrint('[VoiceListing] applied_field=category');
+          }
+
+          if ((matchedSubcategory ?? '').trim().isNotEmpty) {
+            _selectedProduct = matchedSubcategory;
+            if (!_isRiceCropSelected && !_isProcessedRiceSelected) {
+              _selectedRiceVariety = null;
+            }
+            if (matchedUnit == null) {
+              _selectedUnitType = MandiUnitMapper.resolve(
+                categoryId: _selectedCategoryOptionId,
+                fallbackType: _selectedMandiType,
+                subcategoryLabel: matchedSubcategory,
+              ).defaultUnit;
+            }
+            changed = true;
+            debugPrint('[VoiceListing] applied_field=subcategory');
+          }
+
+          if (matchedUnit != null) {
+            _selectedUnitType = matchedUnit;
+            changed = true;
+            debugPrint('[VoiceListing] applied_field=unit');
+          }
+
+          if (matchedSaleType == 'auction' || matchedSaleType == 'fixed') {
+            _selectedSaleType = matchedSaleType!;
+            changed = true;
+            debugPrint(
+              '[VoiceListing] applied_field=saleType value=$matchedSaleType',
+            );
+          }
+
+          if ((plan.applied['province'] ?? '').toString().trim().isNotEmpty) {
+            _selectedProvince = plan.applied['province'] as String;
+            _selectedDistrict = null;
+            _selectedTehsil = null;
+            _selectedCity = null;
+            _cityController.clear();
+            changed = true;
+            debugPrint('[VoiceListing] applied_field=province');
+          }
+
+          if ((plan.applied['district'] ?? '').toString().trim().isNotEmpty) {
+            _selectedDistrict = plan.applied['district'] as String;
+            _districtAutocompleteController.text = _selectedDistrict!;
+            _selectedTehsil = null;
+            _selectedCity = null;
+            _cityController.clear();
+            changed = true;
+            debugPrint('[VoiceListing] applied_field=district');
+          }
+
+          if ((plan.applied['tehsil'] ?? '').toString().trim().isNotEmpty) {
+            _selectedTehsil = plan.applied['tehsil'] as String;
+            _selectedCity = null;
+            _cityController.clear();
+            changed = true;
+            debugPrint('[VoiceListing] applied_field=tehsil');
+          }
+
+          if ((plan.applied['quantity'] ?? '').toString().trim().isNotEmpty) {
+            _quantityController.text = (plan.applied['quantity'] as String)
+                .trim();
+            changed = true;
+            debugPrint('[VoiceListing] applied_field=quantity');
+            debugPrint(
+              '[VOICE] field_applied_quantity=${_quantityController.text.trim()}',
+            );
+          }
+
+          if ((plan.applied['price'] ?? '').toString().trim().isNotEmpty) {
+            _priceController.text = (plan.applied['price'] as String).trim();
+            changed = true;
+            debugPrint('[VoiceListing] applied_field=price');
+            debugPrint(
+              '[VOICE] field_applied_price=${_priceController.text.trim()}',
+            );
+          }
+
+          if ((plan.applied['localArea'] ?? '').toString().trim().isNotEmpty) {
+            _localAreaController.text = (plan.applied['localArea'] as String)
+                .trim();
+            changed = true;
+            debugPrint('[VoiceListing] applied_field=localArea');
+          }
+
+          if ((plan.applied['description'] ?? '')
+              .toString()
+              .trim()
+              .isNotEmpty) {
+            _descriptionController.text =
+                (plan.applied['description'] as String).trim();
+            changed = true;
+            debugPrint('[VoiceListing] applied_field=description');
+          }
+
+          _fraudPrecheck = _runFraudPrecheck();
+          _voiceAssistSuggestions = plan.suggestions;
+        });
+
+        if (changed) {
+          unawaited(_refreshMarketIntelligence());
+          debugPrint('[VoiceListing] confirm_applied');
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Voice details applied safely. Unmatched fields remain for manual review.',
+              ),
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'No safe fields recognized. Manual edit karein ya dobara bolen.',
+              ),
+            ),
+          );
+        }
+      } else {
+        debugPrint('[VoiceListing] manual_edit_selected');
+        setState(() {
+          _voiceAssistSuggestions = plan.suggestions;
+        });
+      }
+    } catch (e) {
+      debugPrint('[VoiceListing] ERROR stage=voice_assist_final message=$e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Gemini unavailable. Please try again. Error: $e'),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isVoiceAssistLoading = false;
+        });
+      }
+    }
+  }
+
+  /// Builds guided text shown on the confirmation dialog explaining what
+  /// was understood and what's still missing.
+  Widget _buildVoiceGuidanceText(_VoiceApplyPlan plan) {
+    final lines = <String>[];
+    final applied = plan.applied;
+
+    // What was understood
+    final catOption = applied['category'] as MarketCategoryOption?;
+    if (catOption != null) {
+      lines.add('✅ Category samjhi gayi: ${catOption.bilingualLabel}');
+    }
+    final sub = (applied['subcategory'] as String? ?? '').trim();
+    if (sub.isNotEmpty) lines.add('✅ Cheez samjhi gayi: $sub');
+    if ((applied['quantity'] as String? ?? '').isNotEmpty &&
+        (applied['price'] as String? ?? '').isNotEmpty) {
+      lines.add('✅ Miqdar / Qeemat samjhi gayi');
+    } else if ((applied['quantity'] as String? ?? '').isNotEmpty) {
+      lines.add('✅ Miqdar samjhi gayi');
+    } else if ((applied['price'] as String? ?? '').isNotEmpty) {
+      lines.add('✅ Qeemat samjhi gayi');
+    }
+    final province = (applied['province'] as String? ?? '').trim();
+    final district = (applied['district'] as String? ?? '').trim();
+    final tehsil = (applied['tehsil'] as String? ?? '').trim();
+    if (province.isNotEmpty || district.isNotEmpty) {
+      final loc = [
+        if (district.isNotEmpty) district,
+        if (province.isNotEmpty) province,
+      ].join(', ');
+      lines.add('✅ Jagah samjhi gayi: $loc');
+    }
+
+    // What's still needed (critical gaps)
+    if (catOption == null) {
+      lines.add('⚠️ Category nahi samji – dobara bolen ya khud chunain');
+    }
+    if ((applied['quantity'] as String? ?? '').isEmpty) {
+      lines.add('⚠️ Miqdar nahi mili – jaise "50 mann"');
+    }
+    if ((applied['price'] as String? ?? '').isEmpty) {
+      lines.add('⚠️ Qeemat nahi mili – jaise "3600 rupay"');
+    }
+    if (province.isEmpty && district.isEmpty) {
+      lines.add('⚠️ Jagah nahi mili – shahir ya zila batayen');
+    } else if (province.isNotEmpty && district.isNotEmpty && tehsil.isEmpty) {
+      lines.add('ℹ️ Tehsil optional hai – baad mein bhar saktay hain');
+    }
+
+    final saleType = (applied['saleType'] as String? ?? '').trim();
+    if (saleType == 'fixed') {
+      lines.add('✅ Sale type: Fixed Price / سیدھی قیمت');
+    } else if (saleType == 'auction') {
+      lines.add('✅ Sale type: Auction / بولی');
+    }
+
+    if (lines.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ...lines.map(
+          (l) => Padding(
+            padding: const EdgeInsets.only(bottom: 3),
+            child: Text(
+              l,
+              style: TextStyle(
+                color: l.startsWith('✅')
+                    ? const Color(0xFF8FCA74)
+                    : AppColors.primaryText.withValues(alpha: 0.85),
+                fontSize: 12.5,
+              ),
+            ),
+          ),
+        ),
+        const Divider(color: Colors.white24, height: 14),
+      ],
+    );
+  }
+
+  /// Human-readable field label for the confirmation dialog.
+  String _fieldLabel(String key) {
+    switch (key) {
+      case 'category':
+        return 'Category';
+      case 'subcategory':
+        return 'Cheez / Item';
+      case 'quantity':
+        return 'Miqdar';
+      case 'unit':
+        return 'Unit';
+      case 'price':
+        return 'Qeemat (Rs)';
+      case 'province':
+        return 'Suba';
+      case 'district':
+        return 'Zila';
+      case 'tehsil':
+        return 'Tehsil';
+      case 'localArea':
+        return 'Illaqa';
+      case 'description':
+        return 'Tafseelaat';
+      case 'saleType':
+        return 'Sale Type / فروخت کی قسم';
+      default:
+        return key;
+    }
+  }
+
+  Widget _buildVoiceAssistCard() {
+    return _glassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          ElevatedButton.icon(
+            onPressed:
+                (_isSubmitting || _isVoiceAssistLoading || _isVoiceListening)
+                ? null
+                : _runVoiceAssist,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _gold,
+              foregroundColor: AppColors.ctaTextDark,
+              minimumSize: const Size(double.infinity, 48),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            icon: _isVoiceAssistLoading
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.mic_none_rounded),
+            label: const Text(
+              '🎤 Bol Ke Listing Banao',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Bolain, hum details samajh kar form bhar denge',
+            style: TextStyle(
+              color: AppColors.primaryText.withValues(alpha: 0.78),
+              fontSize: 12,
+            ),
+          ),
+          if (_voiceAssistSuggestions.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: _voiceAssistSuggestions.entries
+                  .map(
+                    (entry) => Chip(
+                      backgroundColor: AppColors.primaryText.withValues(
+                        alpha: 0.08,
+                      ),
+                      side: BorderSide(
+                        color: AppColors.primaryText.withValues(alpha: 0.2),
+                      ),
+                      label: Text(
+                        '${entry.key}: ${entry.value}',
+                        style: const TextStyle(
+                          color: AppColors.primaryText,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
+                  )
+                  .toList(),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 
   Future<void> _loadPakistanLocationsAsset() async {
@@ -450,6 +2583,7 @@ class _AddListingScreenState extends State<AddListingScreen> {
       final provinceUrdu = <String, String>{};
       final districtUrdu = <String, String>{};
       final tehsilUrdu = <String, String>{};
+      final cityUrdu = <String, String>{};
 
       for (final provinceItem in provincesRaw) {
         if (provinceItem is! Map) continue;
@@ -475,7 +2609,7 @@ class _AddListingScreenState extends State<AddListingScreen> {
             districtUrdu[districtEn] = districtUr;
 
             final tehsilsRaw = districtMap['tehsils'];
-            final tehsils = <_LocationLeaf>[];
+            final tehsils = <_TehsilNode>[];
 
             if (tehsilsRaw is List) {
               for (final tehsilItem in tehsilsRaw) {
@@ -487,14 +2621,38 @@ class _AddListingScreenState extends State<AddListingScreen> {
                 final tehsilUr = (tehsilMap['name_ur'] ?? '').toString().trim();
                 tehsilUrdu[tehsilEn] = tehsilUr;
 
+                final cities = <_LocationLeaf>[];
+                final citiesRaw = tehsilMap['cities'];
+                if (citiesRaw is List) {
+                  for (final cityItem in citiesRaw) {
+                    if (cityItem is! Map) continue;
+                    final cityMap = cityItem.cast<String, dynamic>();
+                    final cityEn = (cityMap['name_en'] ?? '').toString().trim();
+                    if (cityEn.isEmpty) continue;
+                    final cityUr = (cityMap['name_ur'] ?? '').toString().trim();
+                    cityUrdu[cityEn] = cityUr;
+                    cities.add(
+                      _LocationLeaf(
+                        id: (cityMap['id'] ?? cityEn)
+                            .toString()
+                            .trim()
+                            .toLowerCase(),
+                        nameEn: cityEn,
+                        nameUr: cityUr,
+                      ),
+                    );
+                  }
+                }
+
                 tehsils.add(
-                  _LocationLeaf(
+                  _TehsilNode(
                     id: (tehsilMap['id'] ?? tehsilEn)
                         .toString()
                         .trim()
                         .toLowerCase(),
                     nameEn: tehsilEn,
                     nameUr: tehsilUr,
+                    cities: cities,
                   ),
                 );
               }
@@ -539,6 +2697,9 @@ class _AddListingScreenState extends State<AddListingScreen> {
         _tehsilUrduByEn
           ..clear()
           ..addAll(tehsilUrdu);
+        _cityUrduByEn
+          ..clear()
+          ..addAll(cityUrdu);
         _isLocationAssetReady = true;
       });
     } catch (_) {
@@ -551,12 +2712,74 @@ class _AddListingScreenState extends State<AddListingScreen> {
     if (trimmed.isEmpty) return option;
 
     final urdu =
-        _provinceUrduByEn[trimmed] ??
-        _districtUrduByEn[trimmed] ??
-        _tehsilUrduByEn[trimmed] ??
-        '';
-    if (urdu.isEmpty) return trimmed;
-    return '$trimmed / $urdu';
+        (_provinceUrduByEn[trimmed] ??
+                _districtUrduByEn[trimmed] ??
+                _tehsilUrduByEn[trimmed] ??
+                _cityUrduByEn[trimmed] ??
+                PakistanLocationHierarchy.urduLabelForLocation(trimmed))
+            .trim();
+    return LocationDisplayHelper.bilingualLabelFromParts(
+      trimmed,
+      candidateUrdu: urdu,
+    );
+  }
+
+  String _resolveCityForPayload() {
+    return (_selectedCity ?? '').trim();
+  }
+
+  String _resolveTehsilForPayload(String resolvedCity) {
+    final tehsil = (_selectedTehsil ?? '').trim();
+    return tehsil;
+  }
+
+  String _resolveDistrictForPayload(String resolvedTehsil) {
+    final district = (_selectedDistrict ?? '').trim();
+    return district;
+  }
+
+  String _resolveProvinceForPayload(String resolvedDistrict) {
+    final province = (_selectedProvince ?? '').trim();
+    return province;
+  }
+
+  String _composeLocationEnglish({
+    required String city,
+    required String tehsil,
+    required String district,
+  }) {
+    final parts = <String>[
+      city.trim(),
+      tehsil.trim(),
+      district.trim(),
+    ].where((e) => e.isNotEmpty).toList(growable: false);
+    return parts.join(', ');
+  }
+
+  String _composeLocationUrdu({
+    required String city,
+    required String tehsil,
+    required String district,
+  }) {
+    final parts = <String>[
+      _locationUrduPart(city),
+      _locationUrduPart(tehsil),
+      _locationUrduPart(district),
+    ].where((e) => e.isNotEmpty).toList(growable: false);
+    return parts.join('، ');
+  }
+
+  String _locationUrduPart(String english) {
+    final String en = english.trim();
+    if (en.isEmpty) return '';
+    return LocationDisplayHelper.resolvedUrduLabel(
+      en,
+      candidateUrdu:
+          _provinceUrduByEn[en] ??
+          _districtUrduByEn[en] ??
+          _tehsilUrduByEn[en] ??
+          _cityUrduByEn[en],
+    );
   }
 
   FraudPrecheckResult _runFraudPrecheck() {
@@ -714,6 +2937,7 @@ class _AddListingScreenState extends State<AddListingScreen> {
         _trustPhotoFileSize = fileSize;
         _verificationInlineError = null;
         _fraudPrecheck = _runFraudPrecheck();
+        _logSubmitGateStatus('trust_photo_captured');
       });
     } catch (_) {
       if (!mounted) return;
@@ -863,6 +3087,13 @@ class _AddListingScreenState extends State<AddListingScreen> {
       _isLoadingMarket = true;
     });
 
+    final normalizedUnitType = MandiUnitMapper.normalizeUnitType(
+      rawUnit: _selectedUnitType.wireValue,
+      categoryId: _selectedCategoryOptionId,
+      fallbackType: _selectedMandiType,
+      subcategoryLabel: _selectedProduct,
+    );
+
     try {
       final result = await _intelligenceService.fetchMandiAverageRateWithMeta(
         product,
@@ -875,7 +3106,7 @@ class _AddListingScreenState extends State<AddListingScreen> {
         province: _selectedProvince,
         district: _selectedDistrict,
         quantity: _numericQuantity > 0 ? _numericQuantity : null,
-        unit: _selectedUnitType.wireValue,
+        unit: normalizedUnitType.wireValue,
       );
       if (!mounted) return;
       setState(() {
@@ -905,6 +3136,31 @@ class _AddListingScreenState extends State<AddListingScreen> {
 
   Future<void> _submitListing() async {
     debugPrint('[AddListingUI] submit_tap');
+    if (_isSubmitting) {
+      debugPrint('[AddListingUI] submit_blocked_already_submitting');
+      return;
+    }
+
+    if (_approvalCheckInProgress) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Seller approval status is still loading / سیلر منظوری کی حالت ابھی لوڈ ہو رہی ہے',
+          ),
+        ),
+      );
+      return;
+    }
+
+    if (_approvalLocked) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_approvalLockMessage)));
+      return;
+    }
+
     FocusScope.of(context).unfocus();
 
     final form = _formKey.currentState;
@@ -947,47 +3203,190 @@ class _AddListingScreenState extends State<AddListingScreen> {
       return;
     }
 
+    await _logAuthSnapshot(
+      'submit_tap',
+      finalDecision: 'inspect',
+      reason: 'submit_pressed',
+    );
+    await _ensureListingAuthSession('submit_tap');
+
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
-      debugPrint('[AddListingUI] user_null');
+    final String localSessionUid =
+        (await _authService.getPersistedSessionUid() ?? '').trim();
+    final String firebaseUid = (user?.uid ?? '').trim();
+    if (firebaseUid.isEmpty) {
+      await _logAuthSnapshot(
+        'submit_decision',
+        finalDecision: 'block',
+        reason: 'firebase_auth_session_missing_for_submit',
+      );
+      debugPrint(
+        '[AddListingUI] submit_blocked missing_firebase_auth '
+        'firebaseUid=null '
+        'localSessionUid=${localSessionUid.isEmpty ? 'null' : localSessionUid} '
+        'sellerDocUid=${_sellerDocUid.isEmpty ? 'null' : _sellerDocUid}',
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Login required / لاگ اِن ضروری ہے')),
       );
       return;
     }
-    debugPrint('[AddListingUI] validation_pass uid=${user.uid}');
+    if (_sellerDocUid.isNotEmpty && _sellerDocUid != firebaseUid) {
+      await _logAuthSnapshot(
+        'submit_decision',
+        finalDecision: 'block',
+        reason: 'firebase_uid_mismatch_seller_doc_uid',
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Session mismatch. Please sign in again / سیشن دوبارہ شروع کریں',
+          ),
+        ),
+      );
+      return;
+    }
+    if (localSessionUid.isNotEmpty &&
+        _sellerDocUid.isNotEmpty &&
+        localSessionUid != _sellerDocUid) {
+      await _logAuthSnapshot(
+        'submit_decision',
+        finalDecision: 'block',
+        reason: 'local_session_uid_mismatch_seller_doc_uid',
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Session mismatch. Please sign in again / سیشن دوبارہ شروع کریں',
+          ),
+        ),
+      );
+      return;
+    }
+    await _logAuthSnapshot(
+      'submit_decision',
+      finalDecision: 'allow',
+      reason: 'firebase_uid_resolved_for_submit',
+    );
+    final String submitSellerUid = firebaseUid;
+    debugPrint(
+      '[AddListingUI] submit_identity_resolved '
+      'firebaseUid=$firebaseUid '
+      'localSessionUid=${localSessionUid.isEmpty ? 'null' : localSessionUid} '
+      'sellerDocUid=${_sellerDocUid.isEmpty ? 'null' : _sellerDocUid} '
+      'finalResolvedUid=$submitSellerUid '
+      'source=firebase_auth',
+    );
 
     setState(() {
       _isSubmitting = true;
       _isMediaUploading = true;
       _mediaUploadProgress = 0;
     });
-    debugPrint('[AddListingUI] media_upload_start images=${_allListingImages.length}');
+    debugPrint(
+      '[AddListingUI] media_upload_start images=${_allListingImages.length}',
+    );
 
     final bool requestedFeaturedListing = _featuredListing;
-    final bool requestedFeaturedAuction =
-        _featuredListing && _featuredAuctionUpgrade;
-    final bool promotionRequested =
-        requestedFeaturedListing || requestedFeaturedAuction;
-    final String promotionType = requestedFeaturedAuction
-        ? 'featured_auction'
-        : (requestedFeaturedListing ? 'featured_listing' : 'none');
-    final int promotionCost = requestedFeaturedAuction
-        ? PromotionPaymentConfig.featuredAuctionFee
-        : (requestedFeaturedListing
-              ? PromotionPaymentConfig.featuredListingFee
-              : 0);
+    
+    // CRITICAL: Featured listing requires valid payment data
+    if (requestedFeaturedListing && _featuredPaymentData == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Featured listing ke liye payment zaroori hai / نمایاں لسٹنگ کے لیے ادائیگی ضروری ہے',
+          ),
+          backgroundColor: Colors.redAccent,
+          duration: Duration(seconds: 4),
+        ),
+      );
+      setState(() {
+        _isSubmitting = false;
+        _isMediaUploading = false;
+      });
+      return;
+    }
+    
+    // Validate payment data if featured is requested
+    if (requestedFeaturedListing && _featuredPaymentData != null) {
+      if (!_featuredPaymentData!.isComplete) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Payment details incomplete. Varify payment method, reference, and proof / ادائیگی کی تفصیلات نامکمل ہیں',
+            ),
+            backgroundColor: Colors.redAccent,
+            duration: Duration(seconds: 4),
+          ),
+        );
+        setState(() {
+          _isSubmitting = false;
+          _isMediaUploading = false;
+        });
+        return;
+      }
+    }
 
-    final String resolvedCity = _localAreaController.text.trim().isEmpty
-      ? (_selectedCity ?? '')
-      : _localAreaController.text.trim();
-    final String resolvedVillage = _villageController.text.trim().isEmpty
-      ? resolvedCity
-      : _villageController.text.trim();
+    final bool promotionRequested = requestedFeaturedListing;
+    final String promotionType = requestedFeaturedListing
+        ? 'featured_listing'
+        : 'none';
+    final int promotionCost = requestedFeaturedListing
+        ? PromotionPaymentConfig.featuredListingFee
+        : 0;
+    final String? featuredRequestTimestamp = requestedFeaturedListing
+        ? DateTime.now().toUtc().toIso8601String()
+        : null;
+
+    final String resolvedCity = _resolveCityForPayload();
+    if (resolvedCity.length < 2) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('City required / شہر منتخب کریں'),
+        ),
+      );
+      setState(() {
+        _isSubmitting = false;
+        _isMediaUploading = false;
+      });
+      return;
+    }
+    final String resolvedTehsil = _resolveTehsilForPayload(resolvedCity);
+    final String resolvedDistrict = _resolveDistrictForPayload(resolvedTehsil);
+    final String resolvedProvince = _resolveProvinceForPayload(
+      resolvedDistrict,
+    );
+    final String resolvedProvinceUr = _locationUrduPart(resolvedProvince);
+    final String resolvedDistrictUr = _locationUrduPart(resolvedDistrict);
+    final String resolvedTehsilUr = _locationUrduPart(resolvedTehsil);
+    final String resolvedCityUr = _locationUrduPart(resolvedCity);
+    final String locationEn = _composeLocationEnglish(
+      city: resolvedCity,
+      tehsil: resolvedTehsil,
+      district: resolvedDistrict,
+    );
+    final String locationUr = _composeLocationUrdu(
+      city: resolvedCity,
+      tehsil: resolvedTehsil,
+      district: resolvedDistrict,
+    );
+    final String resolvedVillage = _villageController.text.trim();
+
+    final normalizedUnitType = MandiUnitMapper.normalizeUnitType(
+      rawUnit: _selectedUnitType.wireValue,
+      categoryId: _selectedCategoryOptionId,
+      fallbackType: _selectedMandiType,
+      subcategoryLabel: _selectedProduct,
+    );
 
     final listingData = <String, dynamic>{
-      'sellerId': user.uid,
+      'sellerId': submitSellerUid,
       'sellerName':
           (widget.userData['name'] ?? widget.userData['fullName'] ?? '')
               .toString(),
@@ -999,36 +3398,107 @@ class _AddListingScreenState extends State<AddListingScreen> {
       'subcategoryLabel': _selectedSubcategoryLabel,
       'product': _selectedProduct,
       'quantity': _numericQuantity,
-      'unit': _selectedUnitType.wireValue,
+      'unit': normalizedUnitType.wireValue,
+      'unitType': normalizedUnitType.wireValue,
       'price': _numericPrice,
       'description': _mappedDescriptionForPayload,
       'country': _selectedCountry,
-      'province': _selectedProvince,
-      'district': _selectedDistrict,
-      'tehsil': _selectedTehsil,
+      'province': resolvedProvince,
+      'province_en': resolvedProvince,
+      'province_ur': resolvedProvinceUr,
+      'district': resolvedDistrict,
+      'district_en': resolvedDistrict,
+      'district_ur': resolvedDistrictUr,
+      'tehsil': resolvedTehsil,
+      'tehsil_en': resolvedTehsil,
+      'tehsil_ur': resolvedTehsilUr,
       'city': resolvedCity,
+      'city_text': resolvedCity,
+      'city_text_ur': resolvedCityUr,
       'village': resolvedVillage,
-      'location':
-          '$resolvedCity, ${_selectedTehsil ?? ''}, ${_selectedDistrict ?? ''}, ${_selectedProvince ?? ''}',
+      'location': locationEn,
+      'locationUr': locationUr,
+      'locationDisplay':
+          LocationDisplayHelper.locationDisplayFromData(<String, dynamic>{
+            'province': resolvedProvince,
+            'district': resolvedDistrict,
+            'tehsil': resolvedTehsil,
+            'city': resolvedCity,
+            'location': locationEn,
+            'locationUr': locationUr,
+          }),
+      'locationNodes': <String, dynamic>{
+        'province': <String, String>{
+          'name_en': resolvedProvince,
+          'name_ur': resolvedProvinceUr,
+        },
+        'district': <String, String>{
+          'name_en': resolvedDistrict,
+          'name_ur': resolvedDistrictUr,
+        },
+        'tehsil': <String, String>{
+          'name_en': resolvedTehsil,
+          'name_ur': resolvedTehsilUr,
+        },
+        'city': <String, String>{
+          'name_en': resolvedCity,
+          'name_ur': resolvedCityUr,
+        },
+      },
       'locationData': <String, dynamic>{
         'country': _selectedCountry,
-        'province': _selectedProvince ?? '',
-        'district': _selectedDistrict ?? '',
-        'tehsil': _selectedTehsil ?? '',
+        'province': resolvedProvince,
+        'district': resolvedDistrict,
+        'tehsil': resolvedTehsil,
         'city': resolvedCity,
         'village': resolvedVillage,
+        'provinceObj': <String, String>{
+          'name_en': resolvedProvince,
+          'name_ur': resolvedProvinceUr,
+        },
+        'districtObj': <String, String>{
+          'name_en': resolvedDistrict,
+          'name_ur': resolvedDistrictUr,
+        },
+        'tehsilObj': <String, String>{
+          'name_en': resolvedTehsil,
+          'name_ur': resolvedTehsilUr,
+        },
+        'cityObj': <String, String>{
+          'name_en': resolvedCity,
+          'name_ur': resolvedCityUr,
+        },
       },
-      'saleType': 'auction',
+      'saleType': _selectedSaleType,
+      'isAuction': _isAuctionSale,
       'featured': false,
       'featuredAuction': false,
       'priorityScore': 'normal',
       'featuredCost': promotionCost,
       'promotionType': promotionType,
-      'promotionStatus': promotionRequested ? 'pending_review' : 'none',
-      'promotionRequestedAt': DateTime.now().toUtc().toIso8601String(),
+      'promotionStatus': promotionRequested ? 'pending_payment_review' : 'none',
+      'promotionRequestedAt': featuredRequestTimestamp ?? '',
       'promotionPaymentRequired': promotionRequested,
       'promotionRequestedFeaturedListing': requestedFeaturedListing,
-      'promotionRequestedFeaturedAuction': requestedFeaturedAuction,
+      'promotionRequestedFeaturedAuction': false,
+      'paymentMethod': requestedFeaturedListing && _featuredPaymentData != null
+          ? _featuredPaymentData!.paymentMethod
+          : null,
+      'paymentRef': requestedFeaturedListing && _featuredPaymentData != null
+          ? _featuredPaymentData!.paymentRef
+          : null,
+      'paymentProofFileName': requestedFeaturedListing && _featuredPaymentData != null && _featuredPaymentData!.proofImage != null
+          ? _featuredPaymentData!.proofImage!.name
+          : null,
+      'promotionPaymentSubmittedAt': promotionRequested
+          ? DateTime.now().toUtc().toIso8601String()
+          : null,
+      'isFeaturedRequested': requestedFeaturedListing,
+      'featuredFee': requestedFeaturedListing
+          ? PromotionPaymentConfig.featuredListingFee
+          : null,
+      'featuredStatus': requestedFeaturedListing ? 'pending' : null,
+      'featuredRequestedAt': featuredRequestTimestamp,
       'isSeasonalQurbani':
           _selectedMandiType == MandiType.livestock &&
           SeasonalMarketRules.isQurbaniSeason &&
@@ -1075,9 +3545,6 @@ class _AddListingScreenState extends State<AddListingScreen> {
         'status': _fraudPrecheck.status,
       },
       'estimatedValue': _marketAverage ?? 0,
-      'riskScore': _fraudPrecheck.riskScore,
-      'fraudFlags': _fraudPrecheck.flags,
-      'status': 'pending_review',
       'isVerifiedSource': true,
     };
 
@@ -1095,10 +3562,21 @@ class _AddListingScreenState extends State<AddListingScreen> {
       'images': _allListingImages,
       'video': _video,
       'audioPath': _recordedAudioPath,
+      'paymentProofImage': requestedFeaturedListing && _featuredPaymentData != null && _featuredPaymentData!.proofImage != null
+          ? _featuredPaymentData!.proofImage
+          : null,
     };
 
     try {
-      final status = await _marketplaceService.createListingSecure(
+      final String status;
+      developer.log(
+        '[AddListingUI] submission_start uid=$submitSellerUid authStatus=authenticated',
+      );
+      developer.log('[AddListingUI] payload_keys=${listingData.keys.toList()}');
+      developer.log(
+        '[AddListingUI] using_createListingSecure_path uid=$submitSellerUid',
+      );
+      status = await _marketplaceService.createListingSecure(
         listingData,
         mediaFiles,
         onProgress: (progress) {
@@ -1108,6 +3586,7 @@ class _AddListingScreenState extends State<AddListingScreen> {
           });
         },
       );
+      developer.log('[AddListingUI] submission_success status=$status');
 
       if (!mounted) return;
       setState(() {
@@ -1121,7 +3600,9 @@ class _AddListingScreenState extends State<AddListingScreen> {
       );
       Navigator.of(context).pop(true);
     } catch (error) {
-      debugPrint('[AddListingUI] submit_error_caught type=${error.runtimeType} message=$error');
+      debugPrint(
+        '[AddListingUI] submit_error_caught type=${error.runtimeType} message=$error',
+      );
       if (!mounted) return;
       setState(() {
         _isSubmitting = false;
@@ -1130,26 +3611,39 @@ class _AddListingScreenState extends State<AddListingScreen> {
       final errorMsg = error.toString();
       debugPrint('[AddListingUI] error_msg=$errorMsg');
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
+        const SnackBar(
           content: Text(
-            'Listing could not be submitted right now. Your form data is still here. Please retry. / لسٹنگ اس وقت جمع نہ ہو سکی، آپ کا فارم یہیں محفوظ ہے، دوبارہ کوشش کریں\nError: $errorMsg',
+            'Submit failed. Please wait a moment and try again.\n'
+            'لسٹنگ جمع نہیں ہو سکی، براہ کرم تھوڑی دیر بعد دوبارہ کوشش کریں',
           ),
+          duration: Duration(seconds: 5),
         ),
       );
     }
   }
 
-  InputDecoration _fieldDecoration(String label, {String? hint}) {
+  InputDecoration _fieldDecoration(
+    String label, {
+    String? hint,
+    String? helperText,
+  }) {
     return InputDecoration(
       labelText: label,
       hintText: hint,
+      helperText: helperText,
       filled: true,
       fillColor: AppColors.primaryText.withValues(alpha: 0.08),
-      hintStyle: TextStyle(color: AppColors.primaryText.withValues(alpha: 0.65)),
-      labelStyle: TextStyle(color: AppColors.primaryText.withValues(alpha: 0.95)),
+      hintStyle: TextStyle(
+        color: AppColors.primaryText.withValues(alpha: 0.65),
+      ),
+      labelStyle: TextStyle(
+        color: AppColors.primaryText.withValues(alpha: 0.95),
+      ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide(color: AppColors.primaryText.withValues(alpha: 0.22)),
+        borderSide: BorderSide(
+          color: AppColors.primaryText.withValues(alpha: 0.22),
+        ),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
@@ -1175,7 +3669,9 @@ class _AddListingScreenState extends State<AddListingScreen> {
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: AppColors.primaryText.withValues(alpha: 0.2)),
+            border: Border.all(
+              color: AppColors.primaryText.withValues(alpha: 0.2),
+            ),
             gradient: LinearGradient(
               colors: <Color>[
                 AppColors.primaryText.withValues(alpha: 0.13),
@@ -1186,6 +3682,42 @@ class _AddListingScreenState extends State<AddListingScreen> {
             ),
           ),
           child: child,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCollapsedSupportCard({
+    required String title,
+    required String subtitle,
+    required Widget child,
+    bool initiallyExpanded = false,
+  }) {
+    return _glassCard(
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          tilePadding: EdgeInsets.zero,
+          childrenPadding: const EdgeInsets.only(top: 8),
+          initiallyExpanded: initiallyExpanded,
+          iconColor: _gold,
+          collapsedIconColor: _gold,
+          title: Text(
+            title,
+            style: const TextStyle(
+              color: AppColors.primaryText,
+              fontWeight: FontWeight.w700,
+              fontSize: 14,
+            ),
+          ),
+          subtitle: Text(
+            subtitle,
+            style: TextStyle(
+              color: AppColors.primaryText.withValues(alpha: 0.72),
+              fontSize: 12,
+            ),
+          ),
+          children: <Widget>[child],
         ),
       ),
     );
@@ -1287,6 +3819,99 @@ class _AddListingScreenState extends State<AddListingScreen> {
     );
   }
 
+  Widget _buildSaleTypeOptionCard({
+    required String saleType,
+    required String title,
+    required String subtitle,
+    required IconData icon,
+  }) {
+    final isSelected = _selectedSaleType == saleType;
+    return InkWell(
+      onTap: _isSubmitting
+          ? null
+          : () {
+              if (_selectedSaleType == saleType) return;
+              setState(() {
+                _selectedSaleType = saleType;
+              });
+            },
+      borderRadius: BorderRadius.circular(14),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          color: isSelected
+              ? _gold.withValues(alpha: 0.15)
+              : AppColors.primaryText.withValues(alpha: 0.05),
+          border: Border.all(
+            color: isSelected
+                ? _gold
+                : AppColors.primaryText.withValues(alpha: 0.2),
+            width: isSelected ? 1.4 : 1,
+          ),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Icon(
+              icon,
+              color: isSelected
+                  ? _gold
+                  : AppColors.primaryText.withValues(alpha: 0.85),
+              size: 20,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: AppColors.primaryText,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      color: AppColors.primaryText.withValues(alpha: 0.74),
+                      fontSize: 11.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (isSelected)
+              const Icon(Icons.check_circle, color: _gold, size: 18),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSaleTypeSelector() {
+    return _buildResponsiveFields(
+      first: _buildSaleTypeOptionCard(
+        saleType: 'fixed',
+        title: 'Fixed Price / سیدھی قیمت',
+        subtitle: 'Direct sale at your set price / اپنی مقررہ قیمت پر فروخت',
+        icon: Icons.price_change_outlined,
+      ),
+      second: _buildSaleTypeOptionCard(
+        saleType: 'auction',
+        title: 'Auction / بولی',
+        subtitle: 'Buyers will place bids / خریدار بولی لگائیں گے',
+        icon: Icons.gavel_outlined,
+      ),
+    );
+  }
+
   Widget _buildSearchableSelectorField({
     required String label,
     required String? value,
@@ -1295,12 +3920,13 @@ class _AddListingScreenState extends State<AddListingScreen> {
     String? Function(String?)? validator,
     String Function(String)? optionLabelBuilder,
     String? helperText,
+    bool enabled = true,
   }) {
     return FormField<String>(
       validator: (_) => validator?.call(value),
       builder: (fieldState) {
         return InkWell(
-          onTap: _isSubmitting
+            onTap: (_isSubmitting || !enabled)
               ? null
               : () => _openSearchSheet(
                   title: label,
@@ -1422,7 +4048,9 @@ class _AddListingScreenState extends State<AddListingScreen> {
                           final displayLabel = builder(option);
                           return ListTile(
                             dense: true,
-                            tileColor: AppColors.primaryText.withValues(alpha: 0.03),
+                            tileColor: AppColors.primaryText.withValues(
+                              alpha: 0.03,
+                            ),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(10),
                             ),
@@ -1446,7 +4074,14 @@ class _AddListingScreenState extends State<AddListingScreen> {
   }
 
   Widget _buildDistrictField() {
-    return FormField<String>(
+    return _buildSearchableSelectorField(
+      label: 'District / ضلع',
+      value: _selectedDistrict,
+      options: (_selectedProvince ?? '').trim().isEmpty
+          ? _allDistricts
+          : _districtOptions,
+      optionLabelBuilder: _locationOptionLabel,
+      helperText: 'District is required / ضلع لازمی ہے',
       validator: (_) {
         final district = (_selectedDistrict ?? '').trim();
         if (district.isEmpty) return 'District is required / ضلع لازمی ہے';
@@ -1466,109 +4101,21 @@ class _AddListingScreenState extends State<AddListingScreen> {
         }
         return null;
       },
-      builder: (fieldState) {
-        return Autocomplete<String>(
-          optionsBuilder: (value) {
-            final source = (_selectedProvince ?? '').trim().isEmpty
-                ? _allDistricts
-                : _districtOptions;
-            final q = value.text.trim().toLowerCase();
-            if (q.isEmpty) return source;
-            return source.where(
-              (d) =>
-                  d.toLowerCase().contains(q) ||
-                  _locationOptionLabel(d).toLowerCase().contains(q),
-            );
-          },
-          displayStringForOption: (option) => option,
-          optionsViewBuilder: (context, onSelected, options) {
-            return Align(
-              alignment: Alignment.topLeft,
-              child: Material(
-                color: _darkGreenMid,
-                elevation: 8,
-                borderRadius: BorderRadius.circular(12),
-                child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: _gold.withValues(alpha: 0.35)),
-                  ),
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(
-                      maxHeight: 260,
-                      minWidth: 220,
-                    ),
-                    child: ListView.builder(
-                      padding: const EdgeInsets.symmetric(vertical: 6),
-                      itemCount: options.length,
-                      itemBuilder: (context, index) {
-                        final option = options.elementAt(index);
-                        return ListTile(
-                          dense: true,
-                          title: _bilingualLabel(_locationOptionLabel(option)),
-                          onTap: () => onSelected(option),
-                        );
-                      },
-                    ),
-                  ),
-                ),
-              ),
-            );
-          },
-          fieldViewBuilder: (context, controller, focusNode, onSubmit) {
-            if (_districtAutocompleteController.text != controller.text &&
-                _selectedDistrict == null) {
-              _districtAutocompleteController.text = controller.text;
-            }
-            if (controller.text != (_selectedDistrict ?? '')) {
-              controller.text = _selectedDistrict ?? '';
-              controller.selection = TextSelection.collapsed(
-                offset: controller.text.length,
-              );
-            }
-
-            return TextFormField(
-              controller: controller,
-              focusNode: focusNode,
-              enabled: !_isSubmitting,
-              style: const TextStyle(color: AppColors.primaryText),
-              decoration: _fieldDecoration(
-                'District / ضلع',
-              ).copyWith(errorText: fieldState.errorText),
-              onChanged: (value) {
-                final text = value.trim();
-                setState(() {
-                  _selectedDistrict = text.isEmpty ? null : text;
-                  _selectedTehsil = null;
-                  _selectedCity = null;
-                  _localAreaController.clear();
-                  final autoProvince = _districtToProvince[text.toLowerCase()];
-                  if ((autoProvince ?? '').isNotEmpty) {
-                    _selectedProvince = autoProvince;
-                  }
-                  _fraudPrecheck = _runFraudPrecheck();
-                });
-                fieldState.didChange(_selectedDistrict);
-              },
-            );
-          },
-          onSelected: (selection) {
-            setState(() {
-              _selectedDistrict = selection;
-              _districtAutocompleteController.text = selection;
-              _selectedTehsil = null;
-              _selectedCity = null;
-              _localAreaController.clear();
-              final autoProvince = _districtToProvince[selection.toLowerCase()];
-              if ((autoProvince ?? '').isNotEmpty) {
-                _selectedProvince = autoProvince;
-              }
-              _fraudPrecheck = _runFraudPrecheck();
-            });
-            fieldState.didChange(selection);
-            unawaited(_refreshMarketIntelligence());
-          },
-        );
+      onSelected: (selection) {
+        setState(() {
+          _selectedDistrict = selection;
+          _districtAutocompleteController.text = selection;
+          _selectedTehsil = null;
+          _selectedCity = null;
+          _cityController.clear();
+          _localAreaController.clear();
+          final autoProvince = _districtToProvince[selection.toLowerCase()];
+          if ((autoProvince ?? '').isNotEmpty) {
+            _selectedProvince = autoProvince;
+          }
+          _fraudPrecheck = _runFraudPrecheck();
+        });
+        unawaited(_refreshMarketIntelligence());
       },
     );
   }
@@ -1589,7 +4136,9 @@ class _AddListingScreenState extends State<AddListingScreen> {
           const SizedBox(height: 8),
           Text(
             'Capture a clear photo of your item / اپنے مال کی واضح تصویر لیں',
-            style: TextStyle(color: AppColors.primaryText.withValues(alpha: 0.82)),
+            style: TextStyle(
+              color: AppColors.primaryText.withValues(alpha: 0.82),
+            ),
           ),
           const SizedBox(height: 4),
           Text(
@@ -1655,103 +4204,15 @@ class _AddListingScreenState extends State<AddListingScreen> {
                         _trustPhotoCapturedAt = null;
                         _trustPhotoTag = null;
                         _trustPhotoFileSize = null;
+                        _logSubmitGateStatus('trust_photo_removed');
                       });
                     },
-              icon: const Icon(Icons.delete_outline, color: AppColors.primaryText),
+              icon: const Icon(
+                Icons.delete_outline,
+                color: AppColors.primaryText,
+              ),
               label: const Text(
                 'Remove Trust Photo / ٹرسٹ تصویر ہٹائیں',
-                style: TextStyle(color: AppColors.primaryText),
-              ),
-            ),
-          ],
-          const SizedBox(height: 10),
-          Divider(color: AppColors.primaryText.withValues(alpha: 0.2)),
-          const SizedBox(height: 8),
-          const Text(
-            'Add verification video (optional) / اختیاری تصدیقی ویڈیو شامل کریں',
-            style: TextStyle(
-              color: AppColors.primaryText,
-              fontWeight: FontWeight.w700,
-              fontSize: 14,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'A short live video can improve buyer trust / مختصر لائیو ویڈیو خریدار کا اعتماد بڑھا سکتی ہے',
-            style: TextStyle(
-              color: AppColors.primaryText.withValues(alpha: 0.72),
-              fontSize: 12,
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            'Verified video listings may appear more trustworthy / ویڈیو والی لسٹنگ زیادہ قابلِ اعتماد محسوس ہو سکتی ہے',
-            style: TextStyle(
-              color: AppColors.primaryText.withValues(alpha: 0.72),
-              fontSize: 12,
-            ),
-          ),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: _isSubmitting ? null : _recordVerificationVideo,
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppColors.primaryText,
-              side: BorderSide(color: AppColors.primaryText.withValues(alpha: 0.35)),
-            ),
-            icon: const Icon(Icons.videocam),
-            label: const Text(
-              'Record Optional Video / اختیاری ویڈیو ریکارڈ کریں',
-            ),
-          ),
-          if (_videoController?.value.isInitialized == true) ...<Widget>[
-            const SizedBox(height: 10),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: AspectRatio(
-                aspectRatio: _videoController!.value.aspectRatio,
-                child: VideoPlayer(_videoController!),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 10,
-              runSpacing: 6,
-              children: <Widget>[
-                Text(
-                  'Duration: ${_videoDurationSeconds ?? 0}s',
-                  style: const TextStyle(color: AppColors.primaryText),
-                ),
-                Text(
-                  'Size: ${((_videoFileSize ?? 0) / (1024 * 1024)).toStringAsFixed(2)} MB',
-                  style: const TextStyle(color: AppColors.primaryText),
-                ),
-                Text(
-                  'GPS: ${_videoLat?.toStringAsFixed(4) ?? '-'}, ${_videoLng?.toStringAsFixed(4) ?? '-'}',
-                  style: TextStyle(color: AppColors.primaryText.withValues(alpha: 0.9)),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            TextButton.icon(
-              onPressed: _isSubmitting
-                  ? null
-                  : () async {
-                      final old = _videoController;
-                      setState(() {
-                        _video = null;
-                        _videoController = null;
-                        _videoLat = null;
-                        _videoLng = null;
-                        _videoCapturedAt = null;
-                        _videoTag = null;
-                        _videoFileSize = null;
-                        _videoDurationSeconds = null;
-                      });
-                      await old?.dispose();
-                    },
-              icon: const Icon(Icons.delete_outline, color: AppColors.primaryText),
-              label: const Text(
-                'Remove Optional Video / اختیاری ویڈیو ہٹائیں',
                 style: TextStyle(color: AppColors.primaryText),
               ),
             ),
@@ -1828,6 +4289,96 @@ class _AddListingScreenState extends State<AddListingScreen> {
               ],
             ),
           ],
+          const SizedBox(height: 10),
+          _buildCollapsedSupportCard(
+            title: 'Optional Verification Video / اختیاری تصدیقی ویڈیو',
+            subtitle: 'Chahein to chhoti video add karein',
+            initiallyExpanded: _videoController?.value.isInitialized == true,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  'A short live video can improve buyer trust / مختصر لائیو ویڈیو اعتماد بڑھا سکتی ہے',
+                  style: TextStyle(
+                    color: AppColors.primaryText.withValues(alpha: 0.74),
+                    fontSize: 12,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: _isSubmitting ? null : _recordVerificationVideo,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.primaryText,
+                    side: BorderSide(
+                      color: AppColors.primaryText.withValues(alpha: 0.35),
+                    ),
+                  ),
+                  icon: const Icon(Icons.videocam),
+                  label: const Text(
+                    'Record Optional Video / اختیاری ویڈیو ریکارڈ کریں',
+                  ),
+                ),
+                if (_videoController?.value.isInitialized == true) ...<Widget>[
+                  const SizedBox(height: 10),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: AspectRatio(
+                      aspectRatio: _videoController!.value.aspectRatio,
+                      child: VideoPlayer(_videoController!),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 6,
+                    children: <Widget>[
+                      Text(
+                        'Duration: ${_videoDurationSeconds ?? 0}s',
+                        style: const TextStyle(color: AppColors.primaryText),
+                      ),
+                      Text(
+                        'Size: ${((_videoFileSize ?? 0) / (1024 * 1024)).toStringAsFixed(2)} MB',
+                        style: const TextStyle(color: AppColors.primaryText),
+                      ),
+                      Text(
+                        'GPS: ${_videoLat?.toStringAsFixed(4) ?? '-'}, ${_videoLng?.toStringAsFixed(4) ?? '-'}',
+                        style: TextStyle(
+                          color: AppColors.primaryText.withValues(alpha: 0.9),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  TextButton.icon(
+                    onPressed: _isSubmitting
+                        ? null
+                        : () async {
+                            final old = _videoController;
+                            setState(() {
+                              _video = null;
+                              _videoController = null;
+                              _videoLat = null;
+                              _videoLng = null;
+                              _videoCapturedAt = null;
+                              _videoTag = null;
+                              _videoFileSize = null;
+                              _videoDurationSeconds = null;
+                            });
+                            await old?.dispose();
+                          },
+                    icon: const Icon(
+                      Icons.delete_outline,
+                      color: AppColors.primaryText,
+                    ),
+                    label: const Text(
+                      'Remove Optional Video / اختیاری ویڈیو ہٹائیں',
+                      style: TextStyle(color: AppColors.primaryText),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -1861,7 +4412,9 @@ class _AddListingScreenState extends State<AddListingScreen> {
                 : _pickImage,
             style: OutlinedButton.styleFrom(
               foregroundColor: AppColors.primaryText,
-              side: BorderSide(color: AppColors.primaryText.withValues(alpha: 0.35)),
+              side: BorderSide(
+                color: AppColors.primaryText.withValues(alpha: 0.35),
+              ),
             ),
             icon: const Icon(Icons.photo_library_outlined),
             label: Text(
@@ -1904,7 +4457,9 @@ class _AddListingScreenState extends State<AddListingScreen> {
                           child: Container(
                             padding: const EdgeInsets.all(3),
                             decoration: BoxDecoration(
-                              color: AppColors.ctaTextDark.withValues(alpha: 0.6),
+                              color: AppColors.ctaTextDark.withValues(
+                                alpha: 0.6,
+                              ),
                               shape: BoxShape.circle,
                             ),
                             child: const Icon(
@@ -1944,7 +4499,9 @@ class _AddListingScreenState extends State<AddListingScreen> {
             const SizedBox(height: 6),
             Text(
               'Uploading ${(100 * _mediaUploadProgress).toStringAsFixed(0)}%',
-              style: TextStyle(color: AppColors.primaryText.withValues(alpha: 0.86)),
+              style: TextStyle(
+                color: AppColors.primaryText.withValues(alpha: 0.86),
+              ),
             ),
           ],
         ],
@@ -1979,7 +4536,9 @@ class _AddListingScreenState extends State<AddListingScreen> {
             const SizedBox(height: 4),
             Text(
               conversionNote,
-              style: TextStyle(color: AppColors.primaryText.withValues(alpha: 0.8)),
+              style: TextStyle(
+                color: AppColors.primaryText.withValues(alpha: 0.8),
+              ),
             ),
           ],
         ],
@@ -2015,7 +4574,9 @@ class _AddListingScreenState extends State<AddListingScreen> {
           if (_isLoadingMarket)
             Text(
               'Loading average rate... / اوسط ریٹ لوڈ ہو رہا ہے',
-              style: TextStyle(color: AppColors.primaryText.withValues(alpha: 0.8)),
+              style: TextStyle(
+                color: AppColors.primaryText.withValues(alpha: 0.8),
+              ),
             )
           else
             Text(
@@ -2028,7 +4589,9 @@ class _AddListingScreenState extends State<AddListingScreen> {
             const SizedBox(height: 6),
             Text(
               'Recommended price: Rs. ${_recommendedPrice!.toStringAsFixed(2)} / تجویز کردہ قیمت',
-              style: TextStyle(color: AppColors.primaryText.withValues(alpha: 0.9)),
+              style: TextStyle(
+                color: AppColors.primaryText.withValues(alpha: 0.9),
+              ),
             ),
           ],
           if (_priceDeviationPercent != null) ...<Widget>[
@@ -2037,7 +4600,9 @@ class _AddListingScreenState extends State<AddListingScreen> {
               _sellerPriceInsight.isEmpty
                   ? 'Your price is ${_priceDeviationPercent!.abs().toStringAsFixed(1)}% ${_priceDeviationPercent! >= 0 ? 'above' : 'below'} mandi average.'
                   : _sellerPriceInsight,
-              style: TextStyle(color: AppColors.primaryText.withValues(alpha: 0.85)),
+              style: TextStyle(
+                color: AppColors.primaryText.withValues(alpha: 0.85),
+              ),
             ),
           ],
           const SizedBox(height: 12),
@@ -2047,7 +4612,9 @@ class _AddListingScreenState extends State<AddListingScreen> {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(12),
               color: AppColors.primaryText.withValues(alpha: 0.07),
-              border: Border.all(color: AppColors.primaryText.withValues(alpha: 0.15)),
+              border: Border.all(
+                color: AppColors.primaryText.withValues(alpha: 0.15),
+              ),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -2062,17 +4629,23 @@ class _AddListingScreenState extends State<AddListingScreen> {
                 const SizedBox(height: 6),
                 Text(
                   'Risk Score: ${_fraudPrecheck.riskScore} / 100 / رسک اسکور',
-                  style: TextStyle(color: AppColors.primaryText.withValues(alpha: 0.88)),
+                  style: TextStyle(
+                    color: AppColors.primaryText.withValues(alpha: 0.88),
+                  ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   'Flags: ${_fraudPrecheck.flags.isEmpty ? 'none / کوئی نہیں' : _fraudPrecheck.flags.join(', ')}',
-                  style: TextStyle(color: AppColors.primaryText.withValues(alpha: 0.88)),
+                  style: TextStyle(
+                    color: AppColors.primaryText.withValues(alpha: 0.88),
+                  ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   'Status: ${_fraudPrecheck.status} / اسٹیٹس',
-                  style: TextStyle(color: AppColors.primaryText.withValues(alpha: 0.88)),
+                  style: TextStyle(
+                    color: AppColors.primaryText.withValues(alpha: 0.88),
+                  ),
                 ),
               ],
             ),
@@ -2103,6 +4676,8 @@ class _AddListingScreenState extends State<AddListingScreen> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(14, 12, 14, 24),
               children: <Widget>[
+                _buildVoiceAssistCard(),
+                const SizedBox(height: 12),
                 _glassCard(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -2125,6 +4700,23 @@ class _AddListingScreenState extends State<AddListingScreen> {
                       ),
                       const SizedBox(height: 12),
                       _sectionHeader(
+                        'Sale Type / فروخت کی قسم',
+                        'Choose how you want to sell / فروخت کا طریقہ منتخب کریں',
+                      ),
+                      _buildSaleTypeSelector(),
+                      if (_isAuctionSale) ...<Widget>[
+                        const SizedBox(height: 8),
+                        Text(
+                          'Bidding enabled for this listing / خریدار بولی لگائیں گے',
+                          style: TextStyle(
+                            color: AppColors.primaryText.withValues(alpha: 0.8),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 12),
+                      _sectionHeader(
                         'Category, Subcategory & Variety / زمرہ، ذیلی زمرہ اور قسم',
                         'Choose the most relevant market classification / درست مارکیٹ درجہ بندی منتخب کریں',
                       ),
@@ -2140,16 +4732,19 @@ class _AddListingScreenState extends State<AddListingScreen> {
                           return null;
                         },
                         onSelected: (selected) {
-                          final mapped = _mandiTypeFromCategoryLabel(selected);
+                          final mapped = _listingCategoryFromLabel(selected);
                           if (mapped == null) return;
+                          final nextUnit = MandiUnitMapper.resolve(
+                            categoryId: mapped.id,
+                            fallbackType: mapped.mandiType,
+                            subcategoryLabel: null,
+                          ).defaultUnit;
                           setState(() {
-                            _selectedMandiType = mapped;
+                            _selectedCategoryOptionId = mapped.id;
+                            _selectedMandiType = mapped.mandiType;
                             _selectedProduct = null;
                             _selectedRiceVariety = null;
-                            _selectedUnitType =
-                                CategoryConstants.defaultUnitForMandiType(
-                                  mapped,
-                                );
+                            _selectedUnitType = nextUnit;
                           });
                         },
                       ),
@@ -2167,12 +4762,18 @@ class _AddListingScreenState extends State<AddListingScreen> {
                           return null;
                         },
                         onSelected: (selected) {
+                          final nextUnit = MandiUnitMapper.resolve(
+                            categoryId: _selectedCategoryOptionId,
+                            fallbackType: _selectedMandiType,
+                            subcategoryLabel: selected,
+                          ).defaultUnit;
                           setState(() {
                             _selectedProduct = selected;
                             if (!_isRiceCropSelected &&
                                 !_isProcessedRiceSelected) {
                               _selectedRiceVariety = null;
                             }
+                            _selectedUnitType = nextUnit;
                             _fraudPrecheck = _runFraudPrecheck();
                           });
                           unawaited(_refreshMarketIntelligence());
@@ -2240,7 +4841,9 @@ class _AddListingScreenState extends State<AddListingScreen> {
                               .map(
                                 (u) => DropdownMenuItem<UnitType>(
                                   value: u,
-                                  child: Text(u.wireValue),
+                                  child: Text(
+                                    '${u.urduLabel} (${u.wireValue})',
+                                  ),
                                 ),
                               )
                               .toList(),
@@ -2265,10 +4868,23 @@ class _AddListingScreenState extends State<AddListingScreen> {
                           return null;
                         },
                       ),
+                      if (_isAuctionSale)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Text(
+                            'Auction mode active / بولی موڈ فعال ہے',
+                            style: TextStyle(
+                              color: AppColors.primaryText.withValues(
+                                alpha: 0.78,
+                              ),
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
                       const SizedBox(height: 12),
                       _sectionHeader(
                         'Location / مقام',
-                        'Select province, district, tehsil, and local area / صوبہ، ضلع، تحصیل اور مقامی علاقہ منتخب کریں',
+                        'Select province, district, tehsil, then city / صوبہ، ضلع، تحصیل، پھر شہر منتخب کریں',
                       ),
                       _buildResponsiveFields(
                         first: _buildSearchableSelectorField(
@@ -2289,6 +4905,7 @@ class _AddListingScreenState extends State<AddListingScreen> {
                               _selectedDistrict = null;
                               _selectedTehsil = null;
                               _selectedCity = null;
+                              _cityController.clear();
                               _localAreaController.clear();
                               _districtAutocompleteController.clear();
                               _fraudPrecheck = _runFraudPrecheck();
@@ -2316,70 +4933,52 @@ class _AddListingScreenState extends State<AddListingScreen> {
                             setState(() {
                               _selectedTehsil = selected;
                               _selectedCity = null;
+                              _cityController.clear();
                               _localAreaController.clear();
                               _fraudPrecheck = _runFraudPrecheck();
                             });
                           },
                         ),
-                        second: TextFormField(
-                          controller: _localAreaController,
-                          style: const TextStyle(color: AppColors.primaryText),
-                          decoration: _fieldDecoration(
-                            'Local Area / مقامی علاقہ',
-                            hint: 'City, town, mohalla / شہر، قصبہ، محلہ',
-                          ),
-                          validator: (value) {
-                            if ((value ?? '').trim().isEmpty &&
-                                (_selectedCity ?? '').trim().isEmpty) {
-                              return 'Local area is required / مقامی علاقہ لازمی ہے';
+                        second: _buildSearchableSelectorField(
+                          label: 'City / شہر',
+                          value: _selectedCity,
+                          options: _cityOptions,
+                          optionLabelBuilder: _locationOptionLabel,
+                          helperText: (_selectedTehsil ?? '').trim().isEmpty
+                              ? 'Tehsil pehle select karein / پہلے تحصیل منتخب کریں'
+                              : 'City required / شہر منتخب کریں',
+                          enabled:
+                              (_selectedTehsil ?? '').trim().isNotEmpty,
+                          validator: (_) {
+                            if ((_selectedCity ?? '').trim().isEmpty) {
+                              return 'City required / شہر منتخب کریں';
                             }
                             return null;
                           },
-                          onChanged: (_) {
+                          onSelected: (selected) {
                             setState(() {
+                              _selectedCity = selected.trim();
+                              _cityController.text = selected.trim();
                               _fraudPrecheck = _runFraudPrecheck();
                             });
+                            unawaited(_refreshMarketIntelligence());
                           },
                         ),
                       ),
-                      if (_localAreaSuggestions.isNotEmpty) ...<Widget>[
-                        const SizedBox(height: 8),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 6,
-                          children: _localAreaSuggestions
-                              .take(6)
-                              .map(
-                                (suggestion) => ActionChip(
-                                  label: Text(
-                                    suggestion,
-                                    style: const TextStyle(color: AppColors.primaryText),
-                                  ),
-                                  backgroundColor: AppColors.primaryText.withValues(
-                                    alpha: 0.1,
-                                  ),
-                                  side: BorderSide(
-                                    color: AppColors.primaryText.withValues(alpha: 0.25),
-                                  ),
-                                  onPressed: _isSubmitting
-                                      ? null
-                                      : () {
-                                          setState(() {
-                                            _selectedCity = suggestion;
-                                            _localAreaController.text =
-                                                suggestion;
-                                            _fraudPrecheck =
-                                                _runFraudPrecheck();
-                                          });
-                                          unawaited(
-                                            _refreshMarketIntelligence(),
-                                          );
-                                        },
-                                ),
-                              )
-                              .toList(),
+                      const SizedBox(height: 12),
+                      TextFormField(
+                        controller: _localAreaController,
+                        style: const TextStyle(color: AppColors.primaryText),
+                        decoration: _fieldDecoration(
+                          'Local Area / محلہ یا علاقہ (Optional)',
+                          helperText: 'City ke andar specific area likhein',
                         ),
-                      ],
+                        onChanged: (_) {
+                          setState(() {
+                            _fraudPrecheck = _runFraudPrecheck();
+                          });
+                        },
+                      ),
                       const SizedBox(height: 12),
                       _sectionHeader(
                         'Description / تفصیل',
@@ -2389,7 +4988,7 @@ class _AddListingScreenState extends State<AddListingScreen> {
                         controller: _villageController,
                         style: const TextStyle(color: AppColors.primaryText),
                         decoration: _fieldDecoration(
-                          'Village / گاؤں (Optional / اختیاری)',
+                          'Village / گاؤں (Optional)',
                           hint:
                               'Optional for rural locations / دیہی علاقوں کے لیے اختیاری',
                         ),
@@ -2420,7 +5019,9 @@ class _AddListingScreenState extends State<AddListingScreen> {
                         _buildResponsiveFields(
                           first: TextFormField(
                             controller: _breedController,
-                            style: const TextStyle(color: AppColors.primaryText),
+                            style: const TextStyle(
+                              color: AppColors.primaryText,
+                            ),
                             decoration: _fieldDecoration('Breed / نسل'),
                             validator: (value) {
                               if ((value ?? '').trim().isEmpty) {
@@ -2431,7 +5032,9 @@ class _AddListingScreenState extends State<AddListingScreen> {
                           ),
                           second: TextFormField(
                             controller: _ageController,
-                            style: const TextStyle(color: AppColors.primaryText),
+                            style: const TextStyle(
+                              color: AppColors.primaryText,
+                            ),
                             decoration: _fieldDecoration('Age / عمر'),
                             validator: (value) {
                               if ((value ?? '').trim().isEmpty) {
@@ -2482,20 +5085,14 @@ class _AddListingScreenState extends State<AddListingScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                _buildTotalValueCard(),
-                const SizedBox(height: 12),
-                _buildMarketIntelligenceCard(),
-                const SizedBox(height: 12),
                 _buildVerificationSection(),
-                const SizedBox(height: 12),
-                _buildOptionalMediaSection(),
                 const SizedBox(height: 12),
                 _glassCard(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
                       const Text(
-                        'Promotion / تشہیری اپ گریڈ',
+                        'Promotion / تشہیر',
                         style: TextStyle(
                           color: AppColors.primaryText,
                           fontWeight: FontWeight.w700,
@@ -2504,9 +5101,26 @@ class _AddListingScreenState extends State<AddListingScreen> {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'Featured listings appear higher in buyer feeds / نمایاں لسٹنگ خریدار فیڈ میں اوپر دکھتی ہے',
+                        'Aapki listing buyer feed mein upar dikhegi / خریداروں کو اوپر دکھائیں',
                         style: TextStyle(
                           color: AppColors.primaryText.withValues(alpha: 0.78),
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Zyada views, zyada calls / زیادہ ویوز، زیادہ کالز',
+                        style: TextStyle(
+                          color: AppColors.primaryText.withValues(alpha: 0.72),
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Fee: Rs ${PromotionPaymentConfig.featuredListingFee} / فیس: ${PromotionPaymentConfig.featuredListingFee} روپے',
+                        style: const TextStyle(
+                          color: _gold,
+                          fontWeight: FontWeight.w700,
                           fontSize: 12,
                         ),
                       ),
@@ -2517,60 +5131,78 @@ class _AddListingScreenState extends State<AddListingScreen> {
                         value: _featuredListing,
                         onChanged: _isSubmitting
                             ? null
-                            : (value) {
-                                setState(() {
-                                  _featuredListing = value;
-                                  if (!value) {
-                                    _featuredAuctionUpgrade = false;
+                            : (value) async {
+                                if (value) {
+                                  // Open payment modal when trying to enable
+                                  if (!mounted) return;
+                                  final result = await showModalBottomSheet<FeaturedListingPaymentData>(
+                                    context: context,
+                                    isScrollControlled: true,
+                                    backgroundColor: Colors.transparent,
+                                    builder: (context) => const FeaturedListingPaymentModal(),
+                                  );
+                                  if (result != null) {
+                                    setState(() {
+                                      _featuredListing = true;
+                                      _featuredPaymentData = result;
+                                    });
                                   }
-                                });
+                                  // If user cancelled or didn't complete modal, toggle stays OFF
+                                } else {
+                                  // User turning off featured listing
+                                  setState(() {
+                                    _featuredListing = false;
+                                    _featuredPaymentData = null;
+                                  });
+                                }
                               },
                         title: const Text(
                           'Featured Listing / نمایاں لسٹنگ',
                           style: TextStyle(color: AppColors.primaryText),
                         ),
                         subtitle: Text(
-                          _featuredListing
-                              ? 'Request fee: Rs ${PromotionPaymentConfig.featuredListingFee} | Pending review'
-                              : 'Enable to request Featured Listing',
+                          _featuredListing && _featuredPaymentData != null
+                              ? 'Payment received - pending admin review / ادائیگی موصول - ایڈمن جائزے کے زیرِ'
+                              : 'Aapki listing buyer feed mein upar dikhegi / خریداروں کو اوپر دکھائیں',
                           style: TextStyle(
-                            color: AppColors.primaryText.withValues(alpha: 0.72),
+                            color: AppColors.primaryText.withValues(
+                              alpha: 0.72,
+                            ),
                             fontSize: 12,
                           ),
                         ),
                       ),
-                      SwitchListTile.adaptive(
-                        contentPadding: EdgeInsets.zero,
-                        activeThumbColor: _gold,
-                        value: _featuredAuctionUpgrade,
-                        onChanged: (_isSubmitting || !_featuredListing)
-                            ? null
-                            : (value) {
-                                setState(() {
-                                  _featuredAuctionUpgrade = value;
-                                });
-                              },
-                        title: const Text(
-                          'Featured Auction / نمایاں بولی',
-                          style: TextStyle(color: AppColors.primaryText),
-                        ),
-                        subtitle: Text(
-                          'Cost: Rs ${PromotionPaymentConfig.featuredAuctionFee} / قیمت: ${PromotionPaymentConfig.featuredAuctionFee} روپے',
-                          style: TextStyle(
-                            color: AppColors.primaryText.withValues(alpha: 0.72),
-                            fontSize: 12,
+                      if (_featuredListing && _featuredPaymentData != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.check_circle,
+                                color: Colors.green.withValues(alpha: 0.8),
+                                size: 16,
+                              ),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  'Payment verified: ${_featuredPaymentData!.paymentMethod} / ادائیگی تصدیق شدہ',
+                                  style: TextStyle(
+                                    color: Colors.green.withValues(alpha: 0.8),
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                      ),
-                      if (_featuredListing)
+                      if (_featuredListing && _featuredPaymentData == null)
                         Padding(
                           padding: const EdgeInsets.only(top: 4),
                           child: Text(
-                            _featuredAuctionUpgrade
-                                ? 'Requested promotion: Featured Auction (pending review) | Rs ${PromotionPaymentConfig.featuredAuctionFee}'
-                                : 'Requested promotion: Featured Listing (pending review) | Rs ${PromotionPaymentConfig.featuredListingFee}',
+                            'Payment required to enable featured listing / نمایاں لسٹنگ کے لیے ادائیگی ضروری ہے',
                             style: TextStyle(
-                              color: AppColors.primaryText.withValues(alpha: 0.78),
+                              color: Colors.orange.withValues(alpha: 0.8),
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
                             ),
@@ -2605,6 +5237,35 @@ class _AddListingScreenState extends State<AddListingScreen> {
                     style: TextStyle(fontWeight: FontWeight.w700),
                   ),
                 ),
+                Builder(
+                  builder: (_) {
+                    _logSubmitGateStatus('build_post_button');
+                    return const SizedBox.shrink();
+                  },
+                ),
+                if (_approvalCheckInProgress)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      'Checking approval status... / منظوری کی حالت چیک ہو رہی ہے',
+                      style: TextStyle(
+                        color: AppColors.primaryText.withValues(alpha: 0.9),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                if (_approvalLocked)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      _approvalLockMessage,
+                      style: const TextStyle(
+                        color: AppColors.urgencyRed,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
                 if (!_hasRequiredTrustPhoto)
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
@@ -2628,6 +5289,24 @@ class _AddListingScreenState extends State<AddListingScreen> {
                       ),
                     ),
                   ),
+                const SizedBox(height: 12),
+                _buildCollapsedSupportCard(
+                  title: 'Helpful Insights / مزید مدد',
+                  subtitle: 'Total value aur mandi signals',
+                  child: Column(
+                    children: <Widget>[
+                      _buildTotalValueCard(),
+                      const SizedBox(height: 12),
+                      _buildMarketIntelligenceCard(),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                _buildCollapsedSupportCard(
+                  title: 'Optional Extra Media / اختیاری اضافی میڈیا',
+                  subtitle: 'Extra photos aur voice note',
+                  child: _buildOptionalMediaSection(),
+                ),
               ],
             ),
           ),

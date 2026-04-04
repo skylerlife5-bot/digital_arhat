@@ -14,6 +14,10 @@ class AuthState {
 
   static void setSelectedUserType(String value) {
     final normalized = value.trim().toLowerCase();
+    if (normalized == 'admin') {
+      _selectedUserType = 'admin';
+      return;
+    }
     if (normalized == 'seller') {
       _selectedUserType = 'seller';
       return;
@@ -22,6 +26,10 @@ class AuthState {
   }
 
   static void setSelectedRole(String value) => setSelectedUserType(value);
+
+  static void clearSelectedRoleCache() {
+    _selectedUserType = 'buyer';
+  }
 
   // Current User ID hasil karne ke liye
   String? get userId => _auth.currentUser?.uid;

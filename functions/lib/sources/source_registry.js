@@ -6,6 +6,36 @@ exports.getHumanContributionSources = getHumanContributionSources;
 const top25_mandi_registry_1 = require("./top25_mandi_registry");
 exports.OFFICIAL_SOURCE_REGISTRY = [
     {
+        //
+        // PRIMARY: Punjab FS&CPD District-wise Notified Rates
+        // - Official Government of Punjab daily publication
+        // - District-wise coverage across all Punjab districts
+        // - Highest source priority (rank 4)
+        //
+        sourceId: "fscpd_official",
+        sourceName: "Punjab FS&CPD Notified Rates",
+        sourceFamily: "official_national_source",
+        sourceType: "official_national_source",
+        province: "Punjab",
+        cityCoverage: ["Punjab"],
+        categoryCoverage: [
+            "crops",
+            "vegetables",
+            "fruits",
+            "pulses",
+            "spices",
+        ],
+        adapterClass: "FscpdOfficialAdapter",
+        trustLevel: "high",
+        schedulePolicy: "daily",
+        enabled: true,
+    },
+    {
+        //
+        // SECONDARY: Punjab AMIS
+        // - Official mandi-style rates, broader agri coverage
+        // - Requires unit validation before ticker display
+        //
         sourceId: "amis_official",
         sourceName: "AMIS Official",
         sourceFamily: "official_national_source",

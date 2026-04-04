@@ -8,9 +8,12 @@ import '../../core/constants.dart';
 import '../../theme/app_colors.dart';
 import '../models/live_mandi_rate.dart';
 import '../repositories/mandi_rates_repository.dart';
-import '../services/gemini_rate_enhancement_service.dart';
+import '../services/mandi_all_presenter.dart';
+import '../services/mandi_home_presenter.dart';
 import '../services/mandi_rate_location_service.dart';
 import '../services/mandi_rate_prioritization_service.dart';
+import '../services/mandi_rate_trust_policy_service.dart';
+import '../utils/mandi_display_utils.dart';
 
 class AllMandiRatesScreen extends StatefulWidget {
   const AllMandiRatesScreen({
@@ -32,12 +35,12 @@ class AllMandiRatesScreen extends StatefulWidget {
 
 class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
   final MandiRatesRepository _repository = MandiRatesRepository();
-  final GeminiRateEnhancementService _enhancement =
-      GeminiRateEnhancementService();
   final MandiRateLocationService _locationService =
       const MandiRateLocationService();
   final MandiRatePrioritizationService _ranker =
       const MandiRatePrioritizationService();
+    final MandiRateTrustPolicyService _trustPolicy =
+      const MandiRateTrustPolicyService();
 
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _searchController = TextEditingController();
@@ -53,15 +56,23 @@ class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
   String? _error;
   DateTime? _lastSyncedAt;
 
+  // Location resolution cache to reduce redundant resolves during filtering
+  MandiLocationContext? _cachedLocation;
+  DateTime? _cachedLocationResolvedAt;
+
   MandiType? _category;
   String? _subcategory;
   String? _mandi;
   String? _city;
+  String? _unit;
   String? _source;
   String? _freshness;
   String? _confidence;
   String? _reviewStatus;
+  String? _province;
   bool _nearestOnly = false;
+  bool _verifiedOnly = false;
+  bool _freshToday = false;
   String _sortBy = 'latest';
   bool _broaderMarketFallback = false;
 
@@ -93,18 +104,22 @@ class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
       _loading = true;
       _error = null;
       _raw.clear();
-      _visible = const <LiveMandiRate>[];
+      // Keep previous _visible results visible during reload instead of showing blank
       _cursor = null;
       _hasMore = true;
     });
 
     try {
-      await _repository.refreshFromUpstream();
-      final location = await _locationService.resolve(
+      // Parallelize: refresh upstream and resolve location simultaneously
+      final refreshFuture = _repository.refreshFromUpstream();
+      final locationFuture = _locationService.resolve(
         fallbackCity: widget.accountCity,
         fallbackDistrict: widget.accountDistrict,
         fallbackProvince: widget.accountProvince,
       );
+
+      await Future.wait([refreshFuture, locationFuture]);
+      final location = await locationFuture;
 
       final scoped = await _repository.fetchLocationAwareCandidates(
         location: location,
@@ -117,11 +132,17 @@ class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
 
       _raw
         ..clear()
-        ..addAll(await _enhancement.enhanceBatch(source, maxItems: source.length));
+        // Load data directly – deterministic display-name mapping applied at
+        // render time via displayCommodityName/displayUnit getters.
+        ..addAll(source);
       _cursor = null;
       _hasMore = true;
       _lastSyncedAt = _deriveLastSyncedAt(_raw);
       _isOfflineFallback = false;
+      _error = null;
+      // Cache the resolved location for subsequent filters
+      _cachedLocation = location;
+      _cachedLocationResolvedAt = DateTime.now();
       await _recomputeVisible();
     } catch (e) {
       final fallback = await _repository.loadOfflineFallback();
@@ -131,7 +152,10 @@ class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
       _lastSyncedAt = _deriveLastSyncedAt(_raw);
       _isOfflineFallback = true;
       _error = e.toString();
-      await _recomputeVisible();
+      // Keep existing _visible results on error; only recompute if empty
+      if (_visible.isEmpty) {
+        await _recomputeVisible();
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -162,24 +186,89 @@ class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
   }
 
   Future<void> _recomputeVisible() async {
-    final location = await _locationService.resolve(
-      fallbackCity: widget.accountCity,
-      fallbackDistrict: widget.accountDistrict,
-      fallbackProvince: widget.accountProvince,
-    );
+    // Use cached location if recent (< 5 min), otherwise resolve fresh
+    final now = DateTime.now();
+    final isCacheStale = _cachedLocation == null ||
+        _cachedLocationResolvedAt == null ||
+        now.difference(_cachedLocationResolvedAt!).inMinutes > 5;
+
+    final location = isCacheStale
+        ? (await _locationService.resolve(
+              fallbackCity: widget.accountCity,
+              fallbackDistrict: widget.accountDistrict,
+              fallbackProvince: widget.accountProvince,
+            ))
+        : _cachedLocation!;
+
+    // Cache the resolved location for subsequent filters
+    _cachedLocation = location;
+    _cachedLocationResolvedAt = now;
 
     var list = List<LiveMandiRate>.from(_raw);
+    final freshness = (_freshness ?? '').trim().toLowerCase();
+    final confidence = (_confidence ?? '').trim().toLowerCase();
+    final review = (_reviewStatus ?? '').trim().toLowerCase();
+    final allowLowTrust =
+        confidence == 'limited' || confidence == 'review' || review == 'limited';
+    final allowStale = freshness == 'stale';
+
+    final preIntegrityCount = list.length;
+    final integrityFiltered = list.where((item) {
+      final trustedPrice = getTrustedDisplayPrice(item);
+      if (trustedPrice <= 0) return false;
+      if (item.isRejectedContribution) return false;
+      if (item.rowConfidence == MandiRowConfidence.rejected) return false;
+      if (item.flags.contains('unit_violation') ||
+          item.flags.contains('critical_unit_violation') ||
+          item.flags.contains('mixed_unit_violation')) {
+        return false;
+      }
+      if (_hasMixedUnitSignals(item.unit, item.displayUnit)) return false;
+      if (!allowStale && item.isStale) return false;
+
+      final sourceRank = _trustPolicy.priorityRank(item);
+      if (!allowLowTrust && sourceRank > 4) return false;
+      if (!allowLowTrust && item.needsReview) return false;
+      return true;
+    }).toList(growable: false);
+
+    // Safety fallback: avoid blanking the screen when strict gating has no rows.
+    if (integrityFiltered.isNotEmpty) {
+      list = integrityFiltered;
+    }
+
+    // --- Canonical normalization rejection ---
+    final preCanonicalCount = list.length;
+    list = list.where((item) {
+      final normalizedUnit = MandiHomePresenter.normalizeHomeUnitKey(item.unit);
+      debugPrint('[MandiAll] parsed_unit_raw=${item.unit}');
+      debugPrint('[MandiAll] parsed_unit_normalized=$normalizedUnit');
+      final reason = MandiAllPresenter.rejectReason(item);
+      if (reason != null) {
+        debugPrint(
+          '[MandiAll] row_rejected_reason=$reason '
+          'commodity=${item.commodityName} city=${item.city}',
+        );
+        return false;
+      }
+      return true;
+    }).toList(growable: false);
+    final postCanonicalCount = list.length;
 
     final query = _searchController.text.trim().toLowerCase();
     if (query.isNotEmpty) {
       list = list
           .where((item) {
+            final canonicalCommodity = MandiAllPresenter.commodityEnglish(item);
+            final canonicalCity = MandiAllPresenter.cityEnglish(item);
             final haystack = [
               item.commodityName,
+              canonicalCommodity,
               item.categoryName,
               item.subCategoryName,
               item.mandiName,
               item.city,
+              canonicalCity,
               item.district,
               item.province,
             ].join(' ').toLowerCase();
@@ -219,7 +308,29 @@ class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
     final city = (_city ?? '').trim().toLowerCase();
     if (city.isNotEmpty) {
       list = list
-          .where((item) => item.city.toLowerCase().contains(city))
+          .where((item) {
+            final canonicalCity = MandiAllPresenter.cityEnglish(item).toLowerCase();
+            return item.city.toLowerCase().contains(city) ||
+                canonicalCity.contains(city);
+          })
+          .toList(growable: false);
+    }
+
+    final province = (_province ?? '').trim().toLowerCase();
+    if (province.isNotEmpty) {
+      list = list
+          .where((item) => item.province.trim().toLowerCase().contains(province))
+          .toList(growable: false);
+    }
+
+    final unit = (_unit ?? '').trim().toLowerCase();
+    if (unit.isNotEmpty) {
+      list = list
+          .where((item) {
+            final rawUnit = item.unit.toLowerCase();
+            final displayUnit = item.displayUnit.toLowerCase();
+            return rawUnit.contains(unit) || displayUnit.contains(unit);
+          })
           .toList(growable: false);
     }
 
@@ -237,7 +348,6 @@ class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
           .toList(growable: false);
     }
 
-    final freshness = (_freshness ?? '').trim().toLowerCase();
     if (freshness.isNotEmpty) {
       list = list.where((item) {
         if (freshness == 'live') return item.isLiveFresh;
@@ -250,7 +360,6 @@ class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
       }).toList(growable: false);
     }
 
-    final confidence = (_confidence ?? '').trim().toLowerCase();
     if (confidence.isNotEmpty) {
       list = list.where((item) {
         final status = item.verificationStatus.trim().toLowerCase();
@@ -270,7 +379,6 @@ class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
       }).toList(growable: false);
     }
 
-    final review = (_reviewStatus ?? '').trim().toLowerCase();
     if (review.isNotEmpty) {
       list = list.where((item) {
         final status = item.reviewStatus.trim().toLowerCase();
@@ -280,6 +388,21 @@ class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
         if (review == 'rejected') return status == 'rejected';
         return true;
       }).toList(growable: false);
+    }
+
+    if (_verifiedOnly) {
+      list = list.where((item) {
+        final status = item.verificationStatus.trim().toLowerCase();
+        return status.contains('official') ||
+            status.contains('verified') ||
+            status.contains('cross');
+      }).toList(growable: false);
+    }
+
+    if (_freshToday) {
+      list = list
+          .where((item) => item.isLiveFresh || item.isRecentFresh)
+          .toList(growable: false);
     }
 
     list = _ranker.rank(rates: list, location: location);
@@ -316,19 +439,13 @@ class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
         final bScore = trendScore[b.trend] ?? 0;
         final byTrend = bScore.compareTo(aScore);
         if (byTrend != 0) return byTrend;
-        return b.lastUpdated.compareTo(a.lastUpdated);
+        return _compareTrustedDeterministic(a, b, location, nearestDistricts);
       });
     } else if (_sortBy == 'confidence') {
       list.sort((a, b) {
         final confidenceCompare = b.confidenceScore.compareTo(a.confidenceScore);
         if (confidenceCompare != 0) return confidenceCompare;
-
-        final freshnessRankA = _freshnessRank(a);
-        final freshnessRankB = _freshnessRank(b);
-        final freshnessCompare = freshnessRankB.compareTo(freshnessRankA);
-        if (freshnessCompare != 0) return freshnessCompare;
-
-        return b.lastUpdated.compareTo(a.lastUpdated);
+        return _compareTrustedDeterministic(a, b, location, nearestDistricts);
       });
     } else if (_sortBy == 'nearby') {
       list.sort((a, b) {
@@ -336,42 +453,67 @@ class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
         final tierB = _locationTier(b, location, nearestDistricts);
         final tierCompare = tierA.compareTo(tierB);
         if (tierCompare != 0) return tierCompare;
-
-        final confidenceCompare = b.confidenceScore.compareTo(a.confidenceScore);
-        if (confidenceCompare != 0) return confidenceCompare;
-
-        return b.lastUpdated.compareTo(a.lastUpdated);
+        return _compareTrustedDeterministic(a, b, location, nearestDistricts);
       });
     } else {
       list = <LiveMandiRate>[...live, ...recent, ...aging, ...stale];
       list.sort((a, b) {
-        final tierA = _locationTier(a, location, nearestDistricts);
-        final tierB = _locationTier(b, location, nearestDistricts);
-        final tierCompare = tierA.compareTo(tierB);
-        if (tierCompare != 0) return tierCompare;
-
-        final freshnessRankA = _freshnessRank(a);
-        final freshnessRankB = _freshnessRank(b);
-        final freshnessCompare = freshnessRankB.compareTo(freshnessRankA);
-        if (freshnessCompare != 0) return freshnessCompare;
-
-        final catCompare = a.categoryName.toLowerCase().compareTo(
-          b.categoryName.toLowerCase(),
-        );
-        if (catCompare != 0) return catCompare;
-
-        final subCompare = a.subCategoryName.toLowerCase().compareTo(
-          b.subCategoryName.toLowerCase(),
-        );
-        if (subCompare != 0) return subCompare;
-
-        final commodityCompare = a.commodityName.toLowerCase().compareTo(
-          b.commodityName.toLowerCase(),
-        );
-        if (commodityCompare != 0) return commodityCompare;
-
-        return b.lastUpdated.compareTo(a.lastUpdated);
+        return _compareTrustedDeterministic(a, b, location, nearestDistricts);
       });
+    }
+
+    list = _ensureWheatNearTopVisible(
+      list,
+      location: location,
+      nearestDistricts: nearestDistricts,
+    );
+
+    debugPrint(
+      '[MandiAll] filter_applied=raw:$preIntegrityCount '
+      'postIntegrity:${integrityFiltered.length} '
+      'preCanonical:$preCanonicalCount postCanonical:$postCanonicalCount '
+      'final:${list.length} sort:$_sortBy '
+      'province:${province.isEmpty ? '-' : province} '
+      'freshness:${freshness.isEmpty ? '-' : freshness} '
+      'confidence:${confidence.isEmpty ? '-' : confidence} '
+      'verifiedOnly:$_verifiedOnly freshToday:$_freshToday '
+      'nearestOnly:$_nearestOnly broaderFallback:$_broaderMarketFallback',
+    );
+    if (list.isNotEmpty) {
+      final preview = list.take(8).toList(growable: false);
+      for (var i = 0; i < preview.length; i++) {
+        final row = preview[i];
+        final srcRank = MandiAllPresenter.sourceRank(row);
+        final summaryRow =
+            '${MandiAllPresenter.commodityEnglish(row)} '
+            '${MandiAllPresenter.cityEnglish(row)} '
+            '${getTrustedDisplayPrice(row).toStringAsFixed(0)} '
+            '${MandiAllPresenter.unitEnglish(row)}';
+        debugPrint('[MandiProof] final_visible_all_mandi_row=$summaryRow');
+        if (_isWheatRate(row)) {
+          debugPrint('[MandiProof] wheat_visible_rank=${i + 1} surface=all_mandi');
+        }
+        // TEMP TRACE: all_mandi visible row
+        debugPrint('[MandiProof] all_mandi_visible_row docId=${row.id} commodity=${MandiAllPresenter.commodityEnglish(row)} city=${MandiAllPresenter.cityEnglish(row)}');
+        debugPrint(
+          '[MandiAll] visible_row idx=${i + 1} '
+          'commodity=${MandiAllPresenter.commodityEnglish(row)} '
+          'city=${MandiAllPresenter.cityEnglish(row)} '
+          'price=${getTrustedDisplayPrice(row).toStringAsFixed(0)} '
+          'unit=${MandiAllPresenter.unitEnglish(row)} '
+          'freshness=${row.freshnessStatus.name}',
+        );
+        debugPrint(
+          '[MandiAll] visible_row=${MandiAllPresenter.commodityEnglish(row)} '
+          '${MandiAllPresenter.cityEnglish(row)} '
+          '${getTrustedDisplayPrice(row).toStringAsFixed(0)} '
+          '${MandiAllPresenter.unitEnglish(row)}',
+        );
+        debugPrint(
+          '[MandiAll] source_selected=${row.sourceId} '
+          'rank=$srcRank confidence=${row.confidenceScore.toStringAsFixed(2)}',
+        );
+      }
     }
 
     if (!mounted) return;
@@ -398,6 +540,12 @@ class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
         onRefresh: _loadInitial,
         child: Column(
           children: [
+            // Thin refresh-progress bar visible when reloading with existing data
+            if (_loading && _visible.isNotEmpty)
+              const LinearProgressIndicator(
+                color: AppColors.accentGold,
+                minHeight: 2,
+              ),
             if (staleNotice)
               Container(
                 width: double.infinity,
@@ -544,6 +692,23 @@ class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
                           ),
                         ),
                         const SizedBox(width: 8),
+                        SizedBox(
+                          width: 150,
+                          child: TextField(
+                            onChanged: (value) {
+                              _unit = value.trim().isEmpty ? null : value.trim();
+                              unawaited(_recomputeVisible());
+                            },
+                            style: const TextStyle(
+                              color: AppColors.primaryText,
+                            ),
+                            decoration: const InputDecoration(
+                              hintText: 'Unit / اکائی',
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
                         DropdownButton<MandiType?>(
                           value: _category,
                           dropdownColor: AppColors.cardSurface,
@@ -677,7 +842,7 @@ class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
                             ),
                             DropdownMenuItem<String?>(
                               value: 'review',
-                              child: Text('Needs Review'),
+                              child: Text('مزید جانچ درکار'),
                             ),
                           ],
                           onChanged: (value) {
@@ -705,7 +870,7 @@ class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
                             ),
                             DropdownMenuItem<String?>(
                               value: 'needs_review',
-                              child: Text('Needs Review'),
+                              child: Text('مزید جانچ درکار'),
                             ),
                             DropdownMenuItem<String?>(
                               value: 'rejected',
@@ -718,11 +883,65 @@ class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
                           },
                         ),
                         const SizedBox(width: 8),
+                        DropdownButton<String?>(
+                          value: _province,
+                          dropdownColor: AppColors.cardSurface,
+                          hint: const Text('Province'),
+                          items: const <DropdownMenuItem<String?>>[
+                            DropdownMenuItem<String?>(
+                              value: null,
+                              child: Text('All Provinces'),
+                            ),
+                            DropdownMenuItem<String?>(
+                              value: 'Punjab',
+                              child: Text('Punjab'),
+                            ),
+                            DropdownMenuItem<String?>(
+                              value: 'Sindh',
+                              child: Text('Sindh'),
+                            ),
+                            DropdownMenuItem<String?>(
+                              value: 'KPK',
+                              child: Text('KPK'),
+                            ),
+                            DropdownMenuItem<String?>(
+                              value: 'Balochistan',
+                              child: Text('Balochistan'),
+                            ),
+                            DropdownMenuItem<String?>(
+                              value: 'Islamabad',
+                              child: Text('ICT'),
+                            ),
+                          ],
+                          onChanged: (value) {
+                            setState(() => _province = value);
+                            unawaited(_recomputeVisible());
+                          },
+                        ),
+                        const SizedBox(width: 8),
                         FilterChip(
                           selected: _nearestOnly,
                           label: const Text('Nearest / قریب ترین'),
                           onSelected: (value) {
                             setState(() => _nearestOnly = value);
+                            unawaited(_recomputeVisible());
+                          },
+                        ),
+                        const SizedBox(width: 8),
+                        FilterChip(
+                          selected: _verifiedOnly,
+                          label: const Text('Verified Only'),
+                          onSelected: (value) {
+                            setState(() => _verifiedOnly = value);
+                            unawaited(_recomputeVisible());
+                          },
+                        ),
+                        const SizedBox(width: 8),
+                        FilterChip(
+                          selected: _freshToday,
+                          label: const Text('Fresh Today'),
+                          onSelected: (value) {
+                            setState(() => _freshToday = value);
                             unawaited(_recomputeVisible());
                           },
                         ),
@@ -734,12 +953,8 @@ class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
             ),
             Expanded(
               child: () {
-                if (_loading) {
-                  return const Center(
-                    child: CircularProgressIndicator(
-                      color: AppColors.accentGold,
-                    ),
-                  );
+                if (_loading && _visible.isEmpty) {
+                  return _buildLoadingSkeleton();
                 }
                 if (_error != null && _visible.isEmpty) {
                   return Center(
@@ -790,6 +1005,19 @@ class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
 
                     final rate = _visible[index];
                     final trustedPrice = getTrustedDisplayPrice(rate);
+                    final commodityDisplay = getLocalizedCommodityName(
+                      rate.commodityNameUr.trim().isNotEmpty
+                          ? rate.commodityNameUr
+                          : rate.commodityName,
+                      MandiDisplayLanguage.urdu,
+                    );
+                    final cityDisplay = getLocalizedPrimaryLocation(
+                      city: rate.city,
+                      district: rate.district,
+                      province: rate.province,
+                      language: MandiDisplayLanguage.urdu,
+                    );
+                    final unitDisplay = _displayUnitUrduForRate(rate);
                     return Container(
                       margin: const EdgeInsets.only(bottom: 8),
                       padding: const EdgeInsets.all(10),
@@ -805,7 +1033,7 @@ class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  rate.commodityName,
+                                  commodityDisplay,
                                   style: const TextStyle(
                                     color: AppColors.primaryText,
                                     fontWeight: FontWeight.w700,
@@ -813,7 +1041,7 @@ class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  '${rate.mandiName} • ${rate.locationLine}',
+                                  cityDisplay,
                                   style: const TextStyle(
                                     color: AppColors.secondaryText,
                                     fontSize: 11.2,
@@ -844,7 +1072,7 @@ class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
                                 ),
                               if (rate.isSuspiciousRate)
                                 const Text(
-                                  'Needs Review',
+                                  'مزید جانچ درکار',
                                   style: TextStyle(
                                     color: AppColors.urgencyRed,
                                     fontSize: 10,
@@ -852,7 +1080,7 @@ class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
                                   ),
                                 ),
                               Text(
-                                '${rate.trendSymbol} ${rate.unit}',
+                                '${rate.trendSymbol} $unitDisplay',
                                 style: const TextStyle(
                                   color: AppColors.secondaryText,
                                   fontSize: 10.5,
@@ -879,6 +1107,59 @@ class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// Loading skeleton shown on first open when no cached data is available.
+  Widget _buildLoadingSkeleton() {
+    return ListView.builder(
+      physics: const NeverScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
+      itemCount: 10,
+      itemBuilder: (context, index) {
+        return Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: AppColors.cardSurface,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: AppColors.secondarySurface),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _skeletonBar(width: 120, height: 13),
+                    const SizedBox(height: 6),
+                    _skeletonBar(width: 160, height: 10),
+                  ],
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  _skeletonBar(width: 70, height: 14),
+                  const SizedBox(height: 4),
+                  _skeletonBar(width: 50, height: 10),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _skeletonBar({required double width, required double height}) {
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: AppColors.primaryText.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(4),
       ),
     );
   }
@@ -972,5 +1253,151 @@ class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
     }
     if (province.isNotEmpty && rateProvince == province) return 3;
     return 4;
+  }
+
+  int _compareTrustedDeterministic(
+    LiveMandiRate a,
+    LiveMandiRate b,
+    MandiLocationContext location,
+    Set<String> nearestDistricts,
+  ) {
+    final sourceRankA = _trustPolicy.priorityRank(a);
+    final sourceRankB = _trustPolicy.priorityRank(b);
+    final sourceCompare = sourceRankA.compareTo(sourceRankB);
+    if (sourceCompare != 0) return sourceCompare;
+
+    final tierA = _locationTier(a, location, nearestDistricts);
+    final tierB = _locationTier(b, location, nearestDistricts);
+    final tierCompare = tierA.compareTo(tierB);
+    if (tierCompare != 0) return tierCompare;
+
+    final freshnessRankA = _freshnessRank(a);
+    final freshnessRankB = _freshnessRank(b);
+    final freshnessCompare = freshnessRankB.compareTo(freshnessRankA);
+    if (freshnessCompare != 0) return freshnessCompare;
+
+    final confidenceCompare = b.confidenceScore.compareTo(a.confidenceScore);
+    if (confidenceCompare != 0) return confidenceCompare;
+
+    final updatedCompare = b.lastUpdated.compareTo(a.lastUpdated);
+    if (updatedCompare != 0) return updatedCompare;
+
+    final categoryCompare = a.categoryName.toLowerCase().compareTo(
+      b.categoryName.toLowerCase(),
+    );
+    if (categoryCompare != 0) return categoryCompare;
+
+    final commodityCompare = a.commodityName.toLowerCase().compareTo(
+      b.commodityName.toLowerCase(),
+    );
+    if (commodityCompare != 0) return commodityCompare;
+
+    return a.id.compareTo(b.id);
+  }
+
+  bool _hasMixedUnitSignals(String rawUnit, String displayUnit) {
+    final source = '$rawUnit $displayUnit'.toLowerCase();
+    final hasKg = source.contains('kg') || source.contains('کلو');
+    final hasDozen = source.contains('dozen') || source.contains('درجن');
+    final hasPiece = source.contains('piece') || source.contains('عدد');
+    final has40kg = source.contains('40kg') || source.contains('40 کلو');
+    final has100kg = source.contains('100kg') || source.contains('100 کلو');
+    if (hasKg && hasDozen) return true;
+    if (hasPiece && hasKg) return true;
+    if (has40kg && has100kg) return true;
+    return false;
+  }
+
+  List<LiveMandiRate> _ensureWheatNearTopVisible(
+    List<LiveMandiRate> list, {
+    required MandiLocationContext location,
+    required Set<String> nearestDistricts,
+  }) {
+    if (list.isEmpty) return list;
+
+    final wheatCandidates = list.where(_isWheatRate).toList(growable: false);
+    if (wheatCandidates.isEmpty) return list;
+
+    final hasLahoreWheat = wheatCandidates.any(_isLahoreRate);
+    final topWindow = list.take(8).toList(growable: false);
+    final hasTopWheat = topWindow.any(_isWheatRate);
+    final hasTopLahoreWheat = topWindow.any(
+      (row) => _isWheatRate(row) && _isLahoreRate(row),
+    );
+
+    if (!hasLahoreWheat && hasTopWheat) return list;
+    if (hasLahoreWheat && hasTopLahoreWheat) return list;
+
+    final rankedWheat = List<LiveMandiRate>.from(wheatCandidates)
+      ..sort((a, b) {
+        final aLahore = _isLahoreRate(a);
+        final bLahore = _isLahoreRate(b);
+        if (aLahore != bLahore) return bLahore ? 1 : -1;
+        return _compareTrustedDeterministic(a, b, location, nearestDistricts);
+      });
+
+    final target = rankedWheat.first;
+    final existingIndex = list.indexWhere((row) => row.id == target.id);
+    if (existingIndex < 0) return list;
+
+    final mutable = List<LiveMandiRate>.from(list);
+    final moved = mutable.removeAt(existingIndex);
+    final insertIndex = 0;
+    mutable.insert(insertIndex, moved);
+    return mutable;
+  }
+
+  bool _isWheatRate(LiveMandiRate rate) {
+    final commodity = MandiAllPresenter.commodityEnglish(rate)
+        .trim()
+        .toLowerCase();
+    return commodity == 'wheat' || commodity.contains('wheat');
+  }
+
+  bool _isLahoreRate(LiveMandiRate rate) {
+    final cityEnglish = MandiAllPresenter.cityEnglish(rate).trim().toLowerCase();
+    final cityRaw = rate.city.trim().toLowerCase();
+    final districtRaw = rate.district.trim().toLowerCase();
+    final mandi = rate.mandiName.trim().toLowerCase();
+    return cityEnglish.contains('lahore') ||
+        cityRaw.contains('lahore') ||
+        cityRaw.contains('لاہور') ||
+        districtRaw.contains('lahore') ||
+        districtRaw.contains('لاہور') ||
+        mandi.contains('lahore') ||
+        mandi.contains('لاہور');
+  }
+
+  String _displayUnitUrduForRate(LiveMandiRate rate) {
+    final commodityKey = MandiHomePresenter.normalizeCommodityKey(
+      '${rate.commodityNameUr} ${rate.commodityName}',
+    );
+    final unitKey = MandiHomePresenter.resolveUnitKeyForCommodity(
+      commodityKey: commodityKey,
+      unitRaw: rate.unit,
+    );
+    switch (unitKey) {
+      case 'per_40kg':
+        return '40 کلو';
+      case 'per_100kg':
+        return '100 کلو';
+      case 'per_50kg':
+        return '50 کلو';
+      case 'per_litre':
+        return 'لیٹر';
+      case 'per_dozen':
+        return 'درجن';
+      case 'per_tray':
+        return 'ٹری';
+      case 'per_crate':
+        return 'کریٹ';
+      case 'per_peti':
+        return 'پیٹی';
+      case 'per_piece':
+        return 'عدد';
+      case 'per_kg':
+      default:
+        return 'کلو';
+    }
   }
 }

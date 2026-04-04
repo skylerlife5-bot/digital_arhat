@@ -4,6 +4,7 @@ exports.normalizeLocationToken = normalizeLocationToken;
 exports.normalizeCommodityName = normalizeCommodityName;
 exports.toUrduCommodityLabel = toUrduCommodityLabel;
 exports.normalizeUnit = normalizeUnit;
+exports.normalizePriceText = normalizePriceText;
 exports.normalizeTrend = normalizeTrend;
 exports.freshnessStatus = freshnessStatus;
 exports.deterministicIdForRow = deterministicIdForRow;
@@ -20,11 +21,13 @@ function slug(input) {
         .replace(/^_+|_+$/g, "");
 }
 const LOCATION_ALIAS_TO_EN = {
+    // Urdu city/district names
     "لاہور": "Lahore",
     "کراچی": "Karachi",
     "اسلام آباد": "Islamabad",
     "راولپنڈی": "Rawalpindi",
     "گوجرانوالہ": "Gujranwala",
+    "گوجرانوالا": "Gujranwala",
     "ڈیرہ غازی خان": "D.G. Khan",
     "ڈی جی خان": "D.G. Khan",
     "ڈی۔جی۔خان": "D.G. Khan",
@@ -49,14 +52,80 @@ const LOCATION_ALIAS_TO_EN = {
     "مظفرگڑھ": "Muzaffargarh",
     "لیہ": "Layyah",
     "بہاولپور": "Bahawalpur",
+    // Roman Urdu / common misspellings
     "faislabad": "Faisalabad",
     "faisalbad": "Faisalabad",
     "faisal abad": "Faisalabad",
     "dg khan": "D.G. Khan",
     "d.g. khan": "D.G. Khan",
     "dera ghazi khan": "D.G. Khan",
+    "deraghazikhan": "D.G. Khan",
+    // New Punjab districts for FS&CPD coverage
+    "sialkot": "Sialkot",
+    "sheikhupura": "Sheikhupura",
+    "kasur": "Kasur",
+    "nankana sahib": "Nankana Sahib",
+    "mandi bahauddin": "Mandi Bahauddin",
+    "hafizabad": "Hafizabad",
+    "chakwal": "Chakwal",
+    "attock": "Attock",
+    "khushab": "Khushab",
+    "pakpattan": "Pakpattan",
+    "toba tek singh": "Toba Tek Singh",
+    "tobateksingh": "Toba Tek Singh",
+    "muzaffargarh": "Muzaffargarh",
+    "layyah": "Layyah",
+    "rajanpur": "Rajanpur",
+    "rahim yar khan": "Rahim Yar Khan",
+    "rahimyarkhan": "Rahim Yar Khan",
 };
+const CANONICAL_COMMODITY_IDS = new Set([
+    "wheat",
+    "rice",
+    "basmati_rice",
+    "irri_rice",
+    "paddy",
+    "maize",
+    "sugar",
+    "potato",
+    "onion",
+    "tomato",
+    "banana",
+    "eggs",
+    "garlic",
+    "ginger",
+    "chilli",
+    "capsicum",
+    "peas",
+    "carrot",
+    "radish",
+    "turnip",
+    "spinach",
+    "okra",
+    "cauliflower",
+    "cabbage",
+    "mango",
+    "apple",
+    "orange",
+    "guava",
+    "grapes",
+    "watermelon",
+    "melon",
+    "pomegranate",
+    "dates",
+    "chickpea",
+    "lentil",
+    "mung_bean",
+    "black_gram",
+    "sugarcane",
+    "cotton",
+    "dap",
+    "urea",
+    "goat",
+    "cow",
+]);
 const COMMODITY_ALIAS_TO_EN = {
+    // Urdu
     "گندم": "Wheat",
     "چاول": "Rice",
     "چینی": "Sugar",
@@ -65,30 +134,136 @@ const COMMODITY_ALIAS_TO_EN = {
     "ٹماٹر": "Tomato",
     "مکئی": "Maize",
     "کارن": "Maize",
+    "بھنڈی": "Okra",
+    "کینو": "Kinnow",
+    "کیلا": "Banana",
+    "انڈا": "Egg",
+    "انڈے": "Eggs",
+    "لہسن": "Garlic",
+    "ادرک": "Ginger",
+    "مرچ": "Chilli",
+    "مٹر": "Peas",
+    "گاجر": "Carrot",
+    "مولی": "Radish",
+    "پالک": "Spinach",
+    "آم": "Mango",
+    "سیب": "Apple",
+    "امرود": "Guava",
+    "مالٹا": "Orange",
+    "چنا": "Chickpea",
+    "مسور": "Lentil",
+    "مونگ": "Mung Bean",
+    // Roman Urdu / field variants
     "maize": "Maize",
     "corn": "Maize",
-    "بھنڈی": "Okra",
-    "okra": "Okra",
-    "کینو": "Kinnow",
-    "kinnow": "Kinnow",
     "aaloo": "Potato",
+    "aloo": "Potato",
     "pyaz": "Onion",
     "tamatar": "Tomato",
     "chaawal": "Rice",
+    "chawal": "Rice",
     "gandum": "Wheat",
+    "kinnow": "Kinnow",
+    "kinow": "Kinnow",
+    "kela": "Banana",
+    "banana": "Banana",
+    "anda": "Egg",
+    "anday": "Eggs",
+    "lehsan": "Garlic",
+    "adrak": "Ginger",
+    "mirch": "Chilli",
+    "shimla mirch": "Capsicum",
+    "capsicum": "Capsicum",
+    "bhindi": "Okra",
+    "okra": "Okra",
+    "tinda": "Round Gourd",
+    "karela": "Bitter Gourd",
+    "lauki": "Bottle Gourd",
+    "tori": "Ridge Gourd",
+    "baingan": "Brinjal",
+    "matar": "Peas",
+    "gajar": "Carrot",
+    "mooli": "Radish",
+    "shalgam": "Turnip",
+    "palak": "Spinach",
+    "gobhi": "Cauliflower",
+    "band gobhi": "Cabbage",
+    "aam": "Mango",
+    "seb": "Apple",
+    "amrood": "Guava",
+    "angoor": "Grapes",
+    "tarbuz": "Watermelon",
+    "kharboza": "Melon",
+    "anaar": "Pomegranate",
+    "khajoor": "Dates",
+    "chana": "Chickpea",
+    "moong": "Mung Bean",
+    "mung": "Mung Bean",
+    "masoor": "Lentil",
+    "urad": "Black Gram",
+    "basmati": "Basmati Rice",
+    "irri": "Irri Rice",
+    "dhan": "Paddy",
+    "paddy": "Paddy",
+    "ganna": "Sugarcane",
+    "sugarcane": "Sugarcane",
+    "kapas": "Cotton",
+    "cotton": "Cotton",
+    "dap": "DAP",
+    "urea": "Urea",
+    "bakra": "Goat",
+    "goat": "Goat",
+    "gai": "Cow",
+    "cow": "Cow",
 };
 const COMMODITY_EN_TO_UR = {
     wheat: "گندم",
     rice: "چاول",
+    "basmati rice": "بسمتی چاول",
+    "irri rice": "عرفی چاول",
+    paddy: "دھان",
     sugar: "چینی",
     onion: "پیاز",
     potato: "آلو",
     tomato: "ٹماٹر",
     maize: "مکئی",
-    okra: "بھِنڈی",
+    okra: "بھنڈی",
     kinnow: "کینو",
     mango: "آم",
     banana: "کیلا",
+    apple: "سیب",
+    orange: "مالٹا",
+    guava: "امرود",
+    grapes: "انگور",
+    watermelon: "تربوز",
+    melon: "خربوزہ",
+    pomegranate: "انار",
+    dates: "کھجور",
+    garlic: "لہسن",
+    ginger: "ادرک",
+    chilli: "مرچ",
+    capsicum: "شملہ مرچ",
+    spinach: "پالک",
+    carrot: "گاجر",
+    radish: "مولی",
+    turnip: "شلجم",
+    peas: "مٹر",
+    cauliflower: "پھول گوبھی",
+    cabbage: "بند گوبھی",
+    brinjal: "بینگن",
+    "bitter gourd": "کریلا",
+    "bottle gourd": "لوکی",
+    chickpea: "چنا",
+    lentil: "مسور",
+    "mung bean": "مونگ",
+    sugarcane: "گنا",
+    cotton: "کپاس",
+    egg: "انڈا",
+    eggs: "انڈے",
+    goat: "بکرا",
+    cow: "گائے",
+    dap: "ڈی اے پی",
+    urea: "یوریا",
 };
 const CATEGORY_ALIAS_TO_EN = {
     crops: "crops",
@@ -118,6 +293,9 @@ function canonicalLocation(value) {
         .replace(/\s+district$/i, "")
         .replace(/\s+city$/i, "")
         .replace(/\s+mandi$/i, "")
+        .replace(/\./g, " ")
+        .toLowerCase()
+        .replace(/\s+/g, " ")
         .trim();
 }
 function normalizeCategoryName(value) {
@@ -141,13 +319,28 @@ function normalizeLocationToken(value) {
 function normalizeCommodityName(value) {
     const input = text(value);
     if (!input)
-        return "Unknown";
-    const mapped = COMMODITY_ALIAS_TO_EN[input] ?? input;
-    return mapped
-        .split(/\s+/)
-        .filter((item) => item)
-        .map((part) => part[0].toUpperCase() + part.slice(1).toLowerCase())
-        .join(" ");
+        return "unknown";
+    const cleanInput = input
+        .toLowerCase()
+        .replace(/<[^>]+>/g, " ")
+        .replace(/[^\p{L}\p{N}\s]/gu, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    if (!cleanInput)
+        return "unknown";
+    const mapped = (COMMODITY_ALIAS_TO_EN[input] ??
+        COMMODITY_ALIAS_TO_EN[cleanInput] ??
+        cleanInput)
+        .toLowerCase()
+        .replace(/\s+/g, " ")
+        .trim();
+    const normalized = mapped
+        .replace(/\begg\b/g, "eggs")
+        .replace(/\s+/g, "_")
+        .replace(/[^a-z_]/g, "")
+        .replace(/_+/g, "_")
+        .replace(/^_+|_+$/g, "");
+    return CANONICAL_COMMODITY_IDS.has(normalized) ? normalized : "unknown";
 }
 function toUrduCommodityLabel(english) {
     const key = text(english).toLowerCase();
@@ -157,7 +350,7 @@ function normalizeUnit(value) {
     const raw = text(value).toLowerCase();
     if (!raw)
         return "PKR/100kg";
-    if (raw.includes("mon") || raw.includes("maund") || raw.includes("40 kg"))
+    if (raw.includes("mon") || raw.includes("maund") || raw.includes("mann") || raw.includes("40 kg") || raw.match(/\b40kg\b/))
         return "PKR/40kg";
     if (raw.includes("100") && raw.includes("kg"))
         return "PKR/100kg";
@@ -165,13 +358,32 @@ function normalizeUnit(value) {
         return "PKR/40kg";
     if (raw.includes("50") && raw.includes("kg"))
         return "PKR/50kg";
-    if (raw.includes("kg"))
-        return "PKR/kg";
-    if (raw.includes("doz") || raw.includes("dozen"))
+    if (raw.includes("dozen") || raw.includes("doz"))
         return "PKR/dozen";
+    if (raw.includes("tray"))
+        return "PKR/tray";
+    if (raw.includes("crate") || raw.includes("peti"))
+        return "PKR/crate";
     if (raw.includes("head"))
         return "PKR/head";
+    if (raw.includes("bag"))
+        return "PKR/bag";
+    if (raw === "kg" || raw === "per kg" || raw === "perkg" || raw === "pkr/kg" || raw === "rs/kg")
+        return "PKR/kg";
+    if (raw.includes("kg"))
+        return "PKR/kg";
     return raw.toUpperCase();
+}
+function normalizePriceText(value) {
+    const raw = text(value);
+    if (!raw)
+        return "";
+    return raw
+        .toLowerCase()
+        .replace(/rs\.?|pkr|rupees?/g, "")
+        .replace(/,/g, "")
+        .replace(/[^0-9.\-]/g, "")
+        .trim();
 }
 function normalizeTrend(price, previous, trend) {
     const raw = text(trend).toLowerCase();
@@ -210,6 +422,7 @@ function deterministicIdForRow(row) {
 function toUnifiedBase(row, now) {
     const commodityName = normalizeCommodityName(row.commodityName);
     const unit = normalizeUnit(row.unit ?? "PKR/100kg");
+    const normalizedPriceText = normalizePriceText(row.metadata?.rawPriceText ?? row.metadata?.priceText ?? String(row.price));
     const previousPrice = row.previousPrice ?? null;
     const trend = normalizeTrend(row.price, previousPrice, row.trend ?? "same");
     const city = canonicalLocation(text(row.city, row.mandiName));
@@ -259,6 +472,7 @@ function toUnifiedBase(row, now) {
             subCategoryNorm: subCategoryName,
             commodityNorm: normalizeCommodityName(commodityName).toLowerCase(),
             unitNorm: unit.toLowerCase(),
+            normalizedPriceText,
         },
     };
 }

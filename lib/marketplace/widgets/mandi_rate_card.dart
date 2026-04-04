@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../theme/app_colors.dart';
 import '../models/live_mandi_rate.dart';
+import '../services/mandi_home_presenter.dart';
+import '../utils/mandi_display_utils.dart';
 
 class MandiRateCard extends StatelessWidget {
   const MandiRateCard({super.key, required this.rate});
@@ -13,6 +15,41 @@ class MandiRateCard extends StatelessWidget {
     final previous = rate.previousPrice;
     final hasPrevious = previous != null && previous > 0;
     final trustedPrice = getTrustedDisplayPrice(rate);
+    final commodityKey = MandiHomePresenter.normalizeCommodityKey(
+      '${rate.metadata['urduName'] ?? ''} ${rate.commodityNameUr} ${rate.commodityName} ${rate.subCategoryName}',
+    );
+    if (!MandiHomePresenter.isAllowlistedCommodity(commodityKey)) {
+      return const SizedBox.shrink();
+    }
+    final row = MandiHomePresenter.buildDisplayRow(
+      commodityRaw: rate.commodityName,
+      urduName: '${rate.metadata['urduName'] ?? ''}'.trim().isNotEmpty
+          ? '${rate.metadata['urduName']}'.trim()
+          : null,
+      commodityNameUr: rate.commodityNameUr.trim().isNotEmpty
+          ? rate.commodityNameUr
+          : null,
+      city: rate.city,
+      district: rate.district,
+      province: rate.province,
+      unitRaw: rate.unit,
+      price: trustedPrice,
+      sourceSelected: '${rate.sourceId}|${rate.sourceType}|${rate.source}',
+      confidence: rate.confidenceScore,
+      renderPath: MandiHomeRenderPath.card,
+    );
+    if (!row.isRenderable) return const SizedBox.shrink();
+    debugPrint('[MandiHome] legacy_render_path_hit=false');
+    final commodity = row.commodityDisplay;
+    final city = row.cityDisplay;
+    final unit = row.unitDisplay;
+    final priceLine = '${row.priceDisplay} / $unit';
+    final badges = <String>[
+      if (rate.isLive) 'تازہ',
+      rate.freshnessLabel,
+      if (rate.isNearby) 'قریب',
+      if (rate.isAiCleaned) 'درست شدہ',
+    ].where((value) => value.trim().isNotEmpty).toSet().toList(growable: false);
 
     return Container(
       width: 236,
@@ -43,8 +80,8 @@ class MandiRateCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            rate.commodityName,
-            maxLines: 2,
+            commodity,
+            maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
               color: AppColors.primaryText,
@@ -53,23 +90,10 @@ class MandiRateCard extends StatelessWidget {
               height: 1.2,
             ),
           ),
-          if (rate.subCategoryName.trim().isNotEmpty) ...[
-            const SizedBox(height: 3),
-            Text(
-              rate.subCategoryName,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: AppColors.secondaryText,
-                fontSize: 10.7,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
           const SizedBox(height: 6),
           Text(
-            'Location / مقام: ${rate.mandiName} • ${rate.locationLine}',
-            maxLines: 2,
+            city,
+            maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
               color: AppColors.secondaryText,
@@ -83,19 +107,19 @@ class MandiRateCard extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(
-                  '${rate.currency} ${trustedPrice.toStringAsFixed(0)}',
+                  priceLine,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: Color(0xFFEFD88A),
-                    fontSize: 17,
+                    fontSize: 15.8,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
               ),
               const SizedBox(width: 6),
               Text(
-                '${rate.trendSymbol} ${rate.unit}',
+                rate.trendSymbol,
                 style: const TextStyle(
                   color: Color(0xFFEFD88A),
                   fontSize: 10.5,
@@ -118,7 +142,7 @@ class MandiRateCard extends StatelessWidget {
           if (hasPrevious) ...[
             const SizedBox(height: 2),
             Text(
-              'Prev: ${rate.currency} ${previous.toStringAsFixed(0)}',
+              'پچھلا ریٹ: ${formatLocalizedPrice(previous, MandiDisplayLanguage.urdu)}',
               style: const TextStyle(
                 color: AppColors.primaryText54,
                 fontSize: 10,
@@ -130,16 +154,11 @@ class MandiRateCard extends StatelessWidget {
           Wrap(
             spacing: 5,
             runSpacing: 5,
-            children: [
-              if (rate.isLive) _badge('Live'),
-              _badge(rate.freshnessLabel),
-              if (rate.isNearby) _badge('Nearby'),
-              if (rate.isAiCleaned) _badge('AI Cleaned'),
-            ],
+            children: badges.map(_badge).toList(growable: false),
           ),
           const Spacer(),
           Text(
-            'Last Updated / آخری اپڈیٹ: ${rate.lastUpdatedLabel}',
+            'آخری اپڈیٹ: ${getLocalizedRelativeTime(rate.lastUpdated, MandiDisplayLanguage.urdu)}',
             style: TextStyle(
               color: rate.isStale
                   ? AppColors.urgencyRed
@@ -150,7 +169,7 @@ class MandiRateCard extends StatelessWidget {
           ),
           const SizedBox(height: 2),
           Text(
-            'Synced: ${rate.syncedAtLabel}',
+            'ہم آہنگی: ${getLocalizedRelativeTime(rate.syncedAt, MandiDisplayLanguage.urdu)}',
             style: const TextStyle(
               color: AppColors.secondaryText,
               fontSize: 9.8,

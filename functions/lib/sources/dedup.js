@@ -3,10 +3,25 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.dedupeAndAnnotate = dedupeAndAnnotate;
 const normalization_1 = require("./normalization");
 const SOURCE_PRIORITY = {
+    // Primary: FS&CPD official district notified rates
+    fscpd_official: 5,
+    // Secondary: Punjab AMIS
+    amis_official: 4,
+    // Valid city official lists
     lahore_official_market_rates: 3,
-    karachi_official_price_lists: 3,
-    amis_official: 2,
+    karachi_official_price_lists: 2,
+    // Fallback trend-only source
+    pbs_spi: 1,
 };
+function confidenceRank(item) {
+    const direct = Number(item.confidenceScore ?? 0);
+    if (Number.isFinite(direct) && direct > 0)
+        return direct;
+    const fromMeta = Number(item.metadata?.sourceConfidence ?? item.metadata?.confidence ?? 0);
+    if (Number.isFinite(fromMeta) && fromMeta > 0)
+        return fromMeta;
+    return 0;
+}
 function freshnessRank(status) {
     if (status === "live")
         return 4;
@@ -25,6 +40,10 @@ function chooseBetter(a, b) {
     const freshnessB = freshnessRank(b.freshnessStatus);
     if (freshnessA !== freshnessB)
         return freshnessA > freshnessB ? a : b;
+    const confidenceA = confidenceRank(a);
+    const confidenceB = confidenceRank(b);
+    if (confidenceA !== confidenceB)
+        return confidenceA > confidenceB ? a : b;
     if (a.lastUpdated.getTime() !== b.lastUpdated.getTime()) {
         return a.lastUpdated > b.lastUpdated ? a : b;
     }

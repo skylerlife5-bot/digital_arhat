@@ -1,0 +1,53 @@
+﻿
+04-03 22:24:01.042  1380  4163 D ActivityTaskManager: startActivityAsUser: 
+callingPid=1849, callingUid=2000, caller=com.android.server.wm.ActivityTaskMana
+gerService.startActivityAsUser:1816 com.android.server.am.ActivityManagerServic
+e.startActivityAsUserWithFeature:3747 
+android.app.IActivityManager$Stub.onTransact:4231 
+com.android.server.am.ActivityManagerService.onTransact:3135 
+android.os.Binder.execTransactInternal:1316 
+android.os.Binder.execTransact:1280 <bottom of call stack> 
+04-03 22:24:01.070  1100  9132 I CameraService: onUidStateChanged: uid=10047, 
+procState is changed. (0 -> 1)
+04-03 22:24:02.439   818   818 E audit   : type=1300 
+audit(1775237042.435:15312): arch=c00000b7 syscall=56 success=no exit=-13 
+a0=ffffff9c a1=7088b69020 a2=0 a3=0 items=0 ppid=836 pid=1913 auid=4294967295 
+uid=10396 gid=10396 euid=10396 suid=10396 fsuid=10396 egid=10396 sgid=10396 
+fsgid=10396 tty=(none) ses=4294967295 comm="e.digital_arhat" 
+exe="/system/bin/app_process64" subj=u:r:untrusted_app:s0:c140,c257,c512,c768 
+key=(null)
+04-03 22:24:04.118  1380  3978 V InputMethodManagerService: Creating new 
+session for client ClientState{a38085b uid=10396 pid=1913 displayId=0}
+04-03 22:24:04.134  1100  8211 I CameraService: onUidStateChanged: uid=10219, 
+procState is changed. (3 -> 5)
+04-03 22:24:04.138  1100  1100 I CameraService: onUidStateChanged: uid=10176, 
+procState is changed. (3 -> 5)
+04-03 22:24:04.158  1100  8211 I CameraService: onUidStateChanged: uid=10047, 
+procState is changed. (1 -> 0)
+04-03 22:24:05.562   818   818 E audit   : type=1300 
+audit(1775237045.559:15313): arch=c00000b7 syscall=203 success=no exit=-13 
+a0=a3 a1=b400007082bfbce0 a2=1e a3=ffffffff963187b9 items=0 ppid=836 pid=12782 
+auid=4294967295 uid=10218 gid=10218 euid=10218 suid=10218 fsuid=10218 
+egid=10218 sgid=10218 fsgid=10218 tty=(none) ses=4294967295 
+comm="ThreadPoolForeg" exe="/system/bin/app_process64" 
+subj=u:r:gmscore_app:s0:c512,c768 key=(null)
+04-03 22:24:05.757  1913  1913 I flutter : [AUTH_WRAPPER] 
+firebaseAuthUid=lWoGCBogg7f71bsWmONrz4zBE562 route=role_gate
+04-03 22:24:05.759  1913  1913 I flutter : [AUTH_WRAPPER] 
+firebaseAuthUid=lWoGCBogg7f71bsWmONrz4zBE562 
+gateUid=lWoGCBogg7f71bsWmONrz4zBE562
+04-03 22:24:06.430  1913  1913 I flutter : [AUTH_WRAPPER] 
+usersDocId=lWoGCBogg7f71bsWmONrz4zBE562 role=admin userRole=admin 
+userType=admin resolvedUsersRole=admin
+04-03 22:24:08.964  1913  1913 I flutter : [ADMIN_ACCESS] 
+uid=lWoGCBogg7f71bsWmONrz4zBE562 adminDocExists=true isActive=true role=admin 
+isAdmin=true
+04-03 22:24:08.971  1913  1913 I flutter : [AUTH_WRAPPER] 
+uid=lWoGCBogg7f71bsWmONrz4zBE562 adminsLookupComplete=true isAdmin=true
+04-03 22:24:08.971  1913  1913 I flutter : [AUTH_WRAPPER] 
+uid=lWoGCBogg7f71bsWmONrz4zBE562 adminsLookupComplete=true 
+isAdminByService=true isAdminByUsersRole=true isAdmin=true
+04-03 22:24:08.973  1913  1913 I flutter : [AUTH_WRAPPER] 
+uid=lWoGCBogg7f71bsWmONrz4zBE562 finalRoute=admin_dashboard
+
+

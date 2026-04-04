@@ -3,10 +3,15 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../../auth/master_sign_up_screen.dart';
+import '../../core/widgets/premium_ui_kit.dart';
 import '../../routes.dart';
+import '../../services/auth_service.dart';
 import '../../theme/app_colors.dart';
+import '../../profile/verification_status_widget.dart';
 import 'buyer_dashboard_screen.dart';
 import 'buyer_home_screen.dart';
+import 'buyer_trust_widget.dart';
+import '../export/export_screen.dart';
 
 class BuyerDashboard extends StatefulWidget {
   const BuyerDashboard({super.key, required this.userData});
@@ -178,7 +183,7 @@ class _BuyerDashboardState extends State<BuyerDashboard> {
       BuyerHomeScreen(userData: widget.userData),
       BuyerDashboardScreen(userData: widget.userData),
       const SizedBox.shrink(),
-      _BuyerNotificationsTab(userData: widget.userData),
+      const ExportScreen(),
       _BuyerAccountTab(userData: widget.userData),
     ];
 
@@ -235,7 +240,7 @@ class _BuyerDashboardState extends State<BuyerDashboard> {
                   const NavigationDestination(
                     icon: Icon(Icons.storefront_outlined),
                     selectedIcon: Icon(Icons.storefront_outlined, color: _gold),
-                    label: 'Market',
+                    label: 'Mandi',
                   ),
                   NavigationDestination(
                     icon: Container(
@@ -267,12 +272,12 @@ class _BuyerDashboardState extends State<BuyerDashboard> {
                     label: 'Post',
                   ),
                   const NavigationDestination(
-                    icon: Icon(Icons.notifications_none_rounded),
+                    icon: Icon(Icons.public),
                     selectedIcon: Icon(
-                      Icons.notifications_none_rounded,
+                      Icons.public,
                       color: _gold,
                     ),
-                    label: 'Alerts',
+                    label: 'Export',
                   ),
                   const NavigationDestination(
                     icon: Icon(Icons.person_outline_rounded),
@@ -292,8 +297,8 @@ class _BuyerDashboardState extends State<BuyerDashboard> {
   }
 }
 
-class _BuyerNotificationsTab extends StatelessWidget {
-  const _BuyerNotificationsTab({required this.userData});
+class BuyerNotificationsTab extends StatelessWidget {
+  const BuyerNotificationsTab({super.key, required this.userData});
 
   final Map<String, dynamic> userData;
 
@@ -345,7 +350,18 @@ class _BuyerNotificationsTab extends StatelessWidget {
           final docs =
               snapshot.data?.docs ??
               const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
-          if (docs.isEmpty) {
+          final buyerDocs = docs
+              .where((doc) {
+                final data = doc.data();
+                final role = (data['targetRole'] ?? '')
+                    .toString()
+                    .trim()
+                    .toLowerCase();
+                return role.isEmpty || role == 'buyer';
+              })
+              .toList(growable: false);
+          debugPrint('[NotifReadBuyer] count=${buyerDocs.length}');
+          if (buyerDocs.isEmpty) {
             return const _ShellNoticeCard(
               title: 'No new alerts / نئی اطلاعات موجود نہیں',
               subtitle:
@@ -356,7 +372,7 @@ class _BuyerNotificationsTab extends StatelessWidget {
           return ListView.separated(
             padding: const EdgeInsets.fromLTRB(14, 8, 14, 24),
             itemBuilder: (context, index) {
-              final data = docs[index].data();
+              final data = buyerDocs[index].data();
               final type = (data['type'] ?? '').toString().toUpperCase();
               final isOutbid = type == 'OUTBID';
               final title = (data['titleEn'] ?? data['title'] ?? 'Update')
@@ -365,89 +381,126 @@ class _BuyerNotificationsTab extends StatelessWidget {
               final body = (data['bodyEn'] ?? data['body'] ?? '')
                   .toString()
                   .trim();
-              return Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: isOutbid
-                      ? AppColors.urgencyRed.withValues(alpha: 0.18)
-                      : AppColors.primaryText.withValues(alpha: 0.08),
+              final listingId = (data['listingId'] ?? data['entityId'] ?? '')
+                  .toString()
+                  .trim();
+              final tapAction = (data['tapAction'] ?? '').toString().trim();
+              final routeName = (data['routeName'] ?? '').toString().trim();
+
+              return Material(
+                color: Colors.transparent,
+                child: InkWell(
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: isOutbid
-                        ? AppColors.urgencyRed.withValues(alpha: 0.7)
-                        : _gold.withValues(alpha: 0.28),
-                  ),
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(
-                      isOutbid
-                          ? Icons.trending_up_rounded
-                          : Icons.notifications_active_rounded,
-                      color: isOutbid ? AppColors.urgencyRed : _gold,
-                      size: 18,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (isOutbid)
-                            Container(
-                              margin: const EdgeInsets.only(bottom: 5),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: AppColors.urgencyRed.withValues(
-                                  alpha: 0.22,
-                                ),
-                                borderRadius: BorderRadius.circular(999),
-                                border: Border.all(
-                                  color: AppColors.urgencyRed.withValues(
-                                    alpha: 0.62,
-                                  ),
-                                ),
-                              ),
-                              child: const Text(
-                                'OUTBID',
-                                style: TextStyle(
-                                  color: AppColors.primaryText,
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 10,
-                                ),
-                              ),
-                            ),
-                          Text(
-                            title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: AppColors.primaryText,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            body,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: AppColors.secondaryText,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
+                  onTap: () async {
+                    await buyerDocs[index].reference.set({
+                      'isRead': true,
+                    }, SetOptions(merge: true));
+
+                    String resolvedRoute = routeName;
+                    if (resolvedRoute.isEmpty && listingId.isNotEmpty) {
+                      resolvedRoute = Routes.listingDetails;
+                    }
+
+                    debugPrint(
+                      '[NotifRoute] tapAction=$tapAction route=$resolvedRoute',
+                    );
+
+                    if (resolvedRoute.isNotEmpty && listingId.isNotEmpty) {
+                      if (!context.mounted) return;
+                      Navigator.of(context).pushNamed(
+                        resolvedRoute,
+                        arguments: <String, dynamic>{
+                          'listingId': listingId,
+                          'userData': userData,
+                        },
+                      );
+                    }
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: isOutbid
+                          ? AppColors.urgencyRed.withValues(alpha: 0.18)
+                          : AppColors.primaryText.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isOutbid
+                            ? AppColors.urgencyRed.withValues(alpha: 0.7)
+                            : _gold.withValues(alpha: 0.28),
                       ),
                     ),
-                  ],
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          isOutbid
+                              ? Icons.trending_up_rounded
+                              : Icons.notifications_active_rounded,
+                          color: isOutbid ? AppColors.urgencyRed : _gold,
+                          size: 18,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (isOutbid)
+                                Container(
+                                  margin: const EdgeInsets.only(bottom: 5),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.urgencyRed.withValues(
+                                      alpha: 0.22,
+                                    ),
+                                    borderRadius: BorderRadius.circular(999),
+                                    border: Border.all(
+                                      color: AppColors.urgencyRed.withValues(
+                                        alpha: 0.62,
+                                      ),
+                                    ),
+                                  ),
+                                  child: const Text(
+                                    'OUTBID',
+                                    style: TextStyle(
+                                      color: AppColors.primaryText,
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 10,
+                                    ),
+                                  ),
+                                ),
+                              Text(
+                                title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: AppColors.primaryText,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                body,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: AppColors.secondaryText,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               );
             },
             separatorBuilder: (context, index) => const SizedBox(height: 8),
-            itemCount: docs.length,
+            itemCount: buyerDocs.length,
           );
         },
       ),
@@ -466,13 +519,24 @@ class _BuyerAccountTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
-    final name = (userData['fullName'] ?? userData['name'] ?? 'Buyer')
+    final name = (userData['fullName'] ?? userData['name'] ?? 'خریدار')
         .toString()
         .trim();
     final phone = (userData['phone'] ?? '').toString().trim();
+    final city = (userData['city'] ?? userData['village'] ?? '').toString().trim();
     final district = (userData['district'] ?? '').toString().trim();
     final province = (userData['province'] ?? '').toString().trim();
+    final role = (userData['role'] ?? userData['userRole'] ?? userData['userType'] ?? 'buyer')
+        .toString()
+        .trim()
+        .toLowerCase();
+    final bool verified = userData['isVerified'] == true || userData['isApproved'] == true;
     final bool isGuest = uid.isEmpty;
+    final String roleLabel = role == 'admin'
+        ? 'Admin'
+        : (role == 'seller' || role == 'arhat')
+            ? 'Seller'
+            : 'Buyer';
 
     return Scaffold(
       backgroundColor: _deepGreen,
@@ -480,7 +544,7 @@ class _BuyerAccountTab extends StatelessWidget {
         backgroundColor: Colors.transparent,
         elevation: 0,
         title: const Text(
-          'Account / اکاؤنٹ',
+          'اکاؤنٹ / Account',
           style: TextStyle(
             color: AppColors.primaryText,
             fontWeight: FontWeight.w700,
@@ -488,40 +552,43 @@ class _BuyerAccountTab extends StatelessWidget {
         ),
       ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(14, 8, 14, 24),
+        padding: const EdgeInsets.fromLTRB(
+          PremiumSpacing.screenHorizontal,
+          PremiumSpacing.s1,
+          PremiumSpacing.screenHorizontal,
+          PremiumSpacing.s3,
+        ),
         children: [
+          PremiumSectionHeader(
+            titleUr: isGuest ? 'گیسٹ موڈ' : 'آپ کا اکاؤنٹ',
+            titleEn: isGuest ? 'Guest mode' : 'Your account overview',
+          ),
+          const SizedBox(height: PremiumSpacing.s2),
           Container(
-            padding: const EdgeInsets.all(14),
+            padding: const EdgeInsets.all(PremiumSpacing.s2),
             decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  AppColors.primaryText.withValues(alpha: 0.11),
-                  AppColors.primaryText.withValues(alpha: 0.06),
-                ],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: _gold.withValues(alpha: 0.28)),
+              color: AppColors.primaryText10,
+              borderRadius: BorderRadius.circular(PremiumSpacing.cardRadius),
+              border: Border.all(color: AppColors.softGlassBorder),
             ),
             child: Row(
               children: [
                 Container(
-                  width: 44,
-                  height: 44,
+                  width: 48,
+                  height: 48,
                   decoration: BoxDecoration(
                     color: _gold.withValues(alpha: 0.2),
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(Icons.person_rounded, color: _gold),
                 ),
-                const SizedBox(width: 10),
+                const SizedBox(width: PremiumSpacing.s1_5),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        name.isEmpty ? 'Buyer' : name,
+                        isGuest ? 'Guest User / مہمان صارف' : (name.isEmpty ? 'خریدار' : name),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -530,117 +597,123 @@ class _BuyerAccountTab extends StatelessWidget {
                           fontSize: 16,
                         ),
                       ),
+                      const SizedBox(height: 2),
                       Text(
                         isGuest
-                            ? 'Guest browsing active / گیسٹ موڈ فعال'
-                            : 'Buyer ID: $uid',
+                            ? 'Limited access enabled'
+                            : '${phone.isEmpty ? 'Phone not set' : phone} · ${city.isEmpty ? district : city}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           color: AppColors.primaryText60,
-                          fontSize: 11,
+                          fontSize: 12,
                         ),
                       ),
                     ],
                   ),
                 ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: _gold.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: _gold.withValues(alpha: 0.58)),
+                  ),
+                  child: Text(
+                    isGuest ? 'Guest' : roleLabel,
+                    style: const TextStyle(
+                      color: AppColors.accentGold,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: PremiumSpacing.s2),
           if (isGuest)
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppColors.primaryText.withValues(alpha: 0.06),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.primaryText24),
-              ),
-              child: const Text(
-                'Browse mandi as guest, then sign in to place bids, get alerts, and post listings.\nمہمان کے طور پر مارکیٹ دیکھیں، پھر بولی، الرٹس اور پوسٹنگ کے لیے لاگ اِن کریں۔',
-                style: TextStyle(
-                  color: AppColors.secondaryText,
-                  fontSize: 12.2,
-                  height: 1.3,
-                ),
-              ),
+            const PremiumStatusCard(
+              badgeText: 'GUEST MODE',
+              badgeColor: AppColors.accentGold,
+              titleUr: 'ابھی آپ مہمان کے طور پر براؤز کر رہے ہیں',
+              titleEn: 'You are currently browsing as a guest',
+              descriptionUr: 'لاگ اِن کے بعد آپ بولی لگا سکتے ہیں، الرٹس لے سکتے ہیں اور اپنی سرگرمی محفوظ کر سکتے ہیں۔',
+              descriptionEn: 'After login you can place bids, receive alerts, and save your activity.',
+            )
+          else
+            PremiumStatusCard(
+              badgeText: verified ? 'VERIFIED' : 'UNDER REVIEW',
+              badgeColor: verified ? const Color(0xFF59C686) : AppColors.accentGold,
+              titleUr: verified ? 'آپ کا اکاؤنٹ تصدیق شدہ ہے' : 'آپ کا اکاؤنٹ جائزے میں ہے',
+              titleEn: verified ? 'Your account is verified' : 'Your account is under review',
+              descriptionUr: verified
+                  ? 'آپ کی شناخت اور پروفائل معلومات درست پائی گئی ہیں۔'
+                  : 'کچھ فیچرز محدود ہو سکتے ہیں جب تک جائزہ مکمل نہیں ہو جاتا۔',
+              descriptionEn: verified
+                  ? 'Your identity and profile details have been verified.'
+                  : 'Some features may remain limited until review is complete.',
             ),
-          const SizedBox(height: 10),
+          const SizedBox(height: PremiumSpacing.s2),
           _AccountInfoTile(
             label: 'Phone',
-            value: phone.isEmpty
-                ? (isGuest ? 'Guest session' : 'Not set')
-                : phone,
+            value: phone.isEmpty ? (isGuest ? 'Guest session' : 'Not set') : phone,
           ),
           _AccountInfoTile(
             label: 'Location',
             value:
                 '${district.isEmpty ? 'Pakistan' : district}${province.isEmpty ? '' : ', $province'}',
           ),
+          const SizedBox(height: PremiumSpacing.s1),
+          const VerificationStatusWidget(),
+          if (!isGuest) ...[
+            const SizedBox(height: PremiumSpacing.s2),
+            BuyerTrustWidget(userData: userData),
+          ],
           if (isGuest) ...[
-            const SizedBox(height: 6),
+            const SizedBox(height: PremiumSpacing.s1_5),
             const _AccountBenefitRow(
               icon: Icons.gavel_rounded,
-              text:
-                  'Place bids and track approvals / بولیاں لگائیں اور منظوری ٹریک کریں',
+              text: 'بولی لگائیں اور نتائج ٹریک کریں\nPlace bids and track outcomes',
             ),
             const _AccountBenefitRow(
               icon: Icons.notifications_active_outlined,
-              text: 'Get bid and outbid alerts / بولی اپڈیٹس حاصل کریں',
+              text: 'فوری الرٹس حاصل کریں\nReceive instant activity alerts',
             ),
             const _AccountBenefitRow(
-              icon: Icons.add_box_outlined,
-              text:
-                  'Post listings with seller access / سیلر رسائی کے ساتھ لسٹنگ پوسٹ کریں',
+              icon: Icons.post_add_rounded,
+              text: 'اپنی لسٹنگز پوسٹ کریں\nPost your own listings',
             ),
           ],
-          const SizedBox(height: 14),
-          if (isGuest)
-            Row(
-              children: [
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: () =>
-                        Navigator.of(context).pushNamed(Routes.login),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: _gold,
-                      foregroundColor: const Color(0xFF062517),
-                    ),
-                    icon: const Icon(Icons.login_rounded),
-                    label: const Text('Login / لاگ اِن'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () =>
-                        Navigator.of(context).pushNamed(Routes.createAccount),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.primaryText,
-                      side: BorderSide(color: _gold.withValues(alpha: 0.58)),
-                    ),
-                    icon: const Icon(Icons.person_add_alt_1_rounded),
-                    label: const Text('Create / بنائیں'),
-                  ),
-                ),
-              ],
-            )
-          else
-            OutlinedButton.icon(
+          const SizedBox(height: PremiumSpacing.s2),
+          if (isGuest) ...[
+            PremiumPrimaryButton(
+              label: 'لاگ اِن کریں / Login',
+              icon: Icons.login_rounded,
+              onPressed: () => Navigator.of(context).pushNamed(Routes.login),
+            ),
+            const SizedBox(height: PremiumSpacing.s1),
+            PremiumSecondaryButton(
+              label: 'اکاؤنٹ بنائیں / Create Account',
+              icon: Icons.person_add_alt_1_rounded,
+              onPressed: () =>
+                  Navigator.of(context).pushNamed(Routes.createAccount),
+            ),
+          ] else ...[
+            PremiumSecondaryButton(
+              label: 'لاگ آؤٹ / Logout',
+              icon: Icons.logout_rounded,
               onPressed: () async {
                 await FirebaseAuth.instance.signOut();
+                await AuthService().clearPersistedSessionUid();
                 if (!context.mounted) return;
-                Navigator.of(
-                  context,
-                ).pushNamedAndRemoveUntil(Routes.welcome, (route) => false);
+                Navigator.of(context).pushNamedAndRemoveUntil(
+                  Routes.welcome,
+                  (route) => false,
+                );
               },
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.primaryText,
-                side: BorderSide(color: _gold.withValues(alpha: 0.58)),
-              ),
-              icon: const Icon(Icons.logout_rounded),
-              label: const Text('Logout / لاگ آؤٹ'),
             ),
+          ],
         ],
       ),
     );

@@ -152,7 +152,12 @@ class AuctionLifecycleService {
       throw Exception('Invalid deal outcome status.');
     }
 
-    final listingRef = _db.collection('listings').doc(listingId);
+    final normalizedListingId = listingId.trim();
+    if (normalizedListingId.isEmpty) {
+      throw Exception('Listing not found.');
+    }
+
+    final listingRef = _db.collection('listings').doc(normalizedListingId);
     final listingSnap = await listingRef.get();
     if (!listingSnap.exists) {
       throw Exception('Listing not found.');
@@ -160,16 +165,13 @@ class AuctionLifecycleService {
 
     final listing = listingSnap.data() ?? <String, dynamic>{};
     final sellerId = (listing['sellerId'] ?? '').toString().trim();
-    final buyerId = (listing['buyerId'] ?? listing['winnerId'] ?? '')
-        .toString()
-        .trim();
 
     final callerUid = user.uid;
-    final callerIsParticipant = callerUid == sellerId || callerUid == buyerId;
+    final callerIsSeller = callerUid == sellerId;
     final callerIsAdmin = await _isAdmin(callerUid);
 
-    if (!callerIsParticipant && !callerIsAdmin) {
-      throw Exception('You are not allowed to update this deal outcome.');
+    if (!callerIsSeller && !callerIsAdmin) {
+      throw Exception('Only listing seller can update this deal outcome.');
     }
 
     final dealRef = await _resolveDealRef(
@@ -202,7 +204,7 @@ class AuctionLifecycleService {
 
     if (callerIsAdmin) {
       await _writeAudit(
-        listingId: listingId,
+        listingId: normalizedListingId,
         actionType: 'admin_update_deal_outcome',
         source: 'admin_ui',
         note: 'Outcome set to $normalized',
@@ -214,17 +216,33 @@ class AuctionLifecycleService {
     required String listingId,
     required Map<String, dynamic> listing,
   }) async {
+    final sellerId = (listing['sellerId'] ?? '').toString().trim();
+    final buyerId = (
+      listing['buyerId'] ?? listing['acceptedBuyerUid'] ?? listing['winnerId'] ?? ''
+    ).toString().trim();
     final dealId = (listing['dealId'] ?? '').toString().trim();
     if (dealId.isNotEmpty) {
-      return _db.collection('deals').doc(dealId);
+      final dealRef = _db.collection('deals').doc(dealId);
+      final dealSnap = await dealRef.get();
+      if (dealSnap.exists) {
+        final deal = dealSnap.data() ?? <String, dynamic>{};
+        final dealSellerId = (deal['sellerId'] ?? '').toString().trim();
+        final dealListingId = (deal['listingId'] ?? '').toString().trim();
+        if (dealSellerId == sellerId && dealListingId == listingId) {
+          return dealRef;
+        }
+      }
     }
 
-    final snap = await _db
+    Query<Map<String, dynamic>> query = _db
         .collection('deals')
         .where('listingId', isEqualTo: listingId)
-        .orderBy('createdAt', descending: true)
-        .limit(1)
-        .get();
+        .where('sellerId', isEqualTo: sellerId);
+    if (buyerId.isNotEmpty) {
+      query = query.where('buyerId', isEqualTo: buyerId);
+    }
+
+    final snap = await query.orderBy('createdAt', descending: true).limit(1).get();
     if (snap.docs.isEmpty) return null;
     return snap.docs.first.reference;
   }
@@ -277,6 +295,7 @@ class AuctionLifecycleService {
     'failed',
     'cancelled',
     'disputed',
+    'no_bids',
   };
 
   String _normalizeStatus(dynamic value) {

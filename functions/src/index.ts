@@ -1,4 +1,5 @@
 import * as admin from "firebase-admin";
+import {createHash} from "crypto";
 import {onCall, onRequest, HttpsError} from "firebase-functions/v2/https";
 import {onDocumentCreated, onDocumentDeleted} from "firebase-functions/v2/firestore";
 import {onObjectFinalized} from "firebase-functions/v2/storage";
@@ -308,6 +309,25 @@ function readRequestBody(req: Request): Record<string, unknown> {
   return req.body as Record<string, unknown>;
 }
 
+function normalizePakPhone(value: unknown): string {
+  let digits = String(value || "").replace(/[^0-9]/g, "");
+  if (!digits) return "";
+  if (digits.startsWith("0092")) digits = digits.slice(4);
+  if (digits.startsWith("92")) digits = digits.slice(2);
+  if (digits.startsWith("0")) digits = digits.slice(1);
+  if (digits.length !== 10 || !digits.startsWith("3")) return "";
+  return `+92${digits}`;
+}
+
+function hashPasswordSha256(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+function emailFromPakPhone(normalizedPhone: string): string {
+  const safe = normalizedPhone.replace(/[^0-9]/g, "");
+  return `u_${safe}@digitalarhat.app`;
+}
+
 async function getUidFromBearerToken(req: Request): Promise<string | null> {
   const authHeader = String(req.headers.authorization || "").trim();
   if (!authHeader.toLowerCase().startsWith("bearer ")) return null;
@@ -336,6 +356,166 @@ async function getDecodedTokenFromBearerToken(req: Request): Promise<admin.auth.
     return null;
   }
 }
+
+export const establishCustomSession = onRequest({region: "asia-south1"}, async (req, res) => {
+  setCorsHeaders(res);
+  if (req.method === "OPTIONS") {
+    res.status(204).send("");
+    return;
+  }
+
+  if (req.method !== "POST") {
+    res.status(405).json({ok: false, error: "method-not-allowed"});
+    return;
+  }
+
+  const body = readRequestBody(req);
+  const normalizedPhone = normalizePakPhone(body.phone);
+  const rawPassword = String(body.password || "").trim();
+  const expectedUid = String(body.expectedUid || "").trim();
+
+  if (!normalizedPhone || !rawPassword) {
+    res.status(400).json({ok: false, error: "invalid-credentials"});
+    return;
+  }
+
+  try {
+    const indexSnap = await db.collection("phone_index").doc(normalizedPhone).get();
+    if (!indexSnap.exists) {
+      res.status(401).json({ok: false, error: "invalid-credentials"});
+      return;
+    }
+
+    const indexData = (indexSnap.data() || {}) as Record<string, unknown>;
+    const uid = String(indexData.uid || "").trim();
+    if (!uid) {
+      res.status(401).json({ok: false, error: "invalid-credentials"});
+      return;
+    }
+
+    if (expectedUid && expectedUid !== uid) {
+      res.status(401).json({ok: false, error: "uid-mismatch"});
+      return;
+    }
+
+    const userSnap = await db.collection("users").doc(uid).get();
+    if (!userSnap.exists) {
+      res.status(401).json({ok: false, error: "invalid-credentials"});
+      return;
+    }
+
+    const userData = (userSnap.data() || {}) as Record<string, unknown>;
+    const storedHash = String(userData.passwordHash || "").trim();
+    const storedPlain = String(userData.password || "");
+    const passwordMatches = storedHash
+      ? hashPasswordSha256(rawPassword) === storedHash
+      : (storedPlain && storedPlain === rawPassword);
+
+    if (!passwordMatches) {
+      res.status(401).json({ok: false, error: "invalid-credentials"});
+      return;
+    }
+
+    const auth = getAdminApp().auth();
+    const derivedEmail = emailFromPakPhone(normalizedPhone);
+    let canonicalEmail = derivedEmail;
+    let duplicateUidFound = false;
+    let emailLinkAttachedToOriginalUid = false;
+
+    try {
+      const canonicalOwner = await auth.getUserByEmail(canonicalEmail);
+      if (canonicalOwner.uid !== uid) {
+        duplicateUidFound = true;
+      }
+    } catch (error) {
+      const code = (error as {code?: string})?.code || "";
+      if (code !== "auth/user-not-found") {
+        throw error;
+      }
+    }
+
+    try {
+      const authUser = await auth.getUser(uid);
+      canonicalEmail = authUser.email || derivedEmail;
+
+      const hasPasswordProvider = (authUser.providerData || [])
+        .some((provider) => provider.providerId === "password");
+      const needsEmail = !authUser.email;
+      const needsPasswordSync = !hasPasswordProvider;
+
+      if (needsEmail || needsPasswordSync) {
+        await auth.updateUser(uid, {
+          email: canonicalEmail,
+          password: rawPassword,
+        });
+        emailLinkAttachedToOriginalUid = true;
+      }
+    } catch (error) {
+      const code = (error as {code?: string})?.code || "";
+      if (code === "auth/user-not-found") {
+        await auth.createUser({
+          uid,
+          phoneNumber: normalizedPhone,
+          email: canonicalEmail,
+          password: rawPassword,
+        });
+        emailLinkAttachedToOriginalUid = true;
+      } else {
+        throw error;
+      }
+    }
+
+    console.log(`[PROD_AUTH] originalUid=${uid}`);
+    console.log(`[PROD_AUTH] canonicalEmail=${canonicalEmail}`);
+    console.log(`[PROD_AUTH] duplicateUidFound=${duplicateUidFound}`);
+    console.log(`[PROD_AUTH] emailLinkAttachedToOriginalUid=${emailLinkAttachedToOriginalUid}`);
+
+    // Minting a custom token is enough to establish a Firebase Auth session
+    // for this uid. If minting fails (for example IAM signBlob misconfiguration),
+    // return a safe email/password fallback that the client can use immediately.
+    try {
+      const customToken = await auth.createCustomToken(uid, {
+        loginMethod: "phone_password_bridge",
+      });
+
+      res.status(200).json({
+        ok: true,
+        uid,
+        signInMethod: "custom_token",
+        authEmail: canonicalEmail,
+        originalUid: uid,
+        duplicateUidFound,
+        emailLinkAttachedToOriginalUid,
+        customToken,
+      });
+      return;
+    } catch (tokenError) {
+      console.error("establishCustomSession custom token mint failed", {
+        error: tokenError,
+        uid,
+        phoneSuffix: normalizedPhone ? normalizedPhone.slice(-4) : "",
+      });
+      res.status(200).json({
+        ok: true,
+        uid,
+        signInMethod: "email_password",
+        authEmail: canonicalEmail,
+        originalUid: uid,
+        duplicateUidFound,
+        emailLinkAttachedToOriginalUid,
+        customToken: "",
+      });
+      return;
+    }
+  } catch (error) {
+    console.error("establishCustomSession failed", {
+      error,
+      phoneSuffix: normalizedPhone ? normalizedPhone.slice(-4) : "",
+      expectedUid,
+    });
+    res.status(500).json({ok: false, error: "session-establish-failed"});
+  }
+});
 
 function normalizeCnic(value: string): string {
   const digits = (value || "").replace(/[^0-9]/g, "");
@@ -608,7 +788,6 @@ async function callGeminiText(params: {
         contents: [{parts: parts}],
         generationConfig: {
           temperature: 0.2,
-          responseMimeType: "application/json",
         },
       }),
     });
@@ -1996,7 +2175,7 @@ export const aiSuggestBidRate = onRequest(AI_RUNTIME_OPTIONS, async (req, res) =
   }
 });
 
-export const aiExtractCnicV3 = onRequest(AI_EXTRACT_CNIC_RUNTIME_OPTIONS, async (req, res) => {
+const handleAiExtractCnic = async (req: Request, res: Response): Promise<void> => {
   setCorsHeaders(res);
   if (req.method === "OPTIONS") {
     res.status(204).send("");
@@ -2093,7 +2272,7 @@ export const aiExtractCnicV3 = onRequest(AI_EXTRACT_CNIC_RUNTIME_OPTIONS, async 
     });
   } catch (error) {
     const errorText = String(error || "unknown").trim() || "unknown";
-    console.error("aiExtractCnicV3_failed", {
+    console.error("aiExtractCnic_failed", {
       error: errorText,
     });
     res.status(503).json({
@@ -2102,7 +2281,16 @@ export const aiExtractCnicV3 = onRequest(AI_EXTRACT_CNIC_RUNTIME_OPTIONS, async 
       errorMessage: `ai-unavailable|${errorText}`,
     });
   }
-});
+};
+
+export const aiExtractCnic = onRequest(
+  AI_EXTRACT_CNIC_RUNTIME_OPTIONS,
+  handleAiExtractCnic,
+);
+export const aiExtractCnicV3 = onRequest(
+  AI_EXTRACT_CNIC_RUNTIME_OPTIONS,
+  handleAiExtractCnic,
+);
 
 export const evaluateListingRisk = onCall(AI_RUNTIME_OPTIONS, async (request) => {
   const uid = request.auth?.uid;

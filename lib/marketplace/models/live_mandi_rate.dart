@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../utils/mandi_display_utils.dart';
+
 enum MandiFreshnessStatus { live, recent, aging, stale, unknown }
 
 enum MandiSourceTrust {
@@ -8,6 +10,54 @@ enum MandiSourceTrust {
   warmupSeed,
   fallbackCache,
   unknownSource,
+}
+
+/// Confidence level for a single ticker row after normalization + unit checks.
+/// Mirrors the backend RowConfidence type.
+enum MandiRowConfidence {
+  /// Safe to show numeric price in ticker.
+  high,
+  /// Showable as a card but not as a numeric ticker price.
+  medium,
+  /// Show as pulse message only, no numeric price.
+  low,
+  /// Unit violation or impossible combo — never show in ticker.
+  rejected,
+  /// Not yet evaluated (legacy / missing field).
+  unknown,
+}
+
+/// Source-level reliability (independent of row freshness).
+enum MandiSourceReliabilityLevel { high, medium, low, unknown }
+
+// ---------------------------------------------------------------------------
+// Parsers for Firestore string values
+// ---------------------------------------------------------------------------
+
+MandiRowConfidence _parseRowConfidence(dynamic raw) {
+  switch ((raw ?? '').toString().trim().toLowerCase()) {
+    case 'high':     return MandiRowConfidence.high;
+    case 'medium':   return MandiRowConfidence.medium;
+    case 'low':      return MandiRowConfidence.low;
+    case 'rejected': return MandiRowConfidence.rejected;
+    default:         return MandiRowConfidence.unknown;
+  }
+}
+
+MandiSourceReliabilityLevel _parseSourceReliability(dynamic raw) {
+  switch ((raw ?? '').toString().trim().toLowerCase()) {
+    case 'high':   return MandiSourceReliabilityLevel.high;
+    case 'medium': return MandiSourceReliabilityLevel.medium;
+    case 'low':    return MandiSourceReliabilityLevel.low;
+    default:       return MandiSourceReliabilityLevel.unknown;
+  }
+}
+
+List<String> _parseFlags(dynamic raw) {
+  if (raw is List) {
+    return raw.map((e) => e.toString()).where((e) => e.isNotEmpty).toList();
+  }
+  return const <String>[];
 }
 
 double getTrustedDisplayPrice(LiveMandiRate record) {
@@ -82,6 +132,9 @@ class LiveMandiRate {
     this.commodityRefId = '',
     this.minPrice,
     this.maxPrice,
+    this.rowConfidence = MandiRowConfidence.unknown,
+    this.sourceReliabilityLevel = MandiSourceReliabilityLevel.unknown,
+    this.flags = const <String>[],
   });
 
   final String id;
@@ -138,6 +191,29 @@ class LiveMandiRate {
   final double? minPrice;
   final double? maxPrice;
 
+  // --- Market Pulse confidence fields ---
+  /// Row-level confidence for the home ticker.
+  /// Only [MandiRowConfidence.high] rows show numeric prices.
+  final MandiRowConfidence rowConfidence;
+
+  /// Reliability bucket of the originating source.
+  final MandiSourceReliabilityLevel sourceReliabilityLevel;
+
+  /// Machine-readable flags explaining confidence reduction / rejection.
+  final List<String> flags;
+
+  // ---------------------------------------------------------------------------
+  // Convenience getters
+  // ---------------------------------------------------------------------------
+
+  /// True when this row is safe to show as a numeric price in the home ticker.
+  bool get isTickerPriceEligible =>
+      rowConfidence == MandiRowConfidence.high &&
+      sourceReliabilityLevel == MandiSourceReliabilityLevel.high &&
+      !flags.contains('unit_violation') &&
+      !flags.contains('critical_unit_violation') &&
+      !flags.contains('pbs_spi_trend_only');
+
   MandiSourceTrust get sourceTrust => _classifySource(source);
 
   bool get isTrustedSource {
@@ -191,34 +267,34 @@ class LiveMandiRate {
   String get freshnessLabel {
     switch (freshnessStatus) {
       case MandiFreshnessStatus.live:
-        return 'Live';
+        return 'تازہ';
       case MandiFreshnessStatus.recent:
-        return 'Recent';
+        return 'حالیہ';
       case MandiFreshnessStatus.aging:
-        return 'Latest Verified';
+        return 'تصدیق شدہ';
       case MandiFreshnessStatus.stale:
-        return 'Stale';
+        return 'پرانا';
       case MandiFreshnessStatus.unknown:
-        return 'Unknown';
+        return 'غیر معلوم';
     }
   }
 
   /// Compact label for the price source shown on cards.
   String get displayPriceLabel {
     if (isSuspiciousRate) {
-      return 'Needs Review';
+      return 'مزید جانچ درکار';
     }
     switch (displayPriceSource) {
       case 'average':
-        return 'Avg Rate';
+        return 'اوسط ریٹ';
       case 'fqp':
-        return 'Fair Quote';
+        return 'منصفانہ ریٹ';
       case 'midpoint':
-        return 'Estimated Midpoint';
+        return 'اندازہ';
       case 'fallback':
-        return 'Latest Verified';
+        return 'تصدیق شدہ';
       case 'rawMin':
-        return 'Min Rate';
+        return 'کم ترین';
       default:
         return '';
     }
@@ -234,13 +310,16 @@ class LiveMandiRate {
   }
 
   String get locationLine {
-    final parts = <String>[
-      city,
-      district,
-      province,
-    ].map((e) => e.trim()).where((e) => e.isNotEmpty).toList(growable: false);
-    return parts.isEmpty ? 'Pakistan' : parts.join(', ');
+    return cleanLocationString(city: city, district: district, province: province);
   }
+
+  /// Curated Urdu display name – never shows raw English source label.
+  String get displayCommodityName => getCuratedCommodityName(
+        commodityNameUr.trim().isNotEmpty ? commodityNameUr : commodityName,
+      );
+
+  /// Commodity-aware normalised Urdu unit (e.g. banana → درجن).
+  String get displayUnit => normalizeRateUnit(unit, commodityName);
 
   String get lastUpdatedLabel {
     final diff = DateTime.now().toUtc().difference(lastUpdated.toUtc());
@@ -323,6 +402,9 @@ class LiveMandiRate {
     String? commodityRefId,
     double? minPrice,
     double? maxPrice,
+    MandiRowConfidence? rowConfidence,
+    MandiSourceReliabilityLevel? sourceReliabilityLevel,
+    List<String>? flags,
   }) {
     return LiveMandiRate(
       id: id ?? this.id,
@@ -377,6 +459,9 @@ class LiveMandiRate {
       commodityRefId: commodityRefId ?? this.commodityRefId,
       minPrice: minPrice ?? this.minPrice,
       maxPrice: maxPrice ?? this.maxPrice,
+      rowConfidence: rowConfidence ?? this.rowConfidence,
+      sourceReliabilityLevel: sourceReliabilityLevel ?? this.sourceReliabilityLevel,
+      flags: flags ?? this.flags,
     );
   }
 
@@ -668,6 +753,9 @@ class LiveMandiRate {
       commodityRefId: pickText(const <String>['commodityRefId'], fallback: ''),
       minPrice: pickDouble(const <String>['minPrice']),
       maxPrice: pickDouble(const <String>['maxPrice']),
+      rowConfidence: _parseRowConfidence(data['rowConfidence']),
+      sourceReliabilityLevel: _parseSourceReliability(data['sourceReliabilityLevel']),
+      flags: _parseFlags(data['flags']),
     );
   }
 

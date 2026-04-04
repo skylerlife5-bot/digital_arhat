@@ -4,6 +4,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:local_auth/local_auth.dart';
 
+import 'auth_service.dart';
+
 class QuickLoginConfig {
   const QuickLoginConfig({
     required this.enabled,
@@ -236,5 +238,6 @@ class QuickLoginService {
   static Future<void> forcePasswordFallback() async {
     clearUnlocked();
     await FirebaseAuth.instance.signOut();
+    await AuthService().clearPersistedSessionUid();
   }
 }

@@ -10,6 +10,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../config/fee_policy.dart';
 import '../core/constants.dart';
+import '../core/location_display_helper.dart';
 import '../core/security_filter.dart';
 import '../core/widgets/glass_button.dart';
 import '../dashboard/buyer/bid_bottom_sheet.dart';
@@ -502,10 +503,12 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
             final district = (data['district'] ?? 'Pakistan').toString();
             final rate = bidAmount > 0 ? _money(bidAmount) : '--';
             final unit = (data['unit'] ?? '').toString();
-            final location = (data['location'] ?? district).toString();
+            final location = LocationDisplayHelper.locationDisplayFromData(data);
             final maskedProduct = SecurityFilter.maskAll(product);
             final maskedCategory = SecurityFilter.maskAll(category);
-            final maskedDistrict = SecurityFilter.maskAll(district);
+            final maskedDistrict = SecurityFilter.maskAll(
+              LocationDisplayHelper.bilingualLabel(district),
+            );
             final maskedLocation = SecurityFilter.maskAll(location);
             final weatherLabel = _weatherLabel(data);
             final hasVideo = (data['videoUrl'] ?? '')
