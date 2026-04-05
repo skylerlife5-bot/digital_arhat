@@ -38,44 +38,104 @@ class MandiHomePresenter {
 
   static final RegExp _urduDigits = RegExp(r'[\u06F0-\u06F9\u0660-\u0669]');
 
+  static const Set<String> _blockedCommodityFragments = <String>{
+    'ajnas',
+    'اجناس',
+    'ganna',
+    'گنا',
+    'cotton',
+    'کپاس',
+    'haldi',
+    'ہلدی',
+    'shimla',
+    'شملہ',
+    'shimla mirch',
+    'شملہ مرچ',
+    'fodder',
+    'chara',
+    'charah',
+    'چارہ',
+    'bhusa',
+    'بھوسہ',
+    'silage',
+    'animal feed',
+    'feed',
+  };
+
   static const Set<String> homeCommodityAllowlist = <String>{
+    'wheat',
+    'rice',
+    'maize',
+    'barley',
+    'canola',
+    'sugar',
+    'flour',
+    'milk',
+    'eggs',
+    'cooking_oil',
     'live_chicken',
     'chicken_meat',
     'beef',
     'mutton',
-    'wheat',
-    'milk',
-    'eggs',
     'potato',
-    'tomato',
     'onion',
-    'rice',
-    'lentils',
-    'sugar',
-    'gram',
+    'tomato',
     'garlic',
     'ginger',
+    'peas',
+    'cauliflower',
+    'cabbage',
+    'bitter_gourd',
+    'cucumber',
+    'banana',
+    'apple',
+    'orange',
+    'guava',
+    'daal_chana',
+    'daal_moong',
+    'daal_mash',
+    'white_chana',
+    'yogurt',
+    'ghee',
   };
 
   /// Priority tiers for Home commodity ranking.
   /// Lower number = higher priority. Used by diversity layer.
   static const Map<String, int> commodityPriority = <String, int>{
-    'live_chicken': 1,
-    'chicken_meat': 2,
-    'beef': 3,
-    'mutton': 4,
-    'potato': 5,
-    'onion': 6,
-    'tomato': 7,
-    'garlic': 8,
-    'ginger': 9,
-    'milk': 10,
-    'wheat': 11,
-    'rice': 12,
-    'lentils': 13,
-    'sugar': 14,
-    'gram': 15,
-    'eggs': 16,
+    'wheat': 1,
+    'rice': 2,
+    'maize': 3,
+    'barley': 4,
+    'canola': 5,
+    'sugar': 3,
+    'flour': 6,
+    'milk': 7,
+    'eggs': 8,
+    'cooking_oil': 9,
+    'live_chicken': 10,
+    'chicken_meat': 11,
+    'beef': 12,
+    'mutton': 13,
+    'potato': 14,
+    'onion': 15,
+    'tomato': 16,
+    'garlic': 17,
+    'ginger': 18,
+    'peas': 19,
+    'cauliflower': 20,
+    'cabbage': 21,
+    'bitter_gourd': 22,
+    'cucumber': 23,
+    'banana': 24,
+    'apple': 25,
+    'orange': 26,
+    'guava': 27,
+    'daal_chana': 28,
+    'daal_moong': 29,
+    'daal_mash': 30,
+    'white_chana': 31,
+    'yogurt': 32,
+    'ghee': 33,
   };
 
   /// Soft cap: max rows per commodity in ticker candidate pool.
@@ -88,6 +148,7 @@ class MandiHomePresenter {
       <String, List<String>>{
         'live_chicken': <String>[
           'live chicken',
+          'chicken live',
           'zinda murghi',
           'zinda murgi',
           'زندہ مرغی',
@@ -110,17 +171,75 @@ class MandiHomePresenter {
           'چھوٹا گوشت',
         ],
         'wheat': <String>['wheat', 'gehun', 'gandum', 'گندم'],
+        'flour': <String>['flour', 'atta', 'wheat flour', 'آٹا'],
         'milk': <String>['milk', 'doodh', 'دودھ', 'cow milk', 'buffalo milk'],
         'rice': <String>['rice', 'chawal', 'دھان', 'چاول', 'paddy'],
+        'maize': <String>['maize', 'corn', 'makai', 'مکئی'],
+        'barley': <String>['barley', 'jau', 'جو'],
+        'canola': <String>['canola', 'canola seed', 'کنولہ', 'کینولا'],
         'potato': <String>['potato', 'aloo', 'aalu', 'alu', 'آلو'],
         'onion': <String>['onion', 'pyaz', 'piaz', 'پیاز'],
         'tomato': <String>['tomato', 'tamatar', 'tomatar', 'ٹماٹر'],
         'eggs': <String>['egg', 'eggs', 'anda', 'anday', 'انڈا', 'انڈے'],
-        'lentils': <String>['lentils', 'lentil', 'daal', 'dal', 'دال', 'دالیں'],
         'sugar': <String>['sugar', 'chini', 'cheeni', 'چینی'],
-        'gram': <String>['gram', 'chickpea', 'chana', 'چنا'],
+        'cooking_oil': <String>[
+          'cooking oil',
+          'edible oil',
+          'vegetable oil',
+          'canola oil',
+          'sunflower oil',
+          'soybean oil',
+          'ککنگ آئل',
+          'کوکنگ آئل',
+          'آئل',
+        ],
         'garlic': <String>['garlic', 'lehsan', 'lahsun', 'لہسن'],
         'ginger': <String>['ginger', 'adrak', 'ادرک'],
+        'peas': <String>['peas', 'pea', 'matar', 'مٹر'],
+        'cauliflower': <String>['cauliflower', 'phool gobhi', 'پھول گوبھی'],
+        'cabbage': <String>['cabbage', 'band gobhi', 'بند گوبھی'],
+        'bitter_gourd': <String>['bitter gourd', 'karela', 'کریلا'],
+        'cucumber': <String>['cucumber', 'kheera', 'خیرا', 'کھیرا'],
+        'banana': <String>['banana', 'kela', 'kaila', 'کیلا'],
+        'apple': <String>['apple', 'seb', 'سیب'],
+        'orange': <String>['orange', 'malta', 'santara', 'مالٹا', 'سنگترہ'],
+        'guava': <String>['guava', 'amrood', 'امرود'],
+        'daal_chana': <String>[
+          'chana dal',
+          'dal chana',
+          'daal chana',
+          'چنے کی دال',
+          'چنا دال',
+        ],
+        'daal_moong': <String>[
+          'moong dal',
+          'dal moong',
+          'daal moong',
+          'مونگ دال',
+          'دال مونگ',
+          'moong',
+        ],
+        'daal_mash': <String>[
+          'mash dal',
+          'dal mash',
+          'daal mash',
+          'ماش دال',
+          'دال ماش',
+          'mash',
+        ],
+        'white_chana': <String>[
+          'white chana',
+          'safed chana',
+          'kabuli chana',
+          'gram',
+          'chickpea',
+          'chana',
+          'سفید چنا',
+          'کابلی چنا',
+          'چنا',
+        ],
+        'yogurt': <String>['yogurt', 'yoghurt', 'curd', 'dahi', 'دہی'],
+        'ghee': <String>['ghee', 'desi ghee', 'گھی', 'دیسی گھی'],
       };
 
   static String normalizeCommodityText(String value) {
@@ -135,6 +254,13 @@ class MandiHomePresenter {
   static String normalizeCommodityKey(String raw) {
     final candidate = normalizeCommodityText(raw);
     if (candidate.isEmpty) return '';
+    for (final blocked in _blockedCommodityFragments) {
+      final normalizedBlocked = normalizeCommodityText(blocked);
+      if (normalizedBlocked.isEmpty) continue;
+      if (candidate == normalizedBlocked || candidate.contains(normalizedBlocked)) {
+        return '';
+      }
+    }
 
     for (final entry in _commoditySynonyms.entries) {
       for (final synonym in entry.value) {
@@ -166,10 +292,20 @@ class MandiHomePresenter {
         return 'چھوٹا گوشت';
       case 'wheat':
         return 'گندم';
+      case 'flour':
+        return 'آٹا';
       case 'milk':
         return 'دودھ';
+      case 'cooking_oil':
+        return 'ککنگ آئل';
       case 'rice':
         return 'چاول';
+      case 'maize':
+        return 'Makai';
+      case 'barley':
+        return 'Jau';
+      case 'canola':
+        return 'Canola';
       case 'potato':
         return 'آلو';
       case 'onion':
@@ -178,16 +314,42 @@ class MandiHomePresenter {
         return 'ٹماٹر';
       case 'eggs':
         return 'انڈے';
-      case 'lentils':
-        return 'دالیں';
       case 'sugar':
-        return 'چینی';
-      case 'gram':
-        return 'چنا';
+        return 'Cheeni';
       case 'garlic':
         return 'لہسن';
       case 'ginger':
         return 'ادرک';
+      case 'peas':
+        return 'مٹر';
+      case 'cauliflower':
+        return 'پھول گوبھی';
+      case 'cabbage':
+        return 'بند گوبھی';
+      case 'bitter_gourd':
+        return 'کریلا';
+      case 'cucumber':
+        return 'کھیرا';
+      case 'banana':
+        return 'کیلا';
+      case 'apple':
+        return 'سیب';
+      case 'orange':
+        return 'سنگترہ';
+      case 'guava':
+        return 'امرود';
+      case 'daal_chana':
+        return 'چنے کی دال';
+      case 'daal_moong':
+        return 'دال مونگ';
+      case 'daal_mash':
+        return 'دال ماش';
+      case 'white_chana':
+        return 'سفید چنا';
+      case 'yogurt':
+        return 'دہی';
+      case 'ghee':
+        return 'گھی';
       default:
         return '';
     }
@@ -208,6 +370,15 @@ class MandiHomePresenter {
     final hasKg =
         unit.contains('kg') || unit.contains('kilo') || unit.contains('کلو');
     final compactHasKg = compact.contains('kg');
+    final hasLitre =
+      unit.contains('liter') ||
+      unit.contains('litre') ||
+      unit.contains('ltr') ||
+      unit.contains('لیٹر') ||
+      unit.contains('لٹر') ||
+      compact.contains('l');
+    if ((hasKg || compactHasKg) && compact.contains('20')) return 'per_20kg';
+    if (hasLitre && compact.contains('5')) return 'per_5litre';
     if ((hasKg || compactHasKg) && compact.contains('100')) return 'per_100kg';
     if ((hasKg || compactHasKg) && compact.contains('50')) return 'per_50kg';
     if ((hasKg || compactHasKg) && compact.contains('40')) return 'per_40kg';
@@ -253,46 +424,52 @@ class MandiHomePresenter {
   static String defaultUnitKeyForCommodity(String commodityKey) {
     switch (commodityKey) {
       case 'wheat':
-      case 'gram':
+      case 'daal_chana':
+      case 'daal_moong':
+      case 'daal_mash':
+      case 'maize':
+      case 'barley':
+      case 'canola':
+      case 'maize':
+      case 'barley':
+      case 'canola':
+      case 'white_chana':
       case 'potato':
       case 'onion':
       case 'tomato':
       case 'rice':
-      case 'lentils':
         return 'per_40kg';
       case 'sugar':
         return 'per_50kg';
+      case 'flour':
+        return 'per_20kg';
+      case 'cooking_oil':
+        return 'per_5litre';
       case 'live_chicken':
       case 'chicken_meat':
       case 'beef':
       case 'mutton':
       case 'garlic':
       case 'ginger':
+      case 'peas':
+      case 'cauliflower':
+      case 'cabbage':
+      case 'bitter_gourd':
+      case 'cucumber':
+      case 'apple':
+      case 'orange':
+      case 'guava':
+      case 'ghee':
+      case 'yogurt':
         return 'per_kg';
       case 'milk':
         return 'per_litre';
       case 'eggs':
         return 'per_dozen';
+      case 'banana':
+        return 'per_dozen';
       default:
         return '';
-    }
-  }
-
-  static bool _isSafeForDefault40Kg(String commodityKey) {
-    switch (commodityKey) {
-      case 'wheat':
-      case 'rice':
-      case 'lentils':
-      case 'sugar':
-      case 'gram':
-      case 'potato':
-      case 'tomato':
-      case 'onion':
-      case 'garlic':
-      case 'ginger':
-        return true;
-      default:
-        return false;
     }
   }
 
@@ -302,7 +479,10 @@ class MandiHomePresenter {
   }) {
     final parsed = normalizeHomeUnitKey(unitRaw);
     if (parsed.isNotEmpty) {
-      if (parsed == 'per_100kg' && _isSafeForDefault40Kg(commodityKey)) {
+      if (parsed == 'per_100kg') {
+        if (commodityKey == 'sugar') {
+          return 'per_50kg';
+        }
         return 'per_40kg';
       }
       return parsed;
@@ -334,6 +514,10 @@ class MandiHomePresenter {
     switch (commodityKey) {
       case 'eggs':
         return unitKey == 'per_dozen' || unitKey == 'per_tray';
+      case 'banana':
+        return unitKey == 'per_dozen' ||
+            unitKey == 'per_crate' ||
+            unitKey == 'per_peti';
       case 'live_chicken':
       case 'chicken_meat':
       case 'beef':
@@ -341,9 +525,17 @@ class MandiHomePresenter {
         return unitKey == 'per_kg';
       case 'milk':
         return unitKey == 'per_litre';
-      case 'lentils':
+      case 'cooking_oil':
+        return unitKey == 'per_5litre' || unitKey == 'per_litre';
+      case 'flour':
+        return unitKey == 'per_20kg' ||
+            unitKey == 'per_kg' ||
+            unitKey == 'per_40kg';
+      case 'daal_chana':
+      case 'daal_moong':
+      case 'daal_mash':
       case 'sugar':
-      case 'gram':
+      case 'white_chana':
       case 'potato':
       case 'onion':
       case 'tomato':
@@ -351,6 +543,16 @@ class MandiHomePresenter {
       case 'rice':
       case 'garlic':
       case 'ginger':
+      case 'peas':
+      case 'cauliflower':
+      case 'cabbage':
+      case 'bitter_gourd':
+      case 'cucumber':
+      case 'apple':
+      case 'orange':
+      case 'guava':
+      case 'ghee':
+      case 'yogurt':
         return unitKey == 'per_kg' ||
             unitKey == 'per_40kg' ||
             unitKey == 'per_50kg' ||
@@ -522,41 +724,38 @@ class MandiHomePresenter {
     required String district,
     required String province,
   }) {
+    String sanitizeCityToken(String input) {
+      final cleaned = _normalizeDigitsToAscii(input)
+          .replaceAll(RegExp(r'^\s*\d+\s*[-.):]?\s*'), '')
+          .trim();
+      if (cleaned.isEmpty) return '';
+      if (RegExp(r'^\d+$').hasMatch(cleaned)) return '';
+
+      // Never leak source identifiers as city labels.
+      final lower = cleaned.toLowerCase();
+      if (lower.contains('|')) return '';
+      if (lower.contains('sourceid') ||
+          lower.contains('official') ||
+          lower.contains('adapter') ||
+          lower.contains('ingest')) {
+        return '';
+      }
+      return cleaned;
+    }
+
+    final safeCity = sanitizeCityToken(city);
+    final safeDistrict = sanitizeCityToken(district);
+    final safeProvince = sanitizeCityToken(province);
+
     return enforceUrduOnlyText(
       getLocalizedPrimaryLocation(
-        city: city,
-        district: district,
-        province: province,
+        city: safeCity,
+        district: safeDistrict,
+        province: safeProvince,
         language: MandiDisplayLanguage.urdu,
       ),
       fallback: 'پاکستان',
     );
-  }
-
-  static String _resolveUnitDisplay({required String unitKey}) {
-    switch (unitKey) {
-      case 'per_40kg':
-        return '40 کلو';
-      case 'per_50kg':
-        return '50 کلو';
-      case 'per_100kg':
-        return '100 کلو';
-      case 'per_litre':
-        return 'لیٹر';
-      case 'per_dozen':
-        return 'درجن';
-      case 'per_tray':
-        return 'ٹری';
-      case 'per_crate':
-        return 'کریٹ';
-      case 'per_peti':
-        return 'پیٹی';
-      case 'per_piece':
-        return 'عدد';
-      case 'per_kg':
-      default:
-        return 'کلو';
-    }
   }
 
   static HomeMandiDisplayRow buildDisplayRow({
@@ -602,73 +801,30 @@ class MandiHomePresenter {
       return _rejected('ajnas_fallback', sourceSelected, confidence);
     }
 
-    debugPrint(
-      '[MandiHome] commodity_unit_validation=commodity=$commodityKey '
-      'unitKey=$unitKey allowed=${isAllowedUnitForCommodity(commodityKey, unitKey)}',
-    );
-    if (unitKey.isEmpty || !isAllowedUnitForCommodity(commodityKey, unitKey)) {
-      debugPrint(
-        '[MandiHome] home_reject_reason=commodity_unit_mismatch commodity=$commodityKey unit=$unitRaw',
-      );
-      return _rejected('commodity_unit_mismatch', sourceSelected, confidence);
-    }
-
     final cityDisplay = _cleanCityUrdu(
       city: city,
       district: district,
       province: province,
     );
 
-    final unitDisplay = _resolveUnitDisplay(unitKey: unitKey);
+    final normalizedPrice = price.isFinite && price > 0 ? price : 0.0;
+    final unitDisplay = unitRaw.trim();
+    final priceDisplay = 'Rs. ${normalizedPrice.toStringAsFixed(0)}';
 
-    // -----------------------------------------------------------------------
-    // 40 kg price conversion (display layer ONLY — raw data is never mutated).
-    //
-    // resolveUnitKeyForCommodity() silently maps per_100kg → per_40kg for
-    // "safe" commodities (wheat, potato, etc.).  Without this block the UI
-    // would show the 100 kg source price alongside a "40 کلو" label, which
-    // is a data-integrity failure.
-    //
-    // Math proof:
-    //   rawPrice = 6250 Rs / 100 kg
-    //   displayPrice = (6250 / 100) * 40 = 2500 Rs / 40 kg   ✓
-    // -----------------------------------------------------------------------
-    final String _rawParsedUnitKey = normalizeHomeUnitKey(unitRaw);
-    final double _effectivePrice;
-    if (commodityKey == 'sugar') {
-      if (_rawParsedUnitKey == 'per_100kg') {
-        _effectivePrice = (price / 100.0) * 50.0;
-      } else if (_rawParsedUnitKey == 'per_kg') {
-        _effectivePrice = price * 50.0;
-      } else {
-        _effectivePrice = price;
-      }
-      debugPrint(
-        '[MandiHome] sugar_conversion '
-        'rawUnit=$_rawParsedUnitKey rawPrice=${price.toStringAsFixed(0)} '
-        'displayPrice=${_effectivePrice.toStringAsFixed(0)}',
-      );
-    } else if (_rawParsedUnitKey == 'per_100kg' && unitKey == 'per_40kg') {
-      _effectivePrice = (price / 100.0) * 40.0;
-      debugPrint(
-        '[MandiHome] 100kg→40kg_conversion '
-        'rawPrice=${price.toStringAsFixed(0)} '
-        'displayPrice=${_effectivePrice.toStringAsFixed(0)} '
-        'commodity=$commodityKey',
-      );
-    } else {
-      _effectivePrice = price;
-    }
+    debugPrint(
+      '[MandiHome] raw_price_format '
+      'commodity=$commodityKey '
+      'rawPrice=${normalizedPrice.toStringAsFixed(0)} '
+      'unit=$unitDisplay',
+    );
 
-    final normalizedPrice =
-        _effectivePrice.isFinite && _effectivePrice > 0 ? _effectivePrice : 0.0;
-    final priceDisplay = '${normalizedPrice.toStringAsFixed(0)} روپے';
-
-    final full =
-        '$commodityDisplay • $cityDisplay • $priceDisplay / $unitDisplay';
-    if (hasMixedLatinInUrdu(full)) {
+    final full = unitDisplay.isEmpty
+        ? '$commodityDisplay • $cityDisplay • $priceDisplay'
+        : '$commodityDisplay • $cityDisplay • $priceDisplay • $unitDisplay';
+    final validationText = '$commodityDisplay • $cityDisplay';
+    if (hasMixedLatinInUrdu(validationText)) {
       debugPrint(
-        '[MandiHome] home_reject_reason=mixed_language_blocked line=$full',
+        '[MandiHome] home_reject_reason=mixed_language_blocked line=$validationText',
       );
       return _rejected('mixed_language_blocked', sourceSelected, confidence);
     }

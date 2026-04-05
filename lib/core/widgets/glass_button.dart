@@ -58,7 +58,7 @@ class _GlassButtonState extends State<GlassButton> {
               child: Ink(
                 height: widget.height,
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: enabled ? 0.12 : 0.06),
+                  color: Colors.white.withValues(alpha: enabled ? 0.20 : 0.10),
                   borderRadius: BorderRadius.circular(widget.radius),
                   border: Border.all(
                     color: gold.withValues(alpha: enabled ? 0.9 : 0.45),

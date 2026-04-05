@@ -21,7 +21,7 @@ const List<String> _pulseMessages = <String>[
 ///
 /// Two kinds of items are rendered:
 /// 1. **Price row** — only when [rate.isTickerPriceEligible] is true:
-///    `گندم • گوجرانوالہ • 3,800 روپے / 40 کلو`
+///    `گندم • گوجرانوالہ • Rs. 3800 • per_100kg`
 /// 2. **Pulse message** — when confidence is too low to show a numeric price:
 ///    `مارکیٹ پلس: پاکستان کے سرکاری نرخ جاری ہیں`
 sealed class _TickerItem {
@@ -415,7 +415,7 @@ List<_TickerItem> _buildTickerItems(List<LiveMandiRate> rates) {
       district: rate.district,
       province: rate.province,
       unitRaw: rate.unit,
-      price: getTrustedDisplayPrice(rate),
+      price: rate.price,
       sourceSelected: '${rate.sourceId}|${rate.sourceType}|${rate.source}',
       confidence: rate.confidenceScore,
       renderPath: MandiHomeRenderPath.ticker,
@@ -437,12 +437,11 @@ List<_TickerItem> _buildTickerItems(List<LiveMandiRate> rates) {
     final bool isWheat =
         MandiHomePresenter.isWheatRate(rate) || commodityUrdu == 'گندم';
     final String forcedCommodity = isWheat ? 'گندم' : commodityUrdu;
-    final String forcedUnit = isWheat ? '40 کلو' : row.unitDisplay;
     final String forcedCity = normalizedCity == 'پاکستان'
         ? 'منڈی، پاکستان'
         : normalizedCity;
     final String line = _forceReplaceEnglishCommoditySegments(
-      '$forcedCommodity • $forcedCity • ${row.priceDisplay} / $forcedUnit',
+      '$forcedCommodity • $forcedCity • ${row.priceDisplay}',
     );
     final String dedupeKey = buildTickerDisplayKeyForDedupe(
       commodityUrdu: commodityUrdu,
@@ -606,7 +605,7 @@ bool _isCleanTickerRow(LiveMandiRate rate) {
     district: rate.district,
     province: rate.province,
     unitRaw: rate.unit,
-    price: getTrustedDisplayPrice(rate),
+    price: rate.price,
     sourceSelected: '${rate.sourceId}|${rate.sourceType}|${rate.source}',
     confidence: rate.confidenceScore,
     renderPath: MandiHomeRenderPath.ticker,
@@ -806,21 +805,23 @@ class _MandiRatesTickerState extends State<MandiRatesTicker> {
               physics: const NeverScrollableScrollPhysics(),
               itemCount: mirrored.length,
               separatorBuilder: (context, index) => Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+                padding: const EdgeInsets.symmetric(horizontal: 22),
                 child: Center(
                   child: Text(
-                    '◆',
+                    '|',
                     style: TextStyle(
-                      color: _accentGold.withValues(alpha: 0.50),
-                      fontSize: 7,
-                      fontWeight: FontWeight.w700,
+                      color: _accentGold.withValues(alpha: 0.62),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
               ),
               itemBuilder: (_, index) {
                 final item = mirrored[index];
-                return switch (item) {
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: switch (item) {
                   _PriceTickerItem(
                     :final rate,
                     :final displayLine,
@@ -834,7 +835,8 @@ class _MandiRatesTickerState extends State<MandiRatesTicker> {
                   _PulseTickerItem(:final message) => _buildPulseWidget(
                     message,
                   ),
-                };
+                },
+                );
               },
             ),
           ),

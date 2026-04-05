@@ -425,7 +425,7 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
         '[MandiPulse] final_home_snapshot_count=${snapshotPreview.length}',
       );
       final tickerCityMix = parsed
-          .map((item) => _normalizeLocationToken(item.location))
+          .map((item) => _normalizeLocationToken(item.district))
           .where((value) => value.isNotEmpty)
           .toSet()
           .toList(growable: false);
@@ -435,7 +435,7 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
           .toSet()
           .toList(growable: false);
       final snapshotCityMix = snapshotPreview
-          .map((item) => _normalizeLocationToken(item.location))
+          .map((item) => _normalizeLocationToken(item.district))
           .where((value) => value.isNotEmpty)
           .toSet()
           .toList(growable: false);
@@ -482,13 +482,13 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
         String commodity,
       ) {
         for (final item in primary) {
-          if (item.isFallbackMessage) continue;
+          // Fallback messages no longer supported in _MandiTickerItem
           if (_canonicalHomeCommodityKey(item.crop) == commodity) {
             return item.unit.trim();
           }
         }
         for (final item in secondary) {
-          if (item.isFallbackMessage) continue;
+          // Fallback messages no longer supported in _MandiTickerItem
           if (_canonicalHomeCommodityKey(item.crop) == commodity) {
             return item.unit.trim();
           }
@@ -503,13 +503,13 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
         '[MandiFinal] wheat_inserted_into_snapshot=${snapshotOutcome.inserted}',
       );
       debugPrint(
-        '[MandiFinal] final_ticker_list=[${parsed.where((i) => !i.isFallbackMessage).map((i) => _canonicalHomeCommodityKey(i.crop)).join(',')}]',
+        '[MandiFinal] final_ticker_list=[${parsed.map((i) => _canonicalHomeCommodityKey(i.crop)).join(',')}]',
       );
       debugPrint(
         '[MandiFinal] final_snapshot_list=[${mfSnapshot.map((i) => _canonicalHomeCommodityKey(i.crop)).join(',')}]',
       );
       debugPrint(
-        '[MandiFinal] final_ticker_units=[${parsed.where((i) => !i.isFallbackMessage).map((i) => i.unit.trim()).join(',')}]',
+        '[MandiFinal] final_ticker_units=[${parsed.map((i) => i.unit.trim()).join(',')}]',
       );
       debugPrint(
         '[MandiFinal] final_snapshot_units=[${mfSnapshot.map((i) => i.unit.trim()).join(',')}]',
@@ -528,7 +528,7 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
       String potatoParsedUnit = '';
       String potatoResolutionSource = '';
       for (final item in parsed) {
-        if (item.isFallbackMessage) continue;
+        // Fallback messages no longer supported in _MandiTickerItem
         if (_canonicalHomeCommodityKey(item.crop) == 'potato') {
           potatoSourceUnit = item.sourceUnitRaw;
           potatoParsedUnit = item.parsedUnitRaw;
@@ -548,13 +548,16 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
 
       if (!mounted) return;
       setState(() {
-        _latestFetchedMandiDocs = strategy.docs;
+        _latestFetchedMandiDocs = parsed.isNotEmpty
+            ? strategy.docs
+            : const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
         _mandiSnapshotContextLabelUr = strategy.contextLabelUr;
         _mandiSnapshotFallbackNote = strategy.fallbackNoteUr;
         if (parsed.isNotEmpty) {
           _liveMandiTickerItems = parsed;
           _mandiTickerInfoText = null;
-        } else if (_liveMandiTickerItems.isEmpty) {
+        } else {
+          _liveMandiTickerItems = const <_MandiTickerItem>[];
           _mandiTickerInfoText = 'فی الحال تازہ منڈی ریٹ دستیاب نہیں۔';
         }
       });
@@ -568,14 +571,13 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
       if (_mandiDebugLogs) {
         unawaited(_runForcedLahoreMandiVerification());
       }
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[MANDI_FIRESTORE_ERROR] Firestore error in _refreshMandiTickerFromServer: $e');
       if (!mounted) return;
       setState(() {
-        _mandiSnapshotFallbackNote =
-            'مقامی منڈی کے ریٹس عارضی طور پر دستیاب نہیں۔';
-        if (_liveMandiTickerItems.isEmpty) {
-          _mandiTickerInfoText = 'منڈی ریٹ لوڈ نہیں ہو سکے۔';
-        }
+        _liveMandiTickerItems = const <_MandiTickerItem>[];
+        _mandiTickerInfoText = 'منڈی ریٹ لوڈ نہیں ہو سکے۔';
+        _mandiSnapshotFallbackNote = null;
       });
     }
   }
@@ -585,6 +587,7 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
     // Limit raised from 28 → 100 so seeded wheat/rice docs (IDs like
     // 'wheat_lahore') are not excluded by alphabetic ordering before AMIS docs.
     const int stageLimit = 100;
+    const int broaderMarketLimit = 150;
     final exactCityValues = <String>{
       if (context.cityEn.trim().isNotEmpty) context.cityEn.trim(),
     };
@@ -594,32 +597,10 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
     })..removeWhere((value) => exactCityValues.contains(value.trim()));
 
     final merged = <String, QueryDocumentSnapshot<Map<String, dynamic>>>{};
-    var stageBNearestDocsCount = 0;
-
     void mergeDocs(List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
       for (final doc in docs) {
         merged[doc.id] = doc;
       }
-    }
-
-    bool hasEnoughWithVisibleWheat(
-      List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
-    ) {
-      final parsed = _parseMandiTickerItems(docs);
-      if (parsed.length < 6) {
-        return false;
-      }
-      final hasWheat = parsed.any(
-        (item) =>
-            !item.isFallbackMessage &&
-            _canonicalHomeCommodityKey(item.crop) == 'wheat',
-      );
-      if (!hasWheat) {
-        _logMandiQuery(
-          'stage_gate=continue reason=no_visible_wheat parsed=${parsed.length}',
-        );
-      }
-      return hasWheat;
     }
 
     _logMandiDebug(
@@ -647,10 +628,11 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
     mergeDocs(stageACityAliasDocs);
 
     _logMandiQuery(
-      'stageCounts exactCity=${stageAExactCityDocs.length} cityAlias=${stageACityAliasDocs.length} '
-      'nearestCity=0 district=0 province=0 merged=${merged.length}',
+      'stageCounts exactCity=${stageAExactCityDocs.length} cityAlias=${stageACityAliasDocs.length} ',
     );
-    if (hasEnoughWithVisibleWheat(merged.values.toList(growable: false))) {
+
+    // If strict location stages found data, return it
+    if (merged.isNotEmpty) {
       return _MandiStageFetchResult(
         docs: merged.values.toList(growable: false),
         stageUsed: _MandiFetchStage.exactCity,
@@ -659,102 +641,57 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
       );
     }
 
-    var hasStageBCity = false;
-    for (final nearestCity in context.nearestCityCandidatesEn) {
-      final normalizedCandidate = _normalizeLocationToken(nearestCity);
-      final normalizedCity = _normalizeLocationToken(context.cityEn);
-      if (normalizedCandidate.isEmpty ||
-          normalizedCandidate == normalizedCity) {
-        continue;
-      }
-      final docs = await _queryMandiRatesByFields(
-        fields: const <String>['city', 'mandiName', 'marketName', 'market'],
-        values: _expandLocationAliases(<String>{
-          nearestCity,
-          _toUrduLocationLabel(nearestCity),
-        }),
-        limit: stageLimit,
-        stageLabel: 'StageB-nearestCity:$nearestCity',
-      );
-      if (docs.isEmpty) continue;
-      hasStageBCity = true;
-      stageBNearestDocsCount += docs.length;
-      mergeDocs(docs);
+    // Stage B: Broader market fallback — fetch ANY fresh live documents
+    _logMandiQuery('Stage0-noStrictMatch triggering broader market fallback');
+    final broaderMarketDocs = await _queryBroaderMarketFallback(
+      limit: broaderMarketLimit,
+      stageLabel: 'Stage0-broaderMarket',
+    );
+    if (broaderMarketDocs.isNotEmpty) {
+      mergeDocs(broaderMarketDocs);
       _logMandiQuery(
-        'stageCounts exactCity=${stageAExactCityDocs.length} cityAlias=${stageACityAliasDocs.length} '
-        'nearestCity=$stageBNearestDocsCount district=0 province=0 merged=${merged.length}',
+        'Stage0-broaderMarket found ${broaderMarketDocs.length} fresh documents',
       );
-      if (hasEnoughWithVisibleWheat(merged.values.toList(growable: false))) {
-        return _MandiStageFetchResult(
-          docs: merged.values.toList(growable: false),
-          stageUsed: _MandiFetchStage.nearestCity,
-          contextLabelUr: _toUrduLocationLabel(nearestCity),
-          fallbackNoteUr:
-              '${context.cityUr} کے تازہ ریٹس دستیاب نہیں، قریبی منڈی کے ریٹس دکھائے جا رہے ہیں۔',
-        );
-      }
-    }
-
-    final stageCDistrictDocs = await _queryMandiRatesByFields(
-      fields: const <String>['district', 'city', 'mandiName'],
-      values: _expandLocationAliases(<String>{
-        context.districtEn,
-        context.districtUr,
-      }),
-      limit: stageLimit,
-      stageLabel: 'StageC-district',
-    );
-    mergeDocs(stageCDistrictDocs);
-    _logMandiQuery(
-      'stageCounts exactCity=${stageAExactCityDocs.length} cityAlias=${stageACityAliasDocs.length} '
-      'nearestCity=$stageBNearestDocsCount district=${stageCDistrictDocs.length} province=0 merged=${merged.length}',
-    );
-    if (hasEnoughWithVisibleWheat(merged.values.toList(growable: false))) {
       return _MandiStageFetchResult(
         docs: merged.values.toList(growable: false),
-        stageUsed: _MandiFetchStage.district,
-        contextLabelUr: context.districtUr,
-        fallbackNoteUr: hasStageBCity
-            ? '${context.cityUr} کے تازہ ریٹس دستیاب نہیں، قریبی منڈی کے ریٹس دکھائے جا رہے ہیں۔'
-            : '${context.cityUr} کے تازہ ریٹس دستیاب نہیں، ${context.districtUr} منڈی کے ریٹس دکھائے جا رہے ہیں۔',
+        stageUsed: _MandiFetchStage.exactCity,
+        contextLabelUr: 'وسیع مارکٹ',
+        fallbackNoteUr:
+            'آپ کے علاقے میں براہ راست منڈی ریٹس کی موجودگی کے بغیر، ہم پورے ملک سے سب سے تازہ ریٹس دکھا رہے ہیں۔',
       );
     }
 
-    final stageDProvinceDocs = await _queryMandiRatesByFields(
-      fields: const <String>['province', 'district'],
-      values: _expandLocationAliases(<String>{
-        context.provinceEn,
-        context.provinceUr,
-      }),
-      limit: stageLimit,
-      stageLabel: 'StageD-province',
-    );
-    mergeDocs(stageDProvinceDocs);
     _logMandiQuery(
-      'stageCounts exactCity=${stageAExactCityDocs.length} cityAlias=${stageACityAliasDocs.length} '
-      'nearestCity=$stageBNearestDocsCount district=${stageCDistrictDocs.length} province=${stageDProvinceDocs.length} '
-      'merged=${merged.length}',
+      'Stage0-broaderMarket found 0 documents, Firestore mandi_rates is empty – showing empty state',
     );
-
-    if (merged.isEmpty) {
-      final broad = await FirebaseFirestore.instance
-          .collection('mandi_rates')
-          .orderBy('rateDate', descending: true)
-          .limit(stageLimit)
-          .get();
-      mergeDocs(broad.docs);
-      _logMandiQuery(
-        'broadFallback docs=${broad.docs.length} merged=${merged.length}',
-      );
-    }
-
     return _MandiStageFetchResult(
-      docs: merged.values.toList(growable: false),
-      stageUsed: _MandiFetchStage.province,
-      contextLabelUr: context.provinceUr,
-      fallbackNoteUr:
-          '${context.cityUr} کے تازہ ریٹس دستیاب نہیں، ${context.provinceUr} کی قریبی منڈی کے ریٹس دکھائے جا رہے ہیں۔',
+      docs: const <QueryDocumentSnapshot<Map<String, dynamic>>>[],
+      stageUsed: _MandiFetchStage.exactCity,
+      contextLabelUr: context.cityUr,
+      fallbackNoteUr: null,
     );
+  }
+
+  Future<List<QueryDocumentSnapshot<Map<String, dynamic>>>>
+  _queryBroaderMarketFallback({
+    required int limit,
+    required String stageLabel,
+  }) async {
+    _logMandiQuery('$stageLabel querying all fresh mandi_rates (no location filter)');
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('mandi_rates')
+          .orderBy('syncedAt', descending: true)
+          .limit(limit)
+          .get();
+      _logMandiQuery(
+        '$stageLabel docs=${snapshot.docs.length}',
+      );
+      return snapshot.docs;
+    } catch (error) {
+      _logMandiQuery('$stageLabel error=$error');
+      return const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+    }
   }
 
   Future<List<QueryDocumentSnapshot<Map<String, dynamic>>>>
@@ -779,6 +716,7 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
           final snapshot = await FirebaseFirestore.instance
               .collection('mandi_rates')
               .where(field, isEqualTo: value)
+              .orderBy('syncedAt', descending: true)
               .limit(limit)
               .get();
           final matchedCityValues = snapshot.docs
@@ -818,6 +756,16 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
       }
     }
     return out.values.toList(growable: false);
+  }
+
+  String _resolvedBuyerCityLabel() {
+    return _firstNonEmpty(<String?>[
+      _selectedCityFilter,
+      (widget.userData['city'] ?? '').toString(),
+      (widget.userData['cityVillage'] ?? '').toString(),
+      _weatherLocationLabelUr,
+      'لاہور',
+    ]);
   }
 
   Set<String> _expandLocationAliases(Set<String> base) {
@@ -1745,7 +1693,9 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
         _TickerCandidate(
           item: _MandiTickerItem(
             crop: crop,
-            location: location,
+            city: city,
+            district: district,
+            province: province,
             price: price,
             trendSymbol: trendFrom(data),
             subcategoryKey: subcategoryKey,
@@ -1817,7 +1767,7 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
     for (final candidate in candidates) {
       final priceBucket = (candidate.item.price / 50).round();
       final key =
-          '${candidate.commodityKey}|${_normalizeLocationToken(candidate.item.location)}|${candidate.item.unit}|$priceBucket';
+          '${candidate.commodityKey}|${_normalizeLocationToken(candidate.item.district)}|${candidate.item.unit}|$priceBucket';
       if (!dedupeKeySet.add(key)) {
         stats.duplicateReject++;
         continue;
@@ -1893,7 +1843,7 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
 
     bool hasSelectedRealWheat() => picked.any(
       (item) =>
-          !item.isFallbackMessage &&
+          // Fallback messages no longer supported in _MandiTickerItem
           _canonicalHomeCommodityKey(item.crop) == 'wheat',
     );
 
@@ -1918,7 +1868,7 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
         }
         final priceBucket = (candidate.item.price / 50).round();
         final key =
-            '$commodity|${_normalizeLocationToken(candidate.item.location)}|${candidate.item.unit}|$priceBucket';
+            '$commodity|${_normalizeLocationToken(candidate.item.district)}|${candidate.item.unit}|$priceBucket';
         if (usedKeys.contains(key)) continue;
         commodityCount[commodity] = (commodityCount[commodity] ?? 0) + 1;
         usedKeys.add(key);
@@ -1961,12 +1911,12 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
         }
         final priceBucket = (candidate.item.price / 50).round();
         final key =
-            '$commodity|${_normalizeLocationToken(candidate.item.location)}|${candidate.item.unit}|$priceBucket';
+            '$commodity|${_normalizeLocationToken(candidate.item.district)}|${candidate.item.unit}|$priceBucket';
         if (usedKeys.contains(key)) continue;
         commodityCount[commodity] = (commodityCount[commodity] ?? 0) + 1;
         usedKeys.add(key);
         // TEMP TRACE: ticker selection pass 2
-        debugPrint('[MandiProof] candidate_selected_home_ticker docId=? commodity=$commodity city=${_normalizeLocationToken(candidate.item.location)}');
+        debugPrint('[MandiProof] candidate_selected_home_ticker docId=? commodity=$commodity city=${_normalizeLocationToken(candidate.item.district)}');
         picked.add(candidate.item);
         final isCoreSelected = candidate.corePriorityRank == 1;
         if (isCoreSelected) {
@@ -2001,11 +1951,11 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
         }
         final priceBucket = (candidate.item.price / 50).round();
         final key =
-            '$commodity|${_normalizeLocationToken(candidate.item.location)}|${candidate.item.unit}|$priceBucket';
+            '$commodity|${_normalizeLocationToken(candidate.item.district)}|${candidate.item.unit}|$priceBucket';
         if (!usedKeys.add(key)) continue;
         commodityCount[commodity] = currentCount + 1;
         // TEMP TRACE: ticker selection pass 3 (overflow)
-        debugPrint('[MandiProof] candidate_selected_home_ticker docId=? commodity=$commodity city=${_normalizeLocationToken(candidate.item.location)}');
+        debugPrint('[MandiProof] candidate_selected_home_ticker docId=? commodity=$commodity city=${_normalizeLocationToken(candidate.item.district)}');
         picked.add(candidate.item);
         final isCoreSelected = candidate.corePriorityRank == 1;
         if (isCoreSelected) {
@@ -2033,13 +1983,13 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
       if (wheatCandidate != null) {
         final wheatPriceBucket = (wheatCandidate.item.price / 50).round();
         final wheatDedupeKey =
-            'wheat|${_normalizeLocationToken(wheatCandidate.item.location)}|${wheatCandidate.item.unit}|$wheatPriceBucket';
+            'wheat|${_normalizeLocationToken(wheatCandidate.item.district)}|${wheatCandidate.item.unit}|$wheatPriceBucket';
 
         if (picked.length < 12 && !usedKeys.contains(wheatDedupeKey)) {
           usedKeys.add(wheatDedupeKey);
           commodityCount['wheat'] = (commodityCount['wheat'] ?? 0) + 1;
           // TEMP TRACE: wheat injection append
-          debugPrint('[MandiProof] candidate_selected_home_ticker docId=? commodity=wheat city=${_normalizeLocationToken(wheatCandidate.item.location)}');
+          debugPrint('[MandiProof] candidate_selected_home_ticker docId=? commodity=wheat city=${_normalizeLocationToken(wheatCandidate.item.district)}');
           picked.add(wheatCandidate.item);
           debugPrint('[MandiHome] wheat_injection=ticker_append');
         } else {
@@ -2069,7 +2019,7 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
             commodityCount['wheat'] = (commodityCount['wheat'] ?? 0) + 1;
             usedKeys.add(wheatDedupeKey);
             // TEMP TRACE: wheat injection replace
-            debugPrint('[MandiProof] candidate_selected_home_ticker docId=? commodity=wheat city=${_normalizeLocationToken(wheatCandidate.item.location)}');
+            debugPrint('[MandiProof] candidate_selected_home_ticker docId=? commodity=wheat city=${_normalizeLocationToken(wheatCandidate.item.district)}');
             picked[replaceIndex] = wheatCandidate.item;
             debugPrint(
               '[MandiHome] wheat_injection=ticker_replace replaced_rank=$replaceRank',
@@ -2086,7 +2036,7 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
     // when real wheat data physically exists in Firestore.
     final hasWheatInPickedNow = picked.any(
       (item) =>
-          !item.isFallbackMessage &&
+          // Fallback messages no longer supported in _MandiTickerItem
           _canonicalHomeCommodityKey(item.crop) == 'wheat',
     );
     if (!hasWheatInPickedNow) {
@@ -2136,6 +2086,7 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
         final recMandiName =
             text(recData, const <String>['mandiName', 'marketName', 'market']);
         final recProvince = text(recData, const <String>['province']);
+        final recCity = text(recData, const <String>['city', 'district']);
         if (recDistrict.isEmpty &&
             recMandiName.isEmpty &&
             recProvince.isEmpty) {
@@ -2158,7 +2109,9 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
         );
         final recoveredItem = _MandiTickerItem(
           crop: recCrop.isNotEmpty ? recCrop : 'گندم',
-          location: recLocation,
+          city: recCity,
+          district: recDistrict,
+          province: recProvince,
           price: recPrice,
           trendSymbol: trendFrom(recData),
           subcategoryKey:
@@ -2184,7 +2137,7 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
     coreSelectedCount = picked
       .where(
         (item) =>
-          !item.isFallbackMessage &&
+          // Fallback messages no longer supported in _MandiTickerItem
           _homeCommodityPriorityRankFromRaw(item.crop) == 1,
       )
         .length;
@@ -2193,41 +2146,8 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
     // fallback message 'گندم کے تازہ ریٹس زیرِ تصدیق ہیں'.
     final wheatExistsInDocs = _firstValidWheatTickerItemFromDocs(docs) != null;
 
-    // Add safe Urdu fallback messages when core rows are missing.
-    const fallbackMessages = <String>[
-      'گندم کے تازہ ریٹس زیرِ تصدیق ہیں',
-      'چاول کے سرکاری ریٹس اپڈیٹ ہو رہے ہیں',
-      'برائلر کے ریٹس جلد دستیاب ہوں گے',
-    ];
-    if (coreSelectedCount == 0 && picked.length < 6) {
-      for (final message in fallbackMessages) {
-        if (canStopTickerSelection(6)) break;
-        // Step 3: suppress wheat fallback text when real wheat data exists.
-        if (wheatExistsInDocs && message.contains('گندم')) {
-          debugPrint('[MandiFinal] wheat_fallback_suppressed=true wheat_exists_in_firestore=true');
-          continue;
-        }
-        picked.add(
-          _MandiTickerItem(
-            crop: message,
-            location: '',
-            price: 0,
-            trendSymbol: '•',
-            subcategoryKey: 'fallback_message',
-            subcategoryLabel: 'fallback_message',
-            unit: '',
-            sourceSelected: 'home_core_fallback',
-            isFallbackMessage: true,
-            fallbackMessage: message,
-            sourceUnitRaw: '',
-            parsedUnitRaw: '',
-            unitResolutionSource: 'fallback',
-          ),
-        );
-        fallbackMessageUsed = true;
-        debugPrint('[MandiHome] fallback_message_used=true message=$message');
-      }
-    }
+    // Fallback messages are no longer supported in _MandiTickerItem.
+    // All ticker items now come from real data and use MandiHomePresenter normalization.
 
     final finalPickedOutcome = _ensureWheatVisibleInListDetailed(
       items: picked,
@@ -2240,7 +2160,7 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
     coreSelectedCount = finalPicked
       .where(
         (item) =>
-          !item.isFallbackMessage &&
+          // Fallback messages no longer supported in _MandiTickerItem
           _homeCommodityPriorityRankFromRaw(item.crop) == 1,
       )
         .length;
@@ -2383,6 +2303,7 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
         'marketName',
         'market',
       ]);
+      final city = _mandiMapText(data, const <String>['city', 'district']);
       final district = _mandiMapText(data, const <String>['district', 'city']);
       final province = _mandiMapText(data, const <String>['province']);
       final locationRaw = mandiName.isNotEmpty
@@ -2404,7 +2325,11 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
         crop: _toUrduCommodityLabel(cropRaw).isNotEmpty
             ? _toUrduCommodityLabel(cropRaw)
             : 'گندم',
-        location: location.isNotEmpty ? location : 'مقامی ریٹ',
+        city: city,
+        district: district.isNotEmpty
+            ? district
+            : (location.isNotEmpty ? location : 'مقامی ریٹ'),
+        province: province,
         price: price,
         trendSymbol: '•',
         subcategoryKey: subcategoryKey.isNotEmpty ? subcategoryKey : 'crops',
@@ -2420,8 +2345,23 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
   }
 
   int _wheatReplacementScore(_MandiTickerItem item) {
-    if (item.isFallbackMessage) return 1000;
+    // Fallback messages no longer supported
     return _homeCommodityPriorityRankFromRaw(item.crop) * 10;
+  }
+
+  String _commodityToSeedId(String cropUrdu) {
+    final lower = cropUrdu.toLowerCase();
+    if (lower.contains('مرغی') || lower.contains('chicken')) return 'live_chicken';
+    if (lower.contains('گندم') || lower.contains('wheat')) return 'wheat';
+    if (lower.contains('چاول') || lower.contains('rice')) return 'rice_irri';
+    if (lower.contains('چینی') || lower.contains('sugar')) return 'sugar';
+    if (lower.contains('آلو') || lower.contains('potato')) return 'potato';
+    if (lower.contains('پیاز') || lower.contains('onion')) return 'onion';
+    if (lower.contains('ٹماٹر') || lower.contains('tomato')) return 'tomato';
+    if (lower.contains('سیب') || lower.contains('apple')) return 'apple';
+    if (lower.contains('کیلا') || lower.contains('banana')) return 'banana';
+    if (lower.contains('دال') || lower.contains('lentil')) return 'lentil_moong';
+    return '';
   }
 
   List<_MandiTickerItem> _ensureWheatVisibleInList({
@@ -2458,16 +2398,15 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
     final output = items
         .where(
           (item) =>
-              !(item.isFallbackMessage &&
-                  (item.fallbackMessage.contains('گندم') ||
-                      item.crop.contains('گندم'))),
+              // Fallback messages no longer supported - keep all real data items
+              true,
         )
         .toList(growable: true);
       var inserted = false;
 
     var wheatIndex = output.indexWhere(
       (item) =>
-          !item.isFallbackMessage &&
+          // Fallback messages no longer supported in _MandiTickerItem
           _canonicalHomeCommodityKey(item.crop) == 'wheat',
     );
 
@@ -2500,7 +2439,7 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
       }
       wheatIndex = output.indexWhere(
         (item) =>
-            !item.isFallbackMessage &&
+            // Fallback messages no longer supported in _MandiTickerItem
             _canonicalHomeCommodityKey(item.crop) == 'wheat',
       );
     }
@@ -2973,118 +2912,17 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
   String _toUrduCommodityLabel(String raw) {
     final value = raw.trim();
     if (value.isEmpty) return '';
-    final hasUrdu = RegExp(r'[\u0600-\u06FF]').hasMatch(value);
-    final hasLatin = RegExp(r'[A-Za-z]').hasMatch(value);
-    if (hasUrdu && !hasLatin) return value;
-    if (hasUrdu && hasLatin) {
-      final urduParts = RegExp(r'[\u0600-\u06FF]+(?:\s+[\u0600-\u06FF]+)*')
-          .allMatches(value)
-          .map((m) => (m.group(0) ?? '').trim())
-          .where((p) => p.isNotEmpty && p != 'درجن' && p != 'کلو')
-          .toList(growable: false);
-      if (urduParts.isNotEmpty) {
-        urduParts.sort((a, b) => b.length.compareTo(a.length));
-        return urduParts.first;
-      }
-    }
-    final String? urduInParens = RegExp(
-      r'\(([\u0600-\u06FF\s]+)\)',
-    ).firstMatch(value)?.group(1)?.trim();
-    if ((urduInParens ?? '').isNotEmpty &&
-        urduInParens != 'درجن' &&
-        urduInParens != 'کلو') {
-      return urduInParens!;
-    }
-
+    if (RegExp(r'[\u0600-\u06FF]').hasMatch(value)) return value;
     final normalized = value
         .toLowerCase()
         .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
         .replaceAll(RegExp(r'\s+'), ' ')
         .trim();
-    if (_englishToUrduCommodity.containsKey(normalized)) {
-      return _englishToUrduCommodity[normalized]!;
-    }
-    if (normalized.contains('banana') && normalized.contains('dozen')) {
-      return 'کیلا (درجن)';
-    }
-    if (normalized.contains('capsicum') || normalized.contains('shimla')) {
-      return 'شملہ مرچ';
-    }
-    if ((normalized.contains('gram') && normalized.contains('black')) ||
-        normalized.contains('black gram')) {
-      return 'کالا چنا';
-    }
-    if (normalized.contains('potato') && normalized.contains('fresh')) {
-      return 'آلو';
-    }
-    if (normalized.contains('garlic') && normalized.contains('china')) {
-      return 'لہسن چائنہ';
-    }
-    if (normalized.contains('moong')) return 'مونگ';
-    if (normalized.contains('coriander')) return 'دھنیا';
-    if (normalized.contains('tomato')) return 'ٹماٹر';
-    if (normalized.contains('potato') && !normalized.contains('fresh')) return 'آلو';
-    if (normalized.contains('onion')) return 'پیاز';
-
-    final lower = value.toLowerCase();
-    if (lower.contains('wheat')) return 'گندم';
-    if (lower.contains('gandum')) return 'گندم';
-    if (lower.contains('milk') || lower.contains('doodh')) return 'دودھ';
-    if (lower.contains('rice') || lower.contains('paddy')) return 'چاول';
-    if (lower.contains('chawal')) return 'چاول';
-    if (lower.contains('corn') || lower.contains('maize')) return 'مکئی';
-    if (lower.contains('broiler') || lower.contains('chicken')) {
-      return 'مرغی';
-    }
-    if (lower.contains('mango')) return 'آم';
-    if (lower.contains('banana') || lower.contains('kela') || lower.contains('kaila')) {
-      return 'کیلا';
-    }
-    if (lower.contains('egg') || lower.contains('anda') || lower.contains('anday')) {
-      return 'انڈے';
-    }
-    if (lower.contains('aalu') || lower.contains('alu')) return 'آلو';
-    if (lower.contains('pyaz')) return 'پیاز';
-    if (lower.contains('tamatar') || lower.contains('tomatar')) return 'ٹماٹر';
-    if (lower.contains('shimla mirch')) return 'شملہ مرچ';
-    if (lower.contains('lentil') ||
-        lower.contains('lentils') ||
-        lower.contains('daal') ||
-        lower.contains('dal')) {
-      return 'دال';
-    }
-    if (lower.contains('vegetable') ||
-        lower.contains('vegetables') ||
-        lower.contains('sabzi')) {
-      return 'سبزیاں';
-    }
-    if (lower.contains('apple')) return 'سیب';
-    if (lower.contains('carrot')) return 'گاجر';
-    if (lower.contains('radish') || lower.contains('muli')) return 'مولی';
-    if (lower.contains('turnip')) return 'شلجم';
-    if (lower.contains('cauliflower')) return 'پھول گوبھی';
-    if (lower.contains('cabbage')) return 'بند گوبھی';
-    if (lower.contains('spinach')) return 'پالک';
-    if (lower.contains('peas')) return 'مٹر';
-    if (lower.contains('ginger')) return 'ادرک';
-    if (lower.contains('turmeric')) return 'ہلدی';
-    if (lower.contains('chili') || lower.contains('chilli')) return 'مرچ';
-    if (lower.contains('brinjal') || lower.contains('eggplant')) return 'بینگن';
-    if (lower.contains('cotton')) return 'کپاس';
-    if (lower.contains('sugarcane') || lower.contains('ganna')) return 'گنا';
-    if (lower == 'dap') return 'ڈی اے پی';
-    if (lower.contains('urea')) return 'یوریا';
-    
-    // Hard ban on raw English names in user-facing mandi widgets.
-    return 'اجناس';
+    return _englishToUrduCommodity[normalized] ?? value;
   }
 
   String _normalizeCommodityKey(String input) {
-    return _toUrduCommodityLabel(input)
-        .trim()
-        .toLowerCase()
-        .replaceAll(RegExp(r'[^a-z0-9\u0600-\u06FF]+'), ' ')
-        .replaceAll(RegExp(r'\s+'), ' ');
+    return MandiHomePresenter.normalizeCommodityKey(input);
   }
 
   String _canonicalHomeCommodityKey(String raw) {
@@ -3105,7 +2943,11 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
       return s == t || s.contains(t) || t.contains(s);
     }
 
-    final location = item.location;
+    // Construct location from item fields for matching
+    // Priority: city > district > province
+    final location = item.city.isNotEmpty 
+        ? item.city 
+        : (item.district.isNotEmpty ? item.district : item.province);
     final cityTarget = _firstNonEmpty(<String?>[
       _selectedCityFilter,
       (widget.userData['city'] ?? '').toString(),
@@ -3141,7 +2983,7 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
     required String surface,
   }) {
     final input = candidates
-        .where((item) => !item.isFallbackMessage)
+        // Fallback messages no longer supported in _MandiTickerItem
         .toList(growable: false);
     final indexed = input.indexed.toList(growable: false);
     indexed.sort((a, b) {
@@ -3189,7 +3031,7 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
       if (commodity.isEmpty) return;
       final priceBucket = (item.price / 50).round();
       final dedupe =
-          '$commodity|${_normalizeLocationToken(item.location)}|${item.unit.trim()}|$priceBucket';
+          '$commodity|${_normalizeLocationToken(item.district)}|${item.unit.trim()}|$priceBucket';
       if (!usedDedupe.add(dedupe)) return;
       selected.add(item);
     }
@@ -3783,14 +3625,79 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
     );
     final renderableRows = <(_MandiTickerItem item, String line)>[];
     for (final item in guaranteedTickerItems) {
-      final line = _formatTickerItemText(item, emitVisibilityLogs: false);
-      if (line.isEmpty) continue;
+      final row = MandiHomePresenter.buildDisplayRow(
+        commodityRaw: item.crop,
+        city: item.city,
+        district: item.district,
+        province: item.province,
+        unitRaw: item.sourceUnitRaw.isEmpty ? item.parsedUnitRaw : item.sourceUnitRaw,
+        price: item.price,
+        sourceSelected: item.sourceSelected,
+        confidence: 0.8,
+        renderPath: MandiHomeRenderPath.snapshot,
+      );
+      if (!row.isRenderable) continue;
+      
+        // Build line with presenter-normalized data
+      final location = _cleanTickerLocation(row.cityDisplay).isEmpty
+          ? _tickerFallbackLocalityLabel()
+          : _cleanTickerLocation(row.cityDisplay);
+        final line = '${row.commodityDisplay} • $location • ${row.priceDisplay}';
+      debugPrint('[MandiHome] presenter_ticker_line=$line');
       renderableRows.add((item, line));
     }
+    
+    // Sort by commodity group: Meats -> Grains -> Vegetables -> Fruits -> Pulses
+    const commodityGroupOrder = <String, int>{
+      'meat': 1,
+      'grain': 2,
+      'essential': 2,
+      'veg': 3,
+      'fruit': 4,
+      'pulses': 5,
+    };
+    const commodityKeyToGroup = <String, String>{
+      'live_chicken': 'meat',
+      'chicken_meat': 'meat',
+      'beef': 'meat',
+      'mutton': 'meat',
+      'wheat': 'grain',
+      'rice_irri': 'grain',
+      'rice_basmati': 'grain',
+      'gram': 'grain',
+      'sugar': 'grain',
+      'flour_20kg': 'essential',
+      'cooking_oil_5l': 'essential',
+      'eggs': 'essential',
+      'milk': 'essential',
+      'potato': 'veg',
+      'onion': 'veg',
+      'tomato': 'veg',
+      'garlic': 'veg',
+      'ginger': 'veg',
+      'spinach': 'veg',
+      'apple': 'fruit',
+      'banana': 'fruit',
+      'mango': 'fruit',
+      'lentil_masoor': 'pulses',
+      'lentil_moong': 'pulses',
+      'lentil_mash': 'pulses',
+      'chana_dal': 'pulses',
+    };
+    String groupForCrop(String crop) {
+      final seedId = _commodityToSeedId(crop);
+      return commodityKeyToGroup[seedId] ?? 'veg';
+    }
+    final groupOrder = commodityGroupOrder;
+    renderableRows.sort((a, b) {
+      final aGroup = groupOrder[groupForCrop(a.$1.crop)] ?? 99;
+      final bGroup = groupOrder[groupForCrop(b.$1.crop)] ?? 99;
+      return aGroup.compareTo(bGroup);
+    });
 
     final hasRenderableWheat = renderableRows.any(
       (entry) =>
-          !entry.$1.isFallbackMessage &&
+          // Fallback messages no longer supported in _MandiTickerItem
           _canonicalHomeCommodityKey(entry.$1.crop) == 'wheat',
     );
 
@@ -3800,9 +3707,7 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
 
     if (hasRenderableWheat) {
       final before = visibleRows.length;
-      visibleRows = visibleRows
-          .where((entry) => !entry.$1.isFallbackMessage)
-          .toList(growable: false);
+      // Fallback messages no longer exist - all retained rows are from real data
       if (before != visibleRows.length) {
         debugPrint(
           '[MandiProof] fallback_replaced_real_row=prevented surface=home_ticker',
@@ -3812,14 +3717,14 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
 
     final hasVisibleWheat = visibleRows.any(
       (entry) =>
-          !entry.$1.isFallbackMessage &&
+          // Fallback messages no longer supported in _MandiTickerItem
           _canonicalHomeCommodityKey(entry.$1.crop) == 'wheat',
     );
 
     if (hasRenderableWheat && !hasVisibleWheat) {
       final wheatEntry = renderableRows.firstWhere(
         (entry) =>
-            !entry.$1.isFallbackMessage &&
+            // Fallback messages no longer supported in _MandiTickerItem
             _canonicalHomeCommodityKey(entry.$1.crop) == 'wheat',
       );
       if (visibleRows.isEmpty) {
@@ -3844,7 +3749,7 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
     if (hasRenderableWheat) {
       final wheatIndex = visibleRows.indexWhere(
         (entry) =>
-            !entry.$1.isFallbackMessage &&
+            // Fallback messages no longer supported in _MandiTickerItem
             _canonicalHomeCommodityKey(entry.$1.crop) == 'wheat',
       );
       if (wheatIndex > 0) {
@@ -3936,48 +3841,8 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
     );
   }
 
-  String _formatTickerItemText(
-    _MandiTickerItem item, {
-    bool emitVisibilityLogs = true,
-  }) {
-    if (item.isFallbackMessage) {
-      final message = item.fallbackMessage.trim();
-      if (message.isNotEmpty) {
-        if (emitVisibilityLogs) {
-          debugPrint('[MandiHome] fallback_message_used=true');
-          debugPrint('[MandiHome] home_visible_ticker_line=$message');
-          // TEMP TRACE: fallback ticker message
-          debugPrint('[MandiProof] ticker_fallback_message message=$message');
-        }
-        return message;
-      }
-      return '';
-    }
-
-    final location = _cleanTickerLocation(item.location).isEmpty
-        ? _tickerFallbackLocalityLabel()
-        : _cleanTickerLocation(item.location);
-    // Build display row for final rendered text only.
-    final commodityDisplay = _toUrduCommodityLabel(item.crop).trim();
-     if (commodityDisplay.isEmpty) return '';
-
-     final unitDisplay = _displayUnitForCommodity(
-       commodityRaw: item.crop,
-       unitRaw: item.unit,
-     );
-     if (unitDisplay.isEmpty) return '';
-   
-     final price = item.price.isFinite && item.price > 0 ? item.price : 0.0;
-     final priceDisplay = '${price.toStringAsFixed(0)} روپے';
-   
-     final fullTickerLine = '$commodityDisplay • $location • $priceDisplay / $unitDisplay';
-   
-    if (emitVisibilityLogs) {
-       debugPrint('[MandiHome] home_visible_ticker_line=$fullTickerLine');
-       debugPrint('[MandiFinal] rendered_ticker_line=$fullTickerLine');
-    }
-     return fullTickerLine;
-  }
+  // DELETED: _formatTickerItemText() - Was building ticker lines without presenter normalization
+  // NOTE: Ticker line building now uses MandiHomePresenter.buildDisplayRow() in _buildTopMandiTicker()
 
   String _displayUnitForCommodity({
     required String commodityRaw,
@@ -5876,7 +5741,7 @@ class _HomeIntelligenceHub extends StatelessWidget {
 
     const preferred = <String>['wheat', 'rice', 'broiler_chicken', 'potato'];
     final pool = source
-        .where((item) => !item.isFallbackMessage)
+        // Fallback messages no longer supported in _MandiTickerItem
         .toList(growable: false);
 
     final chosen = <_MandiTickerItem>[];
@@ -5886,8 +5751,9 @@ class _HomeIntelligenceHub extends StatelessWidget {
       if (chosen.length >= 4) return;
       final commodity = _canonicalHomeCommodityKey(item.crop);
       if (commodity.isEmpty) return;
+      // NOTE: location field no longer exists - using district instead
       final dedupe =
-          '$commodity|${_normalizeLocationToken(item.location)}|${item.unit.trim()}';
+          '$commodity|${_normalizeLocationToken(item.district)}|${item.unit.trim()}';
       if (!dedupeKeys.add(dedupe)) return;
       chosen.add(item);
     }
@@ -5977,7 +5843,7 @@ class _HomeIntelligenceHub extends StatelessWidget {
 
     final hasRenderableWheat = renderableRows.any(
       (entry) =>
-          !entry.$1.isFallbackMessage &&
+          // Fallback messages no longer supported in _MandiTickerItem
           _canonicalHomeCommodityKey(entry.$1.crop) == 'wheat',
     );
 
@@ -5987,9 +5853,7 @@ class _HomeIntelligenceHub extends StatelessWidget {
 
     if (hasRenderableWheat) {
       final before = visibleRows.length;
-      visibleRows = visibleRows
-          .where((entry) => !entry.$1.isFallbackMessage)
-          .toList(growable: false);
+      // Fallback messages no longer exist - all retained rows are from real data
       if (before != visibleRows.length) {
         debugPrint(
           '[MandiProof] fallback_replaced_real_row=prevented surface=nearby_snapshot',
@@ -5999,13 +5863,13 @@ class _HomeIntelligenceHub extends StatelessWidget {
 
     final hasVisibleWheat = visibleRows.any(
       (entry) =>
-          !entry.$1.isFallbackMessage &&
+          // Fallback messages no longer supported in _MandiTickerItem
           _canonicalHomeCommodityKey(entry.$1.crop) == 'wheat',
     );
     if (hasRenderableWheat && !hasVisibleWheat) {
       final wheatEntry = renderableRows.firstWhere(
         (entry) =>
-            !entry.$1.isFallbackMessage &&
+            // Fallback messages no longer supported in _MandiTickerItem
             _canonicalHomeCommodityKey(entry.$1.crop) == 'wheat',
       );
       if (visibleRows.isEmpty) {
@@ -6030,7 +5894,7 @@ class _HomeIntelligenceHub extends StatelessWidget {
     if (hasRenderableWheat) {
       final wheatIndex = visibleRows.indexWhere(
         (entry) =>
-            !entry.$1.isFallbackMessage &&
+            // Fallback messages no longer supported in _MandiTickerItem
             _canonicalHomeCommodityKey(entry.$1.crop) == 'wheat',
       );
       if (wheatIndex > 0) {
@@ -6168,38 +6032,33 @@ class _HomeIntelligenceHub extends StatelessWidget {
     );
   }
 
-  /// Builds the compact chip label: commodity • city • price روپے / unit
+  /// Builds the compact chip label: commodity • city • locked formatted price
   String _chipLabel(
     _MandiTickerItem item, {
     bool emitVisibilityLogs = true,
   }) {
-    if (item.isFallbackMessage) {
-      return item.fallbackMessage.trim();
-    }
-    final location = _cleanTickerLocation(item.location).isEmpty
+    // Fallback messages no longer supported in _MandiTickerItem
+    
+    final location = _cleanTickerLocation(item.district).isEmpty
         ? _tickerFallbackLocalityLabel()
-        : _cleanTickerLocation(item.location);
+        : _cleanTickerLocation(item.district);
 
     final commodityDisplay = _toUrduCommodityLabel(item.crop).trim();
      if (commodityDisplay.isEmpty) return '';
 
-     final unitDisplay = _displayUnitForCommodity(
-       commodityRaw: item.crop,
-       unitRaw: item.unit,
-     );
-     if (unitDisplay.isEmpty) return '';
-   
      final price = item.price.isFinite && item.price > 0 ? item.price : 0.0;
-     final priceDisplay = '${price.toStringAsFixed(0)} روپے';
-   
-     final fullSnapshotLine =
-       '$commodityDisplay • $location • $priceDisplay / $unitDisplay';
+     final priceDisplay = 'Rs. ${price.toStringAsFixed(0)}';
+     final unitDisplay = item.unit.trim();
+
+     final fullSnapshotLine = unitDisplay.isEmpty
+       ? '$commodityDisplay • $location • $priceDisplay'
+       : '$commodityDisplay • $location • $priceDisplay • $unitDisplay';
    
     if (emitVisibilityLogs) {
       // TEMP TRACE: snapshot selection
       final snapshotCommodity = _canonicalHomeCommodityKey(item.crop);
       debugPrint(
-        '[MandiProof] candidate_selected_snapshot docId=? commodity=$snapshotCommodity city=${item.location}',
+        '[MandiProof] candidate_selected_snapshot docId=? commodity=$snapshotCommodity city=${item.district}',
       );
        debugPrint('[MandiHome] home_visible_snapshot_line=$fullSnapshotLine');
        debugPrint('[MandiFinal] rendered_snapshot_line=$fullSnapshotLine');
@@ -8531,22 +8390,24 @@ class _MandiParseResult {
 class _MandiTickerItem {
   const _MandiTickerItem({
     required this.crop,
-    required this.location,
+    required this.city,
+    required this.district,
+    required this.province,
     required this.price,
     required this.trendSymbol,
     required this.subcategoryKey,
     required this.subcategoryLabel,
     this.unit = '',
     this.sourceSelected = '',
-    this.isFallbackMessage = false,
-    this.fallbackMessage = '',
     this.sourceUnitRaw = '',
     this.parsedUnitRaw = '',
     this.unitResolutionSource = 'unknown',
   });
 
   final String crop;
-  final String location;
+  final String city;
+  final String district;
+  final String province;
   final double price;
   final String trendSymbol;
   final String subcategoryKey;
@@ -8554,8 +8415,6 @@ class _MandiTickerItem {
   /// Urdu-friendly display unit, e.g. '100 کلو', 'درجن', 'کلو'
   final String unit;
   final String sourceSelected;
-  final bool isFallbackMessage;
-  final String fallbackMessage;
   /// Raw source unit from Firestore document (for proof logging)
   final String sourceUnitRaw;
   /// Parsed/computed unit from document metadata (for proof logging)

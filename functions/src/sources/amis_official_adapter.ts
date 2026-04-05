@@ -1,16 +1,83 @@
 import {scrapeAmisRates} from "./amis_scraper";
 import {AdapterContext, OfficialSourceAdapter, RawSourceRow} from "./types";
+import {FscpdOfficialAdapter} from "./fscpd_official_adapter";
+import {LahoreOfficialAdapter} from "./lahore_official_adapter";
 
 const SOURCE_ID = "amis_official";
 
+function isLahoreRow(row: RawSourceRow): boolean {
+  const city = String(row.city ?? "").toLowerCase();
+  const district = String(row.district ?? "").toLowerCase();
+  const mandi = String(row.mandiName ?? "").toLowerCase();
+  return city.includes("lahore") || district.includes("lahore") || mandi.includes("lahore");
+}
+
+async function fallbackLahoreRows(context: AdapterContext): Promise<RawSourceRow[]> {
+  try {
+    const fscpd = new FscpdOfficialAdapter();
+    const fscpdRows = await fscpd.fetchRows(context);
+    const lahoreOnly = fscpdRows.filter(isLahoreRow);
+    if (lahoreOnly.length > 0) {
+      return lahoreOnly.map((row) => ({
+        ...row,
+        metadata: {
+          ...(row.metadata ?? {}),
+          fallbackFrom: SOURCE_ID,
+          fallbackStrategy: "fscpd_lahore_filter",
+        },
+      }));
+    }
+  } catch (_err) {
+    // Fall through to Lahore official adapter.
+  }
+
+  try {
+    const lahore = new LahoreOfficialAdapter();
+    const lahoreRows = await lahore.fetchRows(context);
+    const lahoreOnly = lahoreRows.filter(isLahoreRow);
+    return lahoreOnly.map((row) => ({
+      ...row,
+      metadata: {
+        ...(row.metadata ?? {}),
+        fallbackFrom: SOURCE_ID,
+        fallbackStrategy: "lahore_official",
+      },
+    }));
+  } catch (_err) {
+    return [];
+  }
+}
+
 export class AmisOfficialAdapter implements OfficialSourceAdapter {
   async fetchRows(context: AdapterContext): Promise<RawSourceRow[]> {
-    const result = await scrapeAmisRates();
+    let result: Awaited<ReturnType<typeof scrapeAmisRates>> | null = null;
+    let amisError: string | null = null;
+    try {
+      result = await scrapeAmisRates();
+    } catch (error) {
+      amisError = String(error);
+    }
+
+    if (!result || result.records.length === 0) {
+      const fallbackRows = await fallbackLahoreRows(context);
+      context.logger("source_fetched", {
+        sourceId: SOURCE_ID,
+        rawRows: fallbackRows.length,
+        newestTimestamp: null,
+        sourceUrl: null,
+        fallbackUsed: true,
+        fallbackReason: amisError ?? "amis_empty_records",
+        fallbackCity: "Lahore",
+      });
+      return fallbackRows;
+    }
+
     context.logger("source_fetched", {
       sourceId: SOURCE_ID,
       rawRows: result.rawRows,
       newestTimestamp: result.newestTimestamp?.toISOString() ?? null,
       sourceUrl: result.sourceUrl,
+      fallbackUsed: false,
     });
 
     return result.records

@@ -79,6 +79,10 @@ class _LiveMandiRatesSectionState extends State<LiveMandiRatesSection> {
         rates: sourceRates,
         userCity: loc.city,
       );
+      if (_countAllowlistedRates(sourceRates) == 0) {
+        debugPrint('[MANDI_FIRESTORE_ERROR] LiveMandiRatesSection: no allowlisted rates for city=${loc.city} – Firestore mandi_rates collection may be empty');
+        sourceRates = const <LiveMandiRate>[];
+      }
 
       debugPrint(
         '[MANDI_QUERY] LiveSection: stateRates=${state.rates.length} '
@@ -305,6 +309,14 @@ class _LiveMandiRatesSectionState extends State<LiveMandiRatesSection> {
     return item.freshnessStatus == MandiFreshnessStatus.live ||
         item.freshnessStatus == MandiFreshnessStatus.recent ||
         item.freshnessStatus == MandiFreshnessStatus.aging;
+  }
+
+  int _countAllowlistedRates(List<LiveMandiRate> rates) {
+    return rates.where((rate) {
+      final commodity = _normalizeHomeCommodity(rate);
+      return commodity.isNotEmpty &&
+          MandiHomePresenter.isAllowlistedCommodity(commodity);
+    }).length;
   }
 
   List<LiveMandiRate> _buildControlledHomeRates(List<LiveMandiRate> rates) {

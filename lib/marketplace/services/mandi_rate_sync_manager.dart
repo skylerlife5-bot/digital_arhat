@@ -1,10 +1,7 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
-
 import '../models/live_mandi_rate.dart';
 import '../repositories/mandi_rates_repository.dart';
-import 'amis_wheat_scraper_service.dart';
 
 class MandiRatesSyncState {
   const MandiRatesSyncState({
@@ -51,12 +48,6 @@ class MandiRateSyncManager {
   Timer? _periodic;
   MandiRatesSyncState _state = MandiRatesSyncState.initial;
 
-  // --- Real-time Wheat scraper state --------------------------------------
-  LiveMandiRate? _scrapedWheatRate;
-  DateTime? _lastWheatScrapeAt;
-  // Re-scrape at most once per 30 minutes to avoid hammering public sources.
-  static const Duration _wheatScrapeInterval = Duration(minutes: 30);
-
   Stream<MandiRatesSyncState> get stream => _controller.stream;
 
   DateTime? _resolveLastSyncedAt(List<LiveMandiRate> rates) {
@@ -73,10 +64,6 @@ class MandiRateSyncManager {
   Future<void> start() async {
     _emit(_state);
 
-    // Kick off the wheat scraper concurrently — do not await so it never
-    // blocks the Firestore stream from starting.
-    unawaited(_refreshScrapedWheatRate());
-
     try {
       await _repository.refreshFromUpstream();
     } catch (_) {
@@ -86,12 +73,9 @@ class MandiRateSyncManager {
     _liveSub?.cancel();
     _liveSub = _repository.watchLiveRates().listen(
       (rates) {
-        // Trigger a background wheat re-scrape if the cached rate is stale.
-        _maybeRefreshWheatInBackground();
-        final mergedRates = _mergeWithScrapedWheat(rates);
         final syncedAt = _resolveLastSyncedAt(rates);
         _state = MandiRatesSyncState(
-          rates: mergedRates,
+          rates: rates,
           isLoading: false,
           isOfflineFallback: false,
           lastSyncedAt: syncedAt,
@@ -102,7 +86,7 @@ class MandiRateSyncManager {
       onError: (e) async {
         final fallback = await _repository.loadOfflineFallback();
         _state = MandiRatesSyncState(
-          rates: _mergeWithScrapedWheat(fallback),
+          rates: fallback,
           isLoading: false,
           isOfflineFallback: true,
           lastSyncedAt: _state.lastSyncedAt,
@@ -116,53 +100,6 @@ class MandiRateSyncManager {
     _periodic = Timer.periodic(const Duration(minutes: 2), (_) {
       unawaited(refresh());
     });
-  }
-
-  // Fetches a fresh wheat rate from AMIS/UrduPoint and re-emits state.
-  Future<void> _refreshScrapedWheatRate() async {
-    try {
-      final rate = await AmisWheatScraperService.fetchWheat40kgLiveRate();
-      if (rate != null) {
-        _scrapedWheatRate = rate;
-        _lastWheatScrapeAt = DateTime.now();
-        debugPrint(
-          '[MandiSync] wheat_scrape_ok price=${rate.price.toStringAsFixed(0)} '
-          'source=${rate.source}',
-        );
-        // Re-emit current state with freshly scraped wheat at top.
-        _state = MandiRatesSyncState(
-          rates: _mergeWithScrapedWheat(_state.rates),
-          isLoading: _state.isLoading,
-          isOfflineFallback: _state.isOfflineFallback,
-          lastSyncedAt: _state.lastSyncedAt,
-          error: _state.error,
-        );
-        _emit(_state);
-      } else {
-        debugPrint('[MandiSync] wheat_scrape_returned_null — using Firestore data');
-      }
-    } catch (e) {
-      debugPrint('[MandiSync] wheat_scrape_error: $e');
-    }
-  }
-
-  void _maybeRefreshWheatInBackground() {
-    final last = _lastWheatScrapeAt;
-    if (last == null ||
-        DateTime.now().difference(last) > _wheatScrapeInterval) {
-      unawaited(_refreshScrapedWheatRate());
-    }
-  }
-
-  /// Prepends the scraped wheat rate (Tier-1 WHEAT_GENERIC) to the rate list,
-  /// replacing any existing entry with the same id to avoid duplicates.
-  List<LiveMandiRate> _mergeWithScrapedWheat(List<LiveMandiRate> rates) {
-    final wheat = _scrapedWheatRate;
-    if (wheat == null) return rates;
-    // Remove any stale scraped-wheat entry already in the list.
-    final filtered =
-        rates.where((r) => !r.id.startsWith('wheat_generic_scraped_')).toList();
-    return [wheat, ...filtered];
   }
 
   Future<void> refresh() async {
@@ -181,7 +118,7 @@ class MandiRateSyncManager {
       final fallback = await _repository.loadOfflineFallback();
       final syncedAt = _resolveLastSyncedAt(fallback);
       _state = MandiRatesSyncState(
-        rates: _mergeWithScrapedWheat(fallback),
+        rates: fallback,
         isLoading: false,
         isOfflineFallback: false,
         lastSyncedAt: syncedAt,
@@ -191,7 +128,7 @@ class MandiRateSyncManager {
     } catch (e) {
       final fallback = await _repository.loadOfflineFallback();
       _state = MandiRatesSyncState(
-        rates: _mergeWithScrapedWheat(fallback),
+        rates: fallback,
         isLoading: false,
         isOfflineFallback: true,
         lastSyncedAt: _state.lastSyncedAt,

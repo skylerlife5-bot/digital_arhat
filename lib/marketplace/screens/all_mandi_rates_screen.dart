@@ -145,17 +145,12 @@ class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
       _cachedLocationResolvedAt = DateTime.now();
       await _recomputeVisible();
     } catch (e) {
-      final fallback = await _repository.loadOfflineFallback();
-      _raw
-        ..clear()
-        ..addAll(fallback);
-      _lastSyncedAt = _deriveLastSyncedAt(_raw);
-      _isOfflineFallback = true;
+      debugPrint('[MANDI_FIRESTORE_ERROR] Firestore load failed in AllMandiRatesScreen: $e');
+      _raw.clear();
+      _lastSyncedAt = null;
+      _isOfflineFallback = false;
       _error = e.toString();
-      // Keep existing _visible results on error; only recompute if empty
-      if (_visible.isEmpty) {
-        await _recomputeVisible();
-      }
+      await _recomputeVisible();
     } finally {
       if (mounted) {
         setState(() {
@@ -214,8 +209,7 @@ class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
 
     final preIntegrityCount = list.length;
     final integrityFiltered = list.where((item) {
-      final trustedPrice = getTrustedDisplayPrice(item);
-      if (trustedPrice <= 0) return false;
+      if (item.price <= 0) return false;
       if (item.isRejectedContribution) return false;
       if (item.rowConfidence == MandiRowConfidence.rejected) return false;
       if (item.flags.contains('unit_violation') ||
@@ -487,7 +481,7 @@ class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
         final summaryRow =
             '${MandiAllPresenter.commodityEnglish(row)} '
             '${MandiAllPresenter.cityEnglish(row)} '
-            '${getTrustedDisplayPrice(row).toStringAsFixed(0)} '
+          '${row.price.toStringAsFixed(0)} '
             '${MandiAllPresenter.unitEnglish(row)}';
         debugPrint('[MandiProof] final_visible_all_mandi_row=$summaryRow');
         if (_isWheatRate(row)) {
@@ -499,14 +493,14 @@ class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
           '[MandiAll] visible_row idx=${i + 1} '
           'commodity=${MandiAllPresenter.commodityEnglish(row)} '
           'city=${MandiAllPresenter.cityEnglish(row)} '
-          'price=${getTrustedDisplayPrice(row).toStringAsFixed(0)} '
+          'price=${row.price.toStringAsFixed(0)} '
           'unit=${MandiAllPresenter.unitEnglish(row)} '
           'freshness=${row.freshnessStatus.name}',
         );
         debugPrint(
           '[MandiAll] visible_row=${MandiAllPresenter.commodityEnglish(row)} '
           '${MandiAllPresenter.cityEnglish(row)} '
-          '${getTrustedDisplayPrice(row).toStringAsFixed(0)} '
+          '${row.price.toStringAsFixed(0)} '
           '${MandiAllPresenter.unitEnglish(row)}',
         );
         debugPrint(
@@ -1004,20 +998,33 @@ class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
                     }
 
                     final rate = _visible[index];
-                    final trustedPrice = getTrustedDisplayPrice(rate);
-                    final commodityDisplay = getLocalizedCommodityName(
-                      rate.commodityNameUr.trim().isNotEmpty
-                          ? rate.commodityNameUr
-                          : rate.commodityName,
-                      MandiDisplayLanguage.urdu,
+                    final commodityKey = MandiHomePresenter.normalizeCommodityKey(
+                      '${rate.metadata['urduName'] ?? ''} ${rate.commodityNameUr} ${rate.commodityName} ${rate.subCategoryName}',
                     );
-                    final cityDisplay = getLocalizedPrimaryLocation(
+                    if (!MandiHomePresenter.isAllowlistedCommodity(commodityKey)) {
+                      return const SizedBox.shrink();
+                    }
+                    final row = MandiHomePresenter.buildDisplayRow(
+                      commodityRaw: rate.commodityName,
+                      urduName: '${rate.metadata['urduName'] ?? ''}'.trim().isNotEmpty
+                          ? '${rate.metadata['urduName']}'.trim()
+                          : null,
+                      commodityNameUr: rate.commodityNameUr.trim().isNotEmpty
+                          ? rate.commodityNameUr
+                          : null,
                       city: rate.city,
                       district: rate.district,
                       province: rate.province,
-                      language: MandiDisplayLanguage.urdu,
+                      unitRaw: rate.unit,
+                      price: rate.price,
+                      sourceSelected: '${rate.sourceId}|${rate.sourceType}|${rate.source}',
+                      confidence: rate.confidenceScore,
+                      renderPath: MandiHomeRenderPath.card,
                     );
-                    final unitDisplay = _displayUnitUrduForRate(rate);
+                    if (!row.isRenderable) {
+                      return const SizedBox.shrink();
+                    }
+                    final formattedUnit = formatUnitDisplay(rate.unit);
                     return Container(
                       margin: const EdgeInsets.only(bottom: 8),
                       padding: const EdgeInsets.all(10),
@@ -1033,7 +1040,7 @@ class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  commodityDisplay,
+                                  row.commodityDisplay,
                                   style: const TextStyle(
                                     color: AppColors.primaryText,
                                     fontWeight: FontWeight.w700,
@@ -1041,7 +1048,7 @@ class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  cityDisplay,
+                                  row.cityDisplay,
                                   style: const TextStyle(
                                     color: AppColors.secondaryText,
                                     fontSize: 11.2,
@@ -1055,21 +1062,12 @@ class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
                             crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
                               Text(
-                                '${rate.currency} ${trustedPrice.toStringAsFixed(0)}',
+                                row.priceDisplay,
                                 style: const TextStyle(
                                   color: Color(0xFFEFD88A),
                                   fontWeight: FontWeight.w800,
                                 ),
                               ),
-                              if (rate.displayPriceLabel.isNotEmpty)
-                                Text(
-                                  rate.displayPriceLabel,
-                                  style: const TextStyle(
-                                    color: AppColors.secondaryText,
-                                    fontSize: 10.1,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
                               if (rate.isSuspiciousRate)
                                 const Text(
                                   'مزید جانچ درکار',
@@ -1079,13 +1077,22 @@ class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
                                     fontWeight: FontWeight.w700,
                                   ),
                                 ),
-                              Text(
-                                '${rate.trendSymbol} $unitDisplay',
-                                style: const TextStyle(
-                                  color: AppColors.secondaryText,
-                                  fontSize: 10.5,
+                              if (formattedUnit.trim().isNotEmpty)
+                                Text(
+                                  formattedUnit,
+                                  style: const TextStyle(
+                                    color: AppColors.secondaryText,
+                                    fontSize: 10.5,
+                                  ),
+                                )
+                              else
+                                Text(
+                                  rate.trendSymbol,
+                                  style: const TextStyle(
+                                    color: AppColors.secondaryText,
+                                    fontSize: 10.5,
+                                  ),
                                 ),
-                              ),
                               Text(
                                 rate.freshnessLabel,
                                 style: TextStyle(
@@ -1368,36 +1375,4 @@ class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
         mandi.contains('لاہور');
   }
 
-  String _displayUnitUrduForRate(LiveMandiRate rate) {
-    final commodityKey = MandiHomePresenter.normalizeCommodityKey(
-      '${rate.commodityNameUr} ${rate.commodityName}',
-    );
-    final unitKey = MandiHomePresenter.resolveUnitKeyForCommodity(
-      commodityKey: commodityKey,
-      unitRaw: rate.unit,
-    );
-    switch (unitKey) {
-      case 'per_40kg':
-        return '40 کلو';
-      case 'per_100kg':
-        return '100 کلو';
-      case 'per_50kg':
-        return '50 کلو';
-      case 'per_litre':
-        return 'لیٹر';
-      case 'per_dozen':
-        return 'درجن';
-      case 'per_tray':
-        return 'ٹری';
-      case 'per_crate':
-        return 'کریٹ';
-      case 'per_peti':
-        return 'پیٹی';
-      case 'per_piece':
-        return 'عدد';
-      case 'per_kg':
-      default:
-        return 'کلو';
-    }
-  }
 }

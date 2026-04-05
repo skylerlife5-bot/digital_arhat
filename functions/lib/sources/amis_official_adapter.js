@@ -2,15 +2,80 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AmisOfficialAdapter = void 0;
 const amis_scraper_1 = require("./amis_scraper");
+const fscpd_official_adapter_1 = require("./fscpd_official_adapter");
+const lahore_official_adapter_1 = require("./lahore_official_adapter");
 const SOURCE_ID = "amis_official";
+function isLahoreRow(row) {
+    const city = String(row.city ?? "").toLowerCase();
+    const district = String(row.district ?? "").toLowerCase();
+    const mandi = String(row.mandiName ?? "").toLowerCase();
+    return city.includes("lahore") || district.includes("lahore") || mandi.includes("lahore");
+}
+async function fallbackLahoreRows(context) {
+    try {
+        const fscpd = new fscpd_official_adapter_1.FscpdOfficialAdapter();
+        const fscpdRows = await fscpd.fetchRows(context);
+        const lahoreOnly = fscpdRows.filter(isLahoreRow);
+        if (lahoreOnly.length > 0) {
+            return lahoreOnly.map((row) => ({
+                ...row,
+                metadata: {
+                    ...(row.metadata ?? {}),
+                    fallbackFrom: SOURCE_ID,
+                    fallbackStrategy: "fscpd_lahore_filter",
+                },
+            }));
+        }
+    }
+    catch (_err) {
+        // Fall through to Lahore official adapter.
+    }
+    try {
+        const lahore = new lahore_official_adapter_1.LahoreOfficialAdapter();
+        const lahoreRows = await lahore.fetchRows(context);
+        const lahoreOnly = lahoreRows.filter(isLahoreRow);
+        return lahoreOnly.map((row) => ({
+            ...row,
+            metadata: {
+                ...(row.metadata ?? {}),
+                fallbackFrom: SOURCE_ID,
+                fallbackStrategy: "lahore_official",
+            },
+        }));
+    }
+    catch (_err) {
+        return [];
+    }
+}
 class AmisOfficialAdapter {
     async fetchRows(context) {
-        const result = await (0, amis_scraper_1.scrapeAmisRates)();
+        let result = null;
+        let amisError = null;
+        try {
+            result = await (0, amis_scraper_1.scrapeAmisRates)();
+        }
+        catch (error) {
+            amisError = String(error);
+        }
+        if (!result || result.records.length === 0) {
+            const fallbackRows = await fallbackLahoreRows(context);
+            context.logger("source_fetched", {
+                sourceId: SOURCE_ID,
+                rawRows: fallbackRows.length,
+                newestTimestamp: null,
+                sourceUrl: null,
+                fallbackUsed: true,
+                fallbackReason: amisError ?? "amis_empty_records",
+                fallbackCity: "Lahore",
+            });
+            return fallbackRows;
+        }
         context.logger("source_fetched", {
             sourceId: SOURCE_ID,
             rawRows: result.rawRows,
             newestTimestamp: result.newestTimestamp?.toISOString() ?? null,
             sourceUrl: result.sourceUrl,
+            fallbackUsed: false,
         });
         return result.records
             .map((item) => {

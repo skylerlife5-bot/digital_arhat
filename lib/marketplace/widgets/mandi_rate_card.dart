@@ -14,7 +14,6 @@ class MandiRateCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final previous = rate.previousPrice;
     final hasPrevious = previous != null && previous > 0;
-    final trustedPrice = getTrustedDisplayPrice(rate);
     final commodityKey = MandiHomePresenter.normalizeCommodityKey(
       '${rate.metadata['urduName'] ?? ''} ${rate.commodityNameUr} ${rate.commodityName} ${rate.subCategoryName}',
     );
@@ -33,7 +32,7 @@ class MandiRateCard extends StatelessWidget {
       district: rate.district,
       province: rate.province,
       unitRaw: rate.unit,
-      price: trustedPrice,
+      price: rate.price,
       sourceSelected: '${rate.sourceId}|${rate.sourceType}|${rate.source}',
       confidence: rate.confidenceScore,
       renderPath: MandiHomeRenderPath.card,
@@ -42,8 +41,8 @@ class MandiRateCard extends StatelessWidget {
     debugPrint('[MandiHome] legacy_render_path_hit=false');
     final commodity = row.commodityDisplay;
     final city = row.cityDisplay;
-    final unit = row.unitDisplay;
-    final priceLine = '${row.priceDisplay} / $unit';
+    final priceLine = row.priceDisplay;
+    final unitLine = formatUnitDisplay(rate.unit);
     final badges = <String>[
       if (rate.isLive) 'تازہ',
       rate.freshnessLabel,
@@ -128,10 +127,10 @@ class MandiRateCard extends StatelessWidget {
               ),
             ],
           ),
-          if (rate.displayPriceLabel.isNotEmpty) ...[
+          if (unitLine.trim().isNotEmpty) ...[
             const SizedBox(height: 2),
             Text(
-              rate.displayPriceLabel,
+              unitLine,
               style: const TextStyle(
                 color: Color(0xFFEFD88A),
                 fontSize: 9.5,

@@ -117,15 +117,88 @@ const CANONICAL_COMMODITY_IDS = new Set<string>([
   "urea",
   "goat",
   "cow",
+  // Meats
+  "live_chicken",
+  "chicken_meat",
+  "chicken",
+  "beef",
+  "mutton",
+  // Daily essentials
+  "flour",
+  "milk",
+  "cooking_oil",
+  "ghee",
+  // Extra vegetables
+  "cauliflower",
+  "cabbage",
+  "carrot",
+  "spinach",
+  "okra",
+  "ginger",
+  "peas",
+  // Extra fruits
+  "guava",
+  "grapes",
+  "pomegranate",
+  // Extra pulses
+  "mash",
+  "black_gram",
 ]);
 
 const COMMODITY_ALIAS_TO_EN: Record<string, string> = {
   // Urdu
   "گندم": "Wheat",
+  "گندم دانہ": "Wheat",
   "چاول": "Rice",
+  "چاول باسمتی": "Basmati Rice",
+  "چاول اری": "Irri Rice",
   "چینی": "Sugar",
+  // Meats
+  "live chicken": "Live Chicken",
+  "chicken live": "Live Chicken",
+  "poultry live": "Live Chicken",
+  "live poultry": "Live Chicken",
+  "broiler": "Live Chicken",
+  "broiler live": "Live Chicken",
+  "live_chicken": "Live Chicken",
+  "zinda murgi": "Live Chicken",
+  "زندہ مرغی": "Live Chicken",
+  "مرغی زندہ": "Live Chicken",
+  "murgi": "Chicken",
+  "مرغی": "Chicken",
+  "chicken meat": "Chicken",
+  "broiler meat": "Chicken",
+  "murghi gosht": "Chicken",
+  "مرغی گوشت": "Chicken",
+  "beef": "Beef",
+  "بڑا گوشت": "Beef",
+  "bada gosht": "Beef",
+  "mutton": "Mutton",
+  "chota gosht": "Mutton",
+  "چھوٹا گوشت": "Mutton",
+  "bakra gosht": "Mutton",
+  // Daily essentials
+  "flour": "Flour",
+  "atta": "Flour",
+  "آٹا": "Flour",
+  "wheat flour": "Flour",
+  "milk": "Milk",
+  "doodh": "Milk",
+  "دودھ": "Milk",
+  "cooking oil": "Cooking Oil",
+  "cooking oils": "Cooking Oil",
+  "sunflower oil": "Cooking Oil",
+  "edible oil": "Cooking Oil",
+  "vegetable oil": "Cooking Oil",
+  "refined oil": "Cooking Oil",
+  "تیل": "Cooking Oil",
+  "ghee": "Ghee",
+  "desi ghee": "Ghee",
+  "گھی": "Ghee",
+  "dalda": "Ghee",
   "پیاز": "Onion",
   "آلو": "Potato",
+  "آلو نئی": "Potato",
   "ٹماٹر": "Tomato",
   "مکئی": "Maize",
   "کارن": "Maize",
@@ -138,12 +211,15 @@ const COMMODITY_ALIAS_TO_EN: Record<string, string> = {
   "ادرک": "Ginger",
   "مرچ": "Chilli",
   "مٹر": "Peas",
+  "سبز مٹر": "Peas",
   "گاجر": "Carrot",
   "مولی": "Radish",
   "پالک": "Spinach",
   "آم": "Mango",
   "سیب": "Apple",
   "امرود": "Guava",
+  "انگور": "Grapes",
+  "انار": "Pomegranate",
   "مالٹا": "Orange",
   "چنا": "Chickpea",
   "مسور": "Lentil",
@@ -153,11 +229,19 @@ const COMMODITY_ALIAS_TO_EN: Record<string, string> = {
   "corn": "Maize",
   "aaloo": "Potato",
   "aloo": "Potato",
+  "potato": "Potato",
+  "potatoes": "Potato",
   "pyaz": "Onion",
+  "onion": "Onion",
+  "onions": "Onion",
   "tamatar": "Tomato",
+  "tomato": "Tomato",
+  "tomatoes": "Tomato",
   "chaawal": "Rice",
   "chawal": "Rice",
+  "rice": "Rice",
   "gandum": "Wheat",
+  "wheat": "Wheat",
   "kinnow": "Kinnow",
   "kinow": "Kinnow",
   "kela": "Banana",
@@ -167,6 +251,10 @@ const COMMODITY_ALIAS_TO_EN: Record<string, string> = {
   "lehsan": "Garlic",
   "adrak": "Ginger",
   "mirch": "Chilli",
+  "chilli": "Chilli",
+  "chilies": "Chilli",
+  "chillies": "Chilli",
+  "chili": "Chilli",
   "shimla mirch": "Capsicum",
   "capsicum": "Capsicum",
   "bhindi": "Okra",
@@ -182,14 +270,22 @@ const COMMODITY_ALIAS_TO_EN: Record<string, string> = {
   "shalgam": "Turnip",
   "palak": "Spinach",
   "gobhi": "Cauliflower",
+  "phool gobhi": "Cauliflower",
+  "cauliflower": "Cauliflower",
   "band gobhi": "Cabbage",
+  "cabbage": "Cabbage",
   "aam": "Mango",
+  "mango": "Mango",
   "seb": "Apple",
+  "apple": "Apple",
   "amrood": "Guava",
+  "guava": "Guava",
   "angoor": "Grapes",
+  "grapes": "Grapes",
   "tarbuz": "Watermelon",
   "kharboza": "Melon",
   "anaar": "Pomegranate",
+  "pomegranate": "Pomegranate",
   "khajoor": "Dates",
   "chana": "Chickpea",
   "moong": "Mung Bean",
@@ -197,7 +293,9 @@ const COMMODITY_ALIAS_TO_EN: Record<string, string> = {
   "masoor": "Lentil",
   "urad": "Black Gram",
   "basmati": "Basmati Rice",
+  "basmati rice": "Basmati Rice",
   "irri": "Irri Rice",
+  "irri rice": "Irri Rice",
   "dhan": "Paddy",
   "paddy": "Paddy",
   "ganna": "Sugarcane",
@@ -211,6 +309,82 @@ const COMMODITY_ALIAS_TO_EN: Record<string, string> = {
   "gai": "Cow",
   "cow": "Cow",
 };
+
+const COMMODITY_FUZZY_KEYWORDS: Array<{id: string; keywords: string[]}> = [
+  {id: "wheat", keywords: ["wheat", "gandum", "gandam", "گندم"]},
+  {id: "basmati_rice", keywords: ["basmati", "باسمتی"]},
+  {id: "irri_rice", keywords: ["irri", "اری"]},
+  {id: "rice", keywords: ["rice", "chawal", "chaawal", "چاول"]},
+  {id: "sugar", keywords: ["sugar", "cheeni", "چینی"]},
+  {id: "flour", keywords: ["flour", "atta", "wheat flour", "آٹا"]},
+  {id: "onion", keywords: ["onion", "onions", "pyaz", "پیاز"]},
+  {id: "potato", keywords: ["potato", "potatoes", "aloo", "aaloo", "آلو"]},
+  {id: "tomato", keywords: ["tomato", "tomatoes", "tamatar", "ٹماٹر"]},
+  {id: "garlic", keywords: ["garlic", "lehsan", "لہسن"]},
+  {id: "ginger", keywords: ["ginger", "adrak", "ادرک"]},
+  {id: "chilli", keywords: ["chilli", "chilies", "chillies", "chili", "mirch", "مرچ"]},
+  {id: "capsicum", keywords: ["capsicum", "shimla mirch", "شملہ مرچ"]},
+  {id: "peas", keywords: ["peas", "matar", "مٹر"]},
+  {id: "carrot", keywords: ["carrot", "carrots", "gajar", "گاجر"]},
+  {id: "spinach", keywords: ["spinach", "palak", "پالک"]},
+  {id: "okra", keywords: ["okra", "bhindi", "ladyfinger", "lady finger", "بھنڈی"]},
+  {id: "cauliflower", keywords: ["cauliflower", "phool gobhi", "gobhi phool", "پھول گوبھی"]},
+  {id: "cabbage", keywords: ["cabbage", "band gobhi", "بند گوبھی"]},
+  {id: "apple", keywords: ["apple", "seb", "سیب"]},
+  {id: "banana", keywords: ["banana", "kela", "کیلا"]},
+  {id: "mango", keywords: ["mango", "aam", "آم"]},
+  {id: "orange", keywords: ["orange", "kinnow", "kino", "مالٹا", "کینو"]},
+  {id: "guava", keywords: ["guava", "amrood", "امرود"]},
+  {id: "grapes", keywords: ["grape", "grapes", "angoor", "انگور"]},
+  {id: "pomegranate", keywords: ["pomegranate", "anar", "anaar", "انار"]},
+  {id: "lentil", keywords: ["lentil", "masoor", "مسور"]},
+  {id: "chickpea", keywords: ["chickpea", "gram", "chana", "چنا"]},
+  {id: "mung_bean", keywords: ["mung", "moong", "mung bean", "moong dal", "مونگ"]},
+  {id: "mash", keywords: ["mash", "urad", "black gram", "ماش"]},
+  {id: "live_chicken", keywords: ["live chicken", "chicken live", "poultry live", "live poultry", "broiler", "zinda murgi", "زندہ مرغی"]},
+  {id: "chicken_meat", keywords: ["chicken meat", "murghi gosht", "مرغی گوشت", "dressed chicken"]},
+  {id: "beef", keywords: ["beef", "bada gosht", "بڑا گوشت"]},
+  {id: "mutton", keywords: ["mutton", "chota gosht", "bakra gosht", "چھوٹا گوشت"]},
+  {id: "eggs", keywords: ["egg", "eggs", "anda", "anday", "انڈا", "انڈے"]},
+  {id: "milk", keywords: ["milk", "doodh", "دودھ"]},
+  {id: "cooking_oil", keywords: ["cooking oil", "edible oil", "vegetable oil", "refined oil", "تیل"]},
+  {id: "ghee", keywords: ["ghee", "desi ghee", "dalda", "گھی"]},
+];
+
+function normalizeCommodityLookupText(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/<[^>]+>/g, " ")
+    .replace(/[\u2010-\u2015]/g, " ")
+    .replace(/[-_/\\]+/g, " ")
+    .replace(/[\u064b-\u065f\u0670]/g, "")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\b(tomatoes|potatoes|onions|chilies|chillies|carrots|grapes)\b/g, (word: string) => {
+      if (word === "tomatoes") return "tomato";
+      if (word === "potatoes") return "potato";
+      if (word === "onions") return "onion";
+      if (word === "chilies" || word === "chillies") return "chilli";
+      if (word === "carrots") return "carrot";
+      if (word === "grapes") return "grape";
+      return word;
+    })
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function fuzzyCommodityIdFromText(normalizedInput: string): string | null {
+  if (!normalizedInput) return null;
+  const collapsed = normalizedInput.replace(/\s+/g, "");
+  for (const rule of COMMODITY_FUZZY_KEYWORDS) {
+    for (const keyword of rule.keywords) {
+      const normKeyword = normalizeCommodityLookupText(keyword);
+      if (!normKeyword) continue;
+      if (normalizedInput.includes(normKeyword)) return rule.id;
+      if (collapsed.includes(normKeyword.replace(/\s+/g, ""))) return rule.id;
+    }
+  }
+  return null;
+}
 
 const COMMODITY_EN_TO_UR: Record<string, string> = {
   wheat: "گندم",
@@ -260,6 +434,22 @@ const COMMODITY_EN_TO_UR: Record<string, string> = {
   cow: "گائے",
   dap: "ڈی اے پی",
   urea: "یوریا",
+  // Meats
+  "live chicken": "زندہ مرغی",
+  live_chicken: "زندہ مرغی",
+  chicken: "مرغی",
+  chicken_meat: "مرغی كا گوشت",
+  beef: "بڑا گوشت",
+  mutton: "چھوٹا گوشت",
+  // Daily essentials
+  flour: "آٹا",
+  milk: "دودھ",
+  "cooking oil": "كکنگ آئل",
+  cooking_oil: "كکنگ آئل",
+  ghee: "دیسی گھی",
+  // Pulses
+  mash: "ماش",
+  black_gram: "ماش دال",
 };
 
 const CATEGORY_ALIAS_TO_EN: Record<string, string> = {
@@ -319,12 +509,7 @@ export function normalizeCommodityName(value: string): string {
   const input = text(value);
   if (!input) return "unknown";
 
-  const cleanInput = input
-    .toLowerCase()
-    .replace(/<[^>]+>/g, " ")
-    .replace(/[^\p{L}\p{N}\s]/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  const cleanInput = normalizeCommodityLookupText(input);
 
   if (!cleanInput) return "unknown";
 
@@ -337,12 +522,25 @@ export function normalizeCommodityName(value: string): string {
 
   const normalized = mapped
     .replace(/\begg\b/g, "eggs")
+    .replace(/\bchicken_live\b/g, "live_chicken")
+    .replace(/\bcooking_oil_5l\b/g, "cooking_oil")
+    .replace(/\bdesi_ghee_1kg\b/g, "ghee")
+    .replace(/\bblack_gram\b/g, "mash")
     .replace(/\s+/g, "_")
     .replace(/[^a-z_]/g, "")
     .replace(/_+/g, "_")
     .replace(/^_+|_+$/g, "");
 
-  return CANONICAL_COMMODITY_IDS.has(normalized) ? normalized : "unknown";
+  if (CANONICAL_COMMODITY_IDS.has(normalized)) {
+    return normalized;
+  }
+
+  const fuzzyMatched = fuzzyCommodityIdFromText(cleanInput);
+  if (fuzzyMatched && CANONICAL_COMMODITY_IDS.has(fuzzyMatched)) {
+    return fuzzyMatched;
+  }
+
+  return "unknown";
 }
 
 export function toUrduCommodityLabel(english: string): string {

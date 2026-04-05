@@ -307,6 +307,30 @@ String getLocalizedUnit(
   return _titleCaseWords(clean);
 }
 
+String formatUnitDisplay(String unitRaw) {
+  final unit = unitRaw.trim().toLowerCase();
+  switch (unit) {
+    case 'per_kg':
+      return 'فی کلو';
+    case 'per_40kg':
+      return '40 کلو (1 من)';
+    case 'per_50kg':
+      return '50 کلو تھیلا';
+    case 'per_20kg':
+      return '20 کلو تھیلا';
+    case 'per_dozen':
+      return 'فی درجن';
+    case 'per_litre':
+      return 'فی لیٹر';
+    case 'per_5litre':
+      return '5 لیٹر';
+    case 'per_100kg':
+      return 'فی 100 کلو';
+    default:
+      return unitRaw;
+  }
+}
+
 String enforceUrduOnlyText(String value, {required String fallback}) {
   final urdu = _onlyUrduText(value);
   if (urdu.isEmpty) return fallback;

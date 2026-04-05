@@ -1,6 +1,7 @@
 import * as admin from "firebase-admin";
 import {createHash} from "crypto";
 import {onCall, onRequest, HttpsError} from "firebase-functions/v2/https";
+import {onSchedule} from "firebase-functions/v2/scheduler";
 import {onDocumentCreated, onDocumentDeleted} from "firebase-functions/v2/firestore";
 import {onObjectFinalized} from "firebase-functions/v2/storage";
 import {defineSecret} from "firebase-functions/params";
@@ -16,10 +17,6 @@ import {
   ListingForFraud,
   UserForFraud,
 } from "./fraud";
-import {
-  ingestMandiRatesOnDemand,
-  ingestMandiRatesScheduled,
-} from "./mandi_rates_ingestion";
 import {submitMandiContribution} from "./mandi_human_contributions";
 import {
   isSameUtcDay,
@@ -30,10 +27,20 @@ import {
 } from "./utils";
 import { setGlobalOptions } from "firebase-functions/v2";
 setGlobalOptions({ timeoutSeconds: 300 });
-export {ingestMandiRatesOnDemand, ingestMandiRatesScheduled, submitMandiContribution};
+export {submitMandiContribution};
 
 console.log("FUNCTIONS ENTRY START");
 console.log("FUNCTIONS ENV CHECK DEFERRED");
+
+// Safe top-level admin init only. Do not perform any network or Firestore calls here.
+if (admin.apps.length === 0) {
+  const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT;
+  if (projectId) {
+    admin.initializeApp({projectId});
+  } else {
+    admin.initializeApp();
+  }
+}
 
 const GOOGLE_API_KEY = defineSecret("GOOGLE_API_KEY");
 const OPENWEATHER_API_KEY_SECRET = defineSecret("OPENWEATHER_API_KEY");
@@ -58,12 +65,7 @@ const AI_EXTRACT_CNIC_RUNTIME_OPTIONS = {
 let cachedDb: FirebaseFirestore.Firestore | null = null;
 
 function getAdminApp(): admin.app.App {
-  if (admin.apps.length > 0) {
-    return admin.app();
-  }
-
-  const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT;
-  return projectId ? admin.initializeApp({projectId}) : admin.initializeApp();
+  return admin.app();
 }
 
 function getDb(): FirebaseFirestore.Firestore {
@@ -78,6 +80,36 @@ const db = new Proxy({} as FirebaseFirestore.Firestore, {
     return Reflect.get(getDb() as unknown as object, prop, receiver);
   },
 }) as FirebaseFirestore.Firestore;
+
+export const ingestMandiRatesScheduled = onSchedule(
+  {
+    schedule: "every 15 minutes",
+    region: "asia-south1",
+    timeoutSeconds: 300,
+    memory: "1GiB",
+  },
+  async () => {
+    const {runMandiRatesIngestionDebug} = await import("./mandi_rates_ingestion");
+    await runMandiRatesIngestionDebug();
+  },
+);
+
+export const ingestMandiRatesOnDemand = onRequest(
+  {
+    region: "asia-south1",
+    timeoutSeconds: 300,
+    memory: "1GiB",
+  },
+  async (_req, res) => {
+    try {
+      const {runMandiRatesIngestionDebug} = await import("./mandi_rates_ingestion");
+      const summary = await runMandiRatesIngestionDebug();
+      res.status(200).json({ok: true, summary});
+    } catch (error) {
+      res.status(500).json({ok: false, error: String(error)});
+    }
+  },
+);
 
 type CreateListingRequest = {
   listingData?: {

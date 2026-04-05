@@ -493,14 +493,11 @@ class _SignInScreenState extends State<SignInScreen> {
                     return const SizedBox(
                       width: 96,
                       height: 96,
-                      child: ColoredBox(
-                        color: AppColors.softOverlayWhite,
-                        child: Center(
-                          child: Icon(
-                            Icons.agriculture_rounded,
-                            color: Colors.white,
-                            size: 36,
-                          ),
+                      child: Center(
+                        child: Icon(
+                          Icons.agriculture_rounded,
+                          color: Colors.white,
+                          size: 36,
                         ),
                       ),
                     );

@@ -33,18 +33,16 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.onListingMediaFinalize = exports.onListingCreated = exports.onWatchlistDeleted = exports.onWatchlistCreated = exports.evaluateBidRiskHttp = exports.evaluateBidRisk = exports.getMandiTrendHttp = exports.suggestMarketRateHttp = exports.suggestMarketRate = exports.evaluateListingRiskHttp = exports.evaluateListingRisk = exports.aiExtractCnicV3 = exports.aiExtractCnic = exports.aiSuggestBidRate = exports.aiWeatherAdvisory = exports.weatherCurrentHttp = exports.aiGenerateText = exports.extendAuctionAdmin = exports.cancelAuctionAdmin = exports.resumeAuctionAdmin = exports.pauseAuctionAdmin = exports.startAuctionAdmin = exports.requestListingChangesAdmin = exports.rejectListingAdmin = exports.approveListingAdmin = exports.createListingSecureHttp = exports.createListingSecure = exports.establishCustomSession = exports.submitMandiContribution = exports.ingestMandiRatesScheduled = exports.ingestMandiRatesOnDemand = void 0;
+exports.onListingMediaFinalize = exports.onListingCreated = exports.onWatchlistDeleted = exports.onWatchlistCreated = exports.evaluateBidRiskHttp = exports.evaluateBidRisk = exports.getMandiTrendHttp = exports.suggestMarketRateHttp = exports.suggestMarketRate = exports.evaluateListingRiskHttp = exports.evaluateListingRisk = exports.aiExtractCnicV3 = exports.aiExtractCnic = exports.aiSuggestBidRate = exports.aiWeatherAdvisory = exports.weatherCurrentHttp = exports.aiGenerateText = exports.extendAuctionAdmin = exports.cancelAuctionAdmin = exports.resumeAuctionAdmin = exports.pauseAuctionAdmin = exports.startAuctionAdmin = exports.requestListingChangesAdmin = exports.rejectListingAdmin = exports.approveListingAdmin = exports.createListingSecureHttp = exports.createListingSecure = exports.establishCustomSession = exports.ingestMandiRatesOnDemand = exports.ingestMandiRatesScheduled = exports.submitMandiContribution = void 0;
 const admin = __importStar(require("firebase-admin"));
 const crypto_1 = require("crypto");
 const https_1 = require("firebase-functions/v2/https");
+const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firestore_1 = require("firebase-functions/v2/firestore");
 const storage_1 = require("firebase-functions/v2/storage");
 const params_1 = require("firebase-functions/params");
 const firestore_2 = require("firebase-admin/firestore");
 const fraud_1 = require("./fraud");
-const mandi_rates_ingestion_1 = require("./mandi_rates_ingestion");
-Object.defineProperty(exports, "ingestMandiRatesOnDemand", { enumerable: true, get: function () { return mandi_rates_ingestion_1.ingestMandiRatesOnDemand; } });
-Object.defineProperty(exports, "ingestMandiRatesScheduled", { enumerable: true, get: function () { return mandi_rates_ingestion_1.ingestMandiRatesScheduled; } });
 const mandi_human_contributions_1 = require("./mandi_human_contributions");
 Object.defineProperty(exports, "submitMandiContribution", { enumerable: true, get: function () { return mandi_human_contributions_1.submitMandiContribution; } });
 const utils_1 = require("./utils");
@@ -52,6 +50,16 @@ const v2_1 = require("firebase-functions/v2");
 (0, v2_1.setGlobalOptions)({ timeoutSeconds: 300 });
 console.log("FUNCTIONS ENTRY START");
 console.log("FUNCTIONS ENV CHECK DEFERRED");
+// Safe top-level admin init only. Do not perform any network or Firestore calls here.
+if (admin.apps.length === 0) {
+    const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT;
+    if (projectId) {
+        admin.initializeApp({ projectId });
+    }
+    else {
+        admin.initializeApp();
+    }
+}
 const GOOGLE_API_KEY = (0, params_1.defineSecret)("GOOGLE_API_KEY");
 const OPENWEATHER_API_KEY_SECRET = (0, params_1.defineSecret)("OPENWEATHER_API_KEY");
 const GEMINI_STABLE_MODEL = "gemini-1.5-flash";
@@ -73,11 +81,7 @@ const AI_EXTRACT_CNIC_RUNTIME_OPTIONS = {
 };
 let cachedDb = null;
 function getAdminApp() {
-    if (admin.apps.length > 0) {
-        return admin.app();
-    }
-    const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT;
-    return projectId ? admin.initializeApp({ projectId }) : admin.initializeApp();
+    return admin.app();
 }
 function getDb() {
     if (!cachedDb) {
@@ -89,6 +93,29 @@ const db = new Proxy({}, {
     get(_target, prop, receiver) {
         return Reflect.get(getDb(), prop, receiver);
     },
+});
+exports.ingestMandiRatesScheduled = (0, scheduler_1.onSchedule)({
+    schedule: "every 15 minutes",
+    region: "asia-south1",
+    timeoutSeconds: 300,
+    memory: "1GiB",
+}, async () => {
+    const { runMandiRatesIngestionDebug } = await Promise.resolve().then(() => __importStar(require("./mandi_rates_ingestion")));
+    await runMandiRatesIngestionDebug();
+});
+exports.ingestMandiRatesOnDemand = (0, https_1.onRequest)({
+    region: "asia-south1",
+    timeoutSeconds: 300,
+    memory: "1GiB",
+}, async (_req, res) => {
+    try {
+        const { runMandiRatesIngestionDebug } = await Promise.resolve().then(() => __importStar(require("./mandi_rates_ingestion")));
+        const summary = await runMandiRatesIngestionDebug();
+        res.status(200).json({ ok: true, summary });
+    }
+    catch (error) {
+        res.status(500).json({ ok: false, error: String(error) });
+    }
 });
 function requireString(value, field) {
     const text = (value || "").toString().trim();

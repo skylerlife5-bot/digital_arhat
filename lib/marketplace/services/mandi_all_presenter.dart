@@ -4,9 +4,8 @@ import 'mandi_home_presenter.dart';
 
 /// Presenter for the All Mandi Rates explorer screen.
 ///
-/// Applies the same canonical normalization as Home but with broader
-/// acceptance — all mappable commodities are allowed, not just the
-/// Home allowlist.
+/// Applies the exact same canonical normalization, allowlist, and unit
+/// rendering rules as the Home mandi surfaces.
 class MandiAllPresenter {
   const MandiAllPresenter._();
 
@@ -28,13 +27,33 @@ class MandiAllPresenter {
       return 'unit_violation_flag';
     }
 
-    final commodity = commodityEnglish(rate);
-    if (commodity == 'Commodity' || commodity.isEmpty) {
-      return 'unmapped_commodity';
+    final commodityKey = MandiHomePresenter.normalizeCommodityKey(
+      '${rate.metadata['urduName'] ?? ''} ${rate.commodityNameUr} ${rate.commodityName} ${rate.subCategoryName}',
+    );
+    if (commodityKey.isEmpty ||
+        !MandiHomePresenter.isAllowlistedCommodity(commodityKey)) {
+      return 'commodity_not_allowlisted';
     }
 
-    if (!_isValidCommodityUnit(rate.commodityName, rate.unit)) {
-      return 'invalid_commodity_unit';
+    final row = MandiHomePresenter.buildDisplayRow(
+      commodityRaw: rate.commodityName,
+      urduName: '${rate.metadata['urduName'] ?? ''}'.trim().isNotEmpty
+          ? '${rate.metadata['urduName']}'.trim()
+          : null,
+      commodityNameUr: rate.commodityNameUr.trim().isNotEmpty
+          ? rate.commodityNameUr
+          : null,
+      city: rate.city,
+      district: rate.district,
+      province: rate.province,
+      unitRaw: rate.unit,
+      price: trustedPrice,
+      sourceSelected: '${rate.sourceId}|${rate.sourceType}|${rate.source}',
+      confidence: rate.confidenceScore,
+      renderPath: MandiHomeRenderPath.card,
+    );
+    if (!row.isRenderable) {
+      return row.rejectReason ?? 'presenter_rejected';
     }
 
     return null;

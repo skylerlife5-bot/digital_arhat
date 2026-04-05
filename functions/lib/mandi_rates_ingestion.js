@@ -197,6 +197,27 @@ function toFirestorePayload(rate) {
         flags: rate.flags ?? [],
     };
 }
+async function clearCollectionInBatches(db, collectionPath, batchSize = 400) {
+    let deleted = 0;
+    while (true) {
+        const snap = await db.collection(collectionPath).limit(batchSize).get();
+        if (snap.empty)
+            break;
+        const batch = db.batch();
+        for (const doc of snap.docs) {
+            batch.delete(doc.ref);
+        }
+        await batch.commit();
+        deleted += snap.size;
+        if (snap.size < batchSize)
+            break;
+    }
+    return deleted;
+}
+function isSensitiveCommodityForPriceAlert(rawName, normalizedName) {
+    const haystack = `${rawName} ${normalizedName}`.toLowerCase();
+    return /(ghee|meat|beef|mutton|chicken|gosht)/.test(haystack);
+}
 async function runIngestion() {
     const db = getDb();
     const now = new Date();
@@ -259,10 +280,38 @@ async function runIngestion() {
                     mandiPulseLog("row_rejected_reason=invalid_price");
                     continue;
                 }
+                if (row.price > 40000) {
+                    sourceStats.rejectedRows += 1;
+                    mandiPulseLog("row_rejected_reason=hard_sanity_cap_exceeded");
+                    logger("price_rejected_hard_cap", {
+                        sourceId: source.sourceId,
+                        commodity: row.commodityName,
+                        city: row.city,
+                        district: row.district,
+                        unit: row.unit,
+                        price: row.price,
+                        sourceRowIndex: row.metadata?.sourceRowIndex ?? null,
+                    });
+                    continue;
+                }
                 // Unit validation gate: reject impossible commodity-unit combos
                 // before they enter the normalization pipeline.
                 const unitCheck = (0, unit_rules_1.checkUnitForCommodity)(row.unit ?? "", normalizedCommodity);
                 mandiPulseLog(`normalized_unit=${unitCheck.normalizedUnit || String(row.unit ?? "").trim().toLowerCase()}`);
+                if (isSensitiveCommodityForPriceAlert(String(row.commodityName ?? ""), normalizedCommodity) &&
+                    unitCheck.normalizedUnit === "per_100kg" &&
+                    row.price < 5000) {
+                    console.error("[AMIS_PRICE_SANITY_ALERT]", {
+                        sourceId: source.sourceId,
+                        commodityName: row.commodityName,
+                        normalizedCommodity,
+                        price: row.price,
+                        unit: row.unit,
+                        normalizedUnit: unitCheck.normalizedUnit,
+                        sourcePage: row.metadata?.sourcePage ?? null,
+                        sourceRowIndex: row.metadata?.sourceRowIndex ?? null,
+                    });
+                }
                 if (!unitCheck.allowed) {
                     sourceStats.rejectedRows += 1;
                     mandiPulseLog(`row_rejected_reason=${unitCheck.reason}`);
@@ -382,29 +431,66 @@ async function runIngestion() {
             priorityRank: 0,
         };
     });
-    for (const record of deduped) {
+    // ── Batch-write deduped records to Firestore ──────────────────────────────
+    // Firestore allows max 500 operations per batch commit. We chunk accordingly.
+    // Preserve coexisting source data (e.g., Karachi + Punjab) by avoiding full
+    // collection clears before every source run.
+    // const deletedBeforeWrite = await clearCollectionInBatches(db, COLLECTION);
+    // logger("collection_cleared", {
+    //   collection: COLLECTION,
+    //   deletedCount: deletedBeforeWrite,
+    // });
+    const BATCH_SIZE = 499;
+    for (let i = 0; i < deduped.length; i += BATCH_SIZE) {
+        const chunk = deduped.slice(i, i + BATCH_SIZE);
+        const batch = db.batch();
+        for (const record of chunk) {
+            const ref = db.collection(COLLECTION).doc(record.id);
+            console.log("[AMIS_SAVE_MAP]", {
+                docId: record.id,
+                sourceId: record.sourceId,
+                commodityName: record.commodityName,
+                city: record.city,
+                mandiName: record.mandiName,
+                price: record.price,
+                unit: record.unit,
+                averagePrice: record.metadata?.averagePrice ?? null,
+                minPrice: record.minPrice ?? null,
+                maxPrice: record.maxPrice ?? null,
+                sourceRowIndex: record.metadata?.sourceRowIndex ?? null,
+                sourceTdCount: record.metadata?.sourceTdCount ?? null,
+                sourceCityColumnIndex: record.metadata?.sourceCityColumnIndex ?? null,
+                sourceMinColumnIndex: record.metadata?.sourceMinColumnIndex ?? null,
+                sourceMaxColumnIndex: record.metadata?.sourceMaxColumnIndex ?? null,
+                sourceFqpColumnIndex: record.metadata?.sourceFqpColumnIndex ?? null,
+                sourceQuantityColumnIndex: record.metadata?.sourceQuantityColumnIndex ?? null,
+            });
+            batch.set(ref, toFirestorePayload(record), { merge: true });
+        }
         try {
-            await db.collection(COLLECTION).doc(record.id).set(toFirestorePayload(record), { merge: true });
-            stats.totalWrittenRows += 1;
-            if (stats.sampleWrittenDocs.length < 10) {
-                stats.sampleWrittenDocs.push({
-                    id: record.id,
-                    sourceId: record.sourceId,
-                    city: record.city,
-                    commodityName: record.commodityName,
-                    price: record.price,
-                    lastUpdatedIso: record.lastUpdated.toISOString(),
-                });
-            }
-            const sourceRun = stats.sourceRuns.find((item) => item.sourceId === record.sourceId);
-            if (sourceRun) {
-                sourceRun.writtenRows += 1;
+            await batch.commit();
+            for (const record of chunk) {
+                stats.totalWrittenRows += 1;
+                if (stats.sampleWrittenDocs.length < 10) {
+                    stats.sampleWrittenDocs.push({
+                        id: record.id,
+                        sourceId: record.sourceId,
+                        city: record.city,
+                        commodityName: record.commodityName,
+                        price: record.price,
+                        lastUpdatedIso: record.lastUpdated.toISOString(),
+                    });
+                }
+                const sourceRun = stats.sourceRuns.find((item) => item.sourceId === record.sourceId);
+                if (sourceRun) {
+                    sourceRun.writtenRows += 1;
+                }
             }
         }
         catch (error) {
-            logger("record_write_failed", {
-                sourceId: record.sourceId,
-                id: record.id,
+            logger("batch_write_failed", {
+                batchStart: i,
+                batchSize: chunk.length,
                 reason: String(error),
             });
         }

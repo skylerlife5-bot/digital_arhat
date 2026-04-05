@@ -73,12 +73,11 @@ class MandiRatesRepository {
           .toList(growable: false);
 
       final deduped = _dedupe(parsed);
-      if (deduped.isNotEmpty) {
-        _memoryCache = deduped;
-      }
-      return deduped.isNotEmpty ? deduped : _memoryCache;
-    }).handleError((_) {
-      return _memoryCache;
+      _memoryCache = deduped;
+      return deduped;
+    }).handleError((Object error, StackTrace stack) {
+      debugPrint('[MANDI_STREAM_ERROR] Firestore watchLiveRates error: $error');
+      throw error;
     });
   }
 
