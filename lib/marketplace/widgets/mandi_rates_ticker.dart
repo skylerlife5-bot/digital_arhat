@@ -439,12 +439,19 @@ List<_TickerItem> _buildTickerItems(List<LiveMandiRate> rates) {
     final String forcedCity = normalizedCity.isEmpty
         ? 'پاکستان'
         : normalizedCity;
-    final String line = MandiDisplayUtils.formatUrduRateLine(
-      commodity: _forceReplaceEnglishCommoditySegments(forcedCommodity),
-      price: rate.price,
-      unitRaw: rate.unit,
-      city: forcedCity,
+    final String commodityText = enforceUrduOnlyText(
+      _forceReplaceEnglishCommoditySegments(forcedCommodity),
+      fallback: 'اجناس',
     );
+    final String cityText = enforceUrduOnlyText(forcedCity, fallback: 'پاکستان');
+    final String priceText = MandiDisplayUtils.formatUrduPriceValue(rate.price);
+    final String baseUnit = MandiDisplayUtils.formatUrduUnitLabel(rate.unit);
+    final String unitText = switch (baseUnit) {
+      'کلو' => 'فی کلو',
+      'درجن' => 'فی درجن',
+      _ => baseUnit,
+    };
+    final String line = '$commodityText • Rs. $priceText • $unitText • $cityText';
     final String dedupeKey = buildTickerDisplayKeyForDedupe(
       commodityUrdu: commodityUrdu,
       row: row,
@@ -812,6 +819,7 @@ class _MandiRatesTickerState extends State<MandiRatesTicker> {
                 child: Center(
                   child: Text(
                     '|',
+                    textDirection: TextDirection.rtl,
                     style: TextStyle(
                       color: _accentGold.withValues(alpha: 0.62),
                       fontSize: 12,
