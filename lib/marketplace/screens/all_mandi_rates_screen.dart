@@ -1024,7 +1024,7 @@ class _AllMandiRatesScreenState extends State<AllMandiRatesScreen> {
                     if (!row.isRenderable) {
                       return const SizedBox.shrink();
                     }
-                    final formattedUnit = formatUnitDisplay(rate.unit);
+                    final formattedUnit = MandiDisplayUtils.formatUnit(rate.unit);
                     return Container(
                       margin: const EdgeInsets.only(bottom: 8),
                       padding: const EdgeInsets.all(10),

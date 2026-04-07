@@ -3,6 +3,138 @@
 
 enum MandiDisplayLanguage { urdu, english }
 
+class MandiDisplayUtils {
+  const MandiDisplayUtils._();
+
+  static const String urduRateSeparator = '۔';
+
+  static String formatUnit(String unitRaw) {
+    switch (unitRaw.trim().toLowerCase()) {
+      case 'per_kg':
+        return 'فی کلو';
+      case 'per_40kg':
+        return 'فی 40 کلو (1 من)';
+      case 'per_50kg':
+        return 'فی 50 کلو تھیلا';
+      case 'per_20kg':
+        return 'فی 20 کلو تھیلا';
+      case 'per_dozen':
+        return 'فی درجن';
+      case 'per_litre':
+        return 'فی لیٹر';
+      case 'per_5litre':
+        return '5 لیٹر کین';
+      case 'per_100kg':
+        return 'فی 100 کلو';
+      default:
+        return unitRaw;
+    }
+  }
+
+  static String formatUrduUnitLabel(String unitRaw) {
+    final normalized = unitRaw.trim().toLowerCase().replaceAll(
+      RegExp(r'\s+'),
+      ' ',
+    );
+    if (normalized.isEmpty) return 'کلو';
+
+    final hasKg =
+        normalized.contains('kg') ||
+        normalized.contains('kilo') ||
+        normalized.contains('کلو');
+    final hasLitre =
+        normalized.contains('litre') ||
+        normalized.contains('liter') ||
+        normalized.contains('ltr') ||
+        normalized.contains('لیٹر') ||
+        normalized.contains('لٹر');
+
+    if (normalized == 'per_40kg' ||
+        normalized == '40 kg' ||
+        normalized == '40kg' ||
+        normalized.contains('40 کلو') ||
+        normalized.contains('maund') ||
+        normalized.contains('mond') ||
+        normalized.contains('mann') ||
+        (normalized.contains('40') && hasKg)) {
+      return '40 کلو';
+    }
+    if (normalized == 'per_50kg' ||
+        normalized == '50 kg' ||
+        normalized == '50kg' ||
+        (normalized.contains('50') && hasKg)) {
+      return '50 کلو';
+    }
+    if (normalized == 'per_20kg' ||
+        normalized == '20 kg' ||
+        normalized == '20kg' ||
+        (normalized.contains('20') && hasKg)) {
+      return '20 کلو';
+    }
+    if (normalized == 'per_100kg' ||
+        normalized == '100 kg' ||
+        normalized == '100kg' ||
+        (normalized.contains('100') && hasKg)) {
+      return '100 کلو';
+    }
+    if (normalized == 'per_dozen' ||
+        normalized.contains('dozen') ||
+        normalized.contains('doz') ||
+        normalized.contains('درجن')) {
+      return 'درجن';
+    }
+    if (normalized == 'per_5litre' || (normalized.contains('5') && hasLitre)) {
+      return '5 لیٹر';
+    }
+    if (normalized == 'per_litre' || hasLitre) {
+      return 'لیٹر';
+    }
+    if (normalized == 'per_piece' ||
+        normalized.contains('piece') ||
+        normalized.contains('عدد')) {
+      return 'عدد';
+    }
+    if (hasKg || normalized == 'per_kg' || normalized == 'kg') {
+      return 'کلو';
+    }
+
+    final clean = getCleanUrduUnitForDisplay(unitRaw, commodityRaw: '');
+    return clean.replaceFirst(RegExp(r'^فی\s+'), '').trim();
+  }
+
+  static String formatUrduPriceValue(num price) {
+    final value = price.toDouble();
+    if (!value.isFinite || value <= 0) return '0';
+    if (value == value.roundToDouble()) {
+      return value.toStringAsFixed(0);
+    }
+    return value.toStringAsFixed(2);
+  }
+
+  static String stripEnglishCurrencyText(String value) {
+    return value
+        .replaceAll(
+          RegExp(r'\b(rs\.?|pkr|rupees?)\b', caseSensitive: false),
+          ' ',
+        )
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
+  static String formatUrduRateLine({
+    required String commodity,
+    required num price,
+    required String unitRaw,
+    required String city,
+  }) {
+    final commodityText = enforceUrduOnlyText(commodity, fallback: 'اجناس');
+    final cityText = enforceUrduOnlyText(city, fallback: 'پاکستان');
+    final unitText = formatUrduUnitLabel(unitRaw);
+    final priceText = stripEnglishCurrencyText(formatUrduPriceValue(price));
+    return '$commodityText $urduRateSeparator $priceText $urduRateSeparator $unitText $urduRateSeparator $cityText';
+  }
+}
+
 const Map<String, String> _cityToUrduMap = <String, String>{
   'lahore': 'لاہور',
   'gujranwala': 'گوجرانوالہ',
@@ -199,7 +331,13 @@ String _sanitizeRawLabel(String input) {
   return input
       .replaceAll(RegExp(r'<[^>]*>'), ' ')
       .replaceAll(RegExp(r'\[[^\]]*\]'), ' ')
-      .replaceAll(RegExp(r'\([^\)]*(kg|dozen|doz|tray|crate|peti)[^\)]*\)', caseSensitive: false), ' ')
+      .replaceAll(
+        RegExp(
+          r'\([^\)]*(kg|dozen|doz|tray|crate|peti)[^\)]*\)',
+          caseSensitive: false,
+        ),
+        ' ',
+      )
       .replaceAll(RegExp(r'\([^\)]*raw[^\)]*\)', caseSensitive: false), ' ')
       .replaceAll(RegExp(r'\s+'), ' ')
       .trim();
@@ -243,8 +381,10 @@ String getLocalizedCityName(String city, MandiDisplayLanguage language) {
     return 'پاکستان';
   }
 
-  if (_urduToEnglishCityMap.containsKey(clean)) return _urduToEnglishCityMap[clean]!;
-  if (_urduToEnglishCityMap.containsKey(lookup)) return _urduToEnglishCityMap[lookup]!;
+  if (_urduToEnglishCityMap.containsKey(clean))
+    return _urduToEnglishCityMap[clean]!;
+  if (_urduToEnglishCityMap.containsKey(lookup))
+    return _urduToEnglishCityMap[lookup]!;
 
   for (final entry in _urduToEnglishCityMap.entries) {
     if (clean.contains(entry.key)) return entry.value;
@@ -308,27 +448,7 @@ String getLocalizedUnit(
 }
 
 String formatUnitDisplay(String unitRaw) {
-  final unit = unitRaw.trim().toLowerCase();
-  switch (unit) {
-    case 'per_kg':
-      return 'فی کلو';
-    case 'per_40kg':
-      return '40 کلو (1 من)';
-    case 'per_50kg':
-      return '50 کلو تھیلا';
-    case 'per_20kg':
-      return '20 کلو تھیلا';
-    case 'per_dozen':
-      return 'فی درجن';
-    case 'per_litre':
-      return 'فی لیٹر';
-    case 'per_5litre':
-      return '5 لیٹر';
-    case 'per_100kg':
-      return 'فی 100 کلو';
-    default:
-      return unitRaw;
-  }
+  return MandiDisplayUtils.formatUnit(unitRaw);
 }
 
 String enforceUrduOnlyText(String value, {required String fallback}) {
@@ -401,13 +521,12 @@ String getCuratedCommodityName(String commodityRaw) {
   if (cleanRaw.isEmpty) return 'اجناس';
 
   // First, try to extract Urdu from parentheses: "Banana (درجن)" -> "درجن"
-  final urduMatch = RegExp(r'\(([\u0600-\u06FF\s]+)\)')
-      .firstMatch(cleanRaw);
+  final urduMatch = RegExp(r'\(([\u0600-\u06FF\s]+)\)').firstMatch(cleanRaw);
   if (urduMatch != null) {
     final extracted = urduMatch.group(1)?.trim();
     if (extracted != null && extracted.isNotEmpty) {
       // Return full mapping if available, else return extracted Urdu
-        final normalized = cleanRaw
+      final normalized = cleanRaw
           .replaceAll(RegExp(r'[\(\)]'), '')
           .trim()
           .toLowerCase()
@@ -480,7 +599,8 @@ String normalizeRateUnit(String unitRaw, String commodityRaw) {
     return 'لیٹر';
   }
 
-  if (commodity.contains('egg') || commodity.contains('eggs') ||
+  if (commodity.contains('egg') ||
+      commodity.contains('eggs') ||
       commodity.contains('انڈا')) {
     return 'درجن';
   }
@@ -500,7 +620,7 @@ String normalizeRateUnit(String unitRaw, String commodityRaw) {
       commodity.contains('چنا')) {
     return '40 کلو';
   }
-  
+
   // Commodity-based overrides take priority, but respect explicit unit signals
   if (commodity.contains('banana') || commodity.contains('کیلا')) {
     final u = _sanitizeRawLabel(unitRaw).toLowerCase();
@@ -508,23 +628,25 @@ String normalizeRateUnit(String unitRaw, String commodityRaw) {
     if (u.contains('peti') || u.contains('پیٹی')) return 'پیٹی';
     return 'درجن';
   }
-  if (commodity.contains('egg') || commodity.contains('eggs') ||
+  if (commodity.contains('egg') ||
+      commodity.contains('eggs') ||
       commodity.contains('انڈا')) {
     final u = _sanitizeRawLabel(unitRaw).toLowerCase();
     if (u.contains('tray') || u.contains('ٹری')) return 'ٹری';
     return 'درجن';
   }
-  if (commodity.contains('lemon') || commodity.contains('لیموں') ||
+  if (commodity.contains('lemon') ||
+      commodity.contains('لیموں') ||
       commodity.contains('nimbu')) {
     return 'درجن';
   }
-  
+
   final unit = _sanitizeRawLabel(unitRaw).toLowerCase();
   final hasKg = unit.contains('kg');
   final hasDozen = unit.contains('dozen') || unit.contains('doz');
   if (hasKg && hasDozen) return 'درجن';
   if (unit.contains('piece') || unit == 'pc' || unit == 'pcs') return 'عدد';
-  
+
   // Standard units
   if (unit.contains('100') && unit.contains('kg')) return '100 کلو';
   if (unit.contains('40') && unit.contains('kg')) return '40 کلو';
@@ -537,7 +659,7 @@ String normalizeRateUnit(String unitRaw, String commodityRaw) {
   if (unit.contains('dozen') || unit.contains('doz')) return 'درجن';
   if (unit == 'kg' || unit == 'per kg' || unit == 'perkg') return 'کلو';
   if (unit.contains('kg')) return 'کلو';
-  
+
   // Default: per 100kg (AMIS standard)
   return '100 کلو';
 }
@@ -551,10 +673,16 @@ String cleanLocationString({
   required String province,
 }) {
   final cleanCity = _sanitizeRawLabel(city)
-      .replaceAll(RegExp(r'\b(mandi|market|wholesale)\b', caseSensitive: false), '')
+      .replaceAll(
+        RegExp(r'\b(mandi|market|wholesale)\b', caseSensitive: false),
+        '',
+      )
       .trim();
   final cleanDistrict = _sanitizeRawLabel(district)
-      .replaceAll(RegExp(r'\b(district|mandi|market)\b', caseSensitive: false), '')
+      .replaceAll(
+        RegExp(r'\b(district|mandi|market)\b', caseSensitive: false),
+        '',
+      )
       .trim();
   final cleanProvince = _sanitizeRawLabel(province).trim();
 
@@ -565,11 +693,12 @@ String cleanLocationString({
   }.where((e) => e.isNotEmpty).toList(growable: false);
 
   if (parts.isEmpty) return 'پاکستان';
-  
+
   // Return deduplicated, in order of preference: city, district, province
   final result = <String>[];
   if (cleanCity.isNotEmpty) result.add(cleanCity);
-  if (cleanDistrict.isNotEmpty && cleanDistrict.toLowerCase() != cleanCity.toLowerCase()) {
+  if (cleanDistrict.isNotEmpty &&
+      cleanDistrict.toLowerCase() != cleanCity.toLowerCase()) {
     result.add(cleanDistrict);
   }
   if (cleanProvince.isNotEmpty &&

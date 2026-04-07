@@ -52,45 +52,69 @@ class _ParseDocsResult {
 }
 
 class MandiRatesRepository {
-  MandiRatesRepository({
-    FirebaseFirestore? db,
-  }) : _db = db ?? FirebaseFirestore.instance;
+  MandiRatesRepository({FirebaseFirestore? db})
+    : _db = db ?? FirebaseFirestore.instance;
 
   final FirebaseFirestore _db;
   static const String _primaryCollection = AppConstants.mandiRatesCollection;
-  static const String _legacyCollection = AppConstants.pakistanMandiRatesCollection;
+  static const String _legacyCollection =
+      AppConstants.pakistanMandiRatesCollection;
+  static const List<String> _punjabProvinceQueryValues = <String>[
+    'Punjab',
+    'punjab',
+    'پنجاب',
+  ];
 
   List<LiveMandiRate> _memoryCache = const <LiveMandiRate>[];
   MandiFetchTrace? _lastFetchTrace;
 
   MandiFetchTrace? get lastFetchTrace => _lastFetchTrace;
 
-  Stream<List<LiveMandiRate>> watchLiveRates({int limit = 150}) {
-    return _buildPrimaryQuery(limit: limit).snapshots().map((snapshot) {
-      final parsed = snapshot.docs
-          .map((doc) => LiveMandiRate.fromMap(doc.id, doc.data()))
-          .where((item) => item.price > 0)
-          .toList(growable: false);
+  Query<Map<String, dynamic>> _primaryPunjabScope() {
+    return _db
+        .collection(_primaryCollection)
+        .where('province', whereIn: _punjabProvinceQueryValues);
+  }
 
-      final deduped = _dedupe(parsed);
-      _memoryCache = deduped;
-      return deduped;
-    }).handleError((Object error, StackTrace stack) {
-      debugPrint('[MANDI_STREAM_ERROR] Firestore watchLiveRates error: $error');
-      throw error;
-    });
+  bool _isPunjabRate(LiveMandiRate item) {
+    final city = item.city.trim().toLowerCase();
+    final province = item.province.trim().toLowerCase();
+    if (city == 'karachi' || city == 'کراچی') {
+      return false;
+    }
+    return province == 'punjab' || province == 'پنجاب';
+  }
+
+  Stream<List<LiveMandiRate>> watchLiveRates({int limit = 150}) {
+    return _buildPrimaryQuery(limit: limit)
+        .snapshots()
+        .map((snapshot) {
+          final parsed = snapshot.docs
+              .map((doc) => LiveMandiRate.fromMap(doc.id, doc.data()))
+              .where((item) => item.price > 0)
+              .where(_isPunjabRate)
+              .toList(growable: false);
+
+          final deduped = _dedupe(parsed);
+          _memoryCache = deduped;
+          return deduped;
+        })
+        .handleError((Object error, StackTrace stack) {
+          debugPrint(
+            '[MANDI_STREAM_ERROR] Firestore watchLiveRates error: $error',
+          );
+          throw error;
+        });
   }
 
   Query<Map<String, dynamic>> _buildPrimaryQuery({required int limit}) {
-    return _db
-        .collection(_primaryCollection)
+    return _primaryPunjabScope()
         .orderBy('syncedAt', descending: true)
         .limit(limit);
   }
 
   Query<Map<String, dynamic>> _buildFallbackOrderQuery({required int limit}) {
-    return _db
-        .collection(_primaryCollection)
+    return _primaryPunjabScope()
         .orderBy('rateDate', descending: true)
         .limit(limit);
   }
@@ -119,6 +143,7 @@ class MandiRatesRepository {
     final items = snapshot.docs
         .map((doc) => LiveMandiRate.fromMap(doc.id, doc.data()))
         .where((item) => item.price > 0)
+        .where(_isPunjabRate)
         .toList(growable: false);
 
     final deduped = _dedupe(items);
@@ -170,12 +195,13 @@ class MandiRatesRepository {
     }
 
     if (location.locationAvailable) {
-      final nearestPriority = PakistanMandiPriorityRegistry.nearestCityCandidates(
-        latitude: location.latitude!,
-        longitude: location.longitude!,
-        excludeCity: city,
-        limit: 6,
-      );
+      final nearestPriority =
+          PakistanMandiPriorityRegistry.nearestCityCandidates(
+            latitude: location.latitude!,
+            longitude: location.longitude!,
+            excludeCity: city,
+            limit: 6,
+          );
       for (final nearestCity in nearestPriority) {
         for (final alias in _expandCityAliases(nearestCity)) {
           await addScope(
@@ -230,7 +256,10 @@ class MandiRatesRepository {
       'strictCity=${city.isEmpty ? 'none' : city}',
     );
     if (strictCityOnly.isNotEmpty) {
-      _memoryCache = _dedupe(<LiveMandiRate>[...strictCityOnly, ..._memoryCache]);
+      _memoryCache = _dedupe(<LiveMandiRate>[
+        ...strictCityOnly,
+        ..._memoryCache,
+      ]);
     }
     return strictCityOnly.take(targetCount).toList(growable: false);
   }
@@ -250,11 +279,14 @@ class MandiRatesRepository {
     }
     if (normalizedAliases.isEmpty) return rates;
 
-    return rates.where((rate) {
-      final rateCity = rate.city.trim().toLowerCase();
-      if (rateCity.isEmpty) return false;
-      return normalizedAliases.contains(rateCity);
-    }).toList(growable: false);
+    return rates
+        .where((rate) {
+          final rateCity = rate.city.trim().toLowerCase();
+          if (rateCity.isEmpty) return false;
+          if (!_isPunjabRate(rate)) return false;
+          return normalizedAliases.contains(rateCity);
+        })
+        .toList(growable: false);
   }
 
   Future<_QueryFetchResult> _fetchByFieldValue({
@@ -263,8 +295,7 @@ class MandiRatesRepository {
     required int limit,
   }) async {
     try {
-      final query = await _db
-          .collection(_primaryCollection)
+      final query = await _primaryPunjabScope()
           .where(field, isEqualTo: value)
           .orderBy('rateDate', descending: true)
           .limit(limit)
@@ -277,8 +308,7 @@ class MandiRatesRepository {
       );
     } catch (_) {
       try {
-        final query = await _db
-            .collection(_primaryCollection)
+        final query = await _primaryPunjabScope()
             .where(field, isEqualTo: value)
             .orderBy('syncedAt', descending: true)
             .limit(limit)
@@ -333,6 +363,7 @@ class MandiRatesRepository {
     final items = docs
         .map((doc) => LiveMandiRate.fromMap(doc.id, doc.data()))
         .where((item) => item.price > 0)
+        .where(_isPunjabRate)
         .toList(growable: false);
     return _ParseDocsResult(items: items, fetchedDocs: docs.length);
   }
@@ -368,28 +399,21 @@ class MandiRatesRepository {
 
     QuerySnapshot<Map<String, dynamic>>? fallbackPrimary;
     try {
-      fallbackPrimary = await _db
-          .collection(_primaryCollection)
-          .orderBy('syncedAt', descending: true)
-          .limit(120)
-          .get();
+      fallbackPrimary = await _buildPrimaryQuery(limit: 120).get();
     } catch (_) {
       try {
-        fallbackPrimary = await _db
-            .collection(_primaryCollection)
-            .orderBy('rateDate', descending: true)
-            .limit(120)
-            .get();
+        fallbackPrimary = await _buildFallbackOrderQuery(limit: 120).get();
       } catch (_) {
         fallbackPrimary = null;
       }
     }
-      var parsed = fallbackPrimary == null
+    var parsed = fallbackPrimary == null
         ? <LiveMandiRate>[]
         : fallbackPrimary.docs
-          .map((doc) => LiveMandiRate.fromMap(doc.id, doc.data()))
-          .where((item) => item.price > 0)
-          .toList(growable: false);
+              .map((doc) => LiveMandiRate.fromMap(doc.id, doc.data()))
+              .where((item) => item.price > 0)
+              .where(_isPunjabRate)
+              .toList(growable: false);
 
     if (parsed.isEmpty) {
       try {
@@ -401,6 +425,7 @@ class MandiRatesRepository {
         parsed = fallbackLegacy.docs
             .map((doc) => LiveMandiRate.fromMap(doc.id, doc.data()))
             .where((item) => item.price > 0)
+            .where(_isPunjabRate)
             .toList(growable: false);
       } catch (_) {
         parsed = const <LiveMandiRate>[];
@@ -410,6 +435,7 @@ class MandiRatesRepository {
     _memoryCache = _dedupe(parsed);
     return _memoryCache;
   }
+
   List<LiveMandiRate> _dedupe(List<LiveMandiRate> items) {
     final map = <String, LiveMandiRate>{};
     for (final item in items) {
@@ -446,7 +472,9 @@ class MandiRatesRepository {
     final normalized = PakistanMandiPriorityRegistry.normalizeCity(value);
     if (normalized.isNotEmpty) {
       final target = PakistanMandiPriorityRegistry.top25.firstWhere(
-        (item) => PakistanMandiPriorityRegistry.normalizeCity(item.city) == normalized,
+        (item) =>
+            PakistanMandiPriorityRegistry.normalizeCity(item.city) ==
+            normalized,
         orElse: () => PriorityMandiTarget(
           city: value,
           district: value,

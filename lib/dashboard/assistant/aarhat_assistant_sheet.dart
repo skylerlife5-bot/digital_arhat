@@ -1,6 +1,11 @@
+import 'dart:async';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 
 import '../../routes.dart';
+import '../../services/ai_generative_service.dart';
 import '../../theme/app_colors.dart';
 import 'assistant_mandi_icon.dart';
 import 'assistant_prefs_service.dart';
@@ -42,10 +47,7 @@ class _QuickActionDef {
 }
 
 class AarhatAssistantSheet extends StatefulWidget {
-  const AarhatAssistantSheet({
-    super.key,
-    required this.userData,
-  });
+  const AarhatAssistantSheet({super.key, required this.userData});
 
   final Map<String, dynamic> userData;
 
@@ -68,6 +70,12 @@ class AarhatAssistantSheet extends StatefulWidget {
 
 class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
     with SingleTickerProviderStateMixin {
+  static const List<String> _punjabProvinceQueryValues = <String>[
+    'Punjab',
+    'punjab',
+    'پنجاب',
+  ];
+
   late final AnimationController _animCtrl;
   late final Animation<Offset> _slideAnim;
   late final Animation<double> _fadeAnim;
@@ -75,12 +83,26 @@ class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
   late final List<Animation<Offset>> _cardSlideAnims;
 
   final TextEditingController _chatCtrl = TextEditingController();
+  final MandiIntelligenceService _aiService = MandiIntelligenceService();
 
   late final AssistantUserRole _role;
   late final List<_QuickActionDef> _actions;
 
   _AssistantAction? _activeAction;
   String? _chatResponse;
+  bool _isChatLoading = false;
+  Timer? _typingTimer;
+  int _typingPhase = 0;
+
+  static const Duration _liveContextTtl = Duration(minutes: 3);
+  static String? _cachedLiveMarketContext;
+  static DateTime? _cachedLiveMarketContextAt;
+  static Future<String>? _liveMarketContextInFlight;
+
+  static const String _madadgarSystemInstruction =
+      "System Instruction: 'You are the official Digital Arhat Support Assistant. You help farmers, buyers, and sellers in Pakistan use the app. Speak in highly polite, natural Roman Urdu or Urdu script depending on the user's input. Be concise and professional. You understand terms like Kachi Arhat, Pakki Arhat, and Mandi rates. If asked a question unrelated to agriculture, the app, or farming, politely decline to answer.'";
+  static const String _liveContextUsageInstruction =
+      "Always use the provided Live Market Context to answer rate queries. If the requested rate is not in the context, tell the user you don't have today's rate for that item.";
 
   int _auctionStep = 0;
   String? _auctionItemType;
@@ -116,22 +138,23 @@ class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
     );
     _cardSlideAnims = List.generate(
       _actions.length,
-      (i) => Tween<Offset>(
-        begin: const Offset(0, 0.12),
-        end: Offset.zero,
-      ).animate(
-        CurvedAnimation(
-          parent: _animCtrl,
-          curve: Interval(
-            0.06 + i * 0.06,
-            (0.40 + i * 0.06).clamp(0.0, 1.0),
-            curve: Curves.easeOutCubic,
+      (i) =>
+          Tween<Offset>(begin: const Offset(0, 0.12), end: Offset.zero).animate(
+            CurvedAnimation(
+              parent: _animCtrl,
+              curve: Interval(
+                0.06 + i * 0.06,
+                (0.40 + i * 0.06).clamp(0.0, 1.0),
+                curve: Curves.easeOutCubic,
+              ),
+            ),
           ),
-        ),
-      ),
     );
 
     _animCtrl.forward();
+
+    // Warm cache in background so first user query is fast.
+    unawaited(_getLiveMarketContext());
 
     AssistantPrefsService.markUsed();
     _markRoleTipSeen();
@@ -153,6 +176,7 @@ class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
   void dispose() {
     _animCtrl.dispose();
     _chatCtrl.dispose();
+    _typingTimer?.cancel();
     super.dispose();
   }
 
@@ -423,10 +447,8 @@ class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
       runSpacing: 8,
       children: chips
           .map(
-            (chip) => _chipBtn(
-              label: chip.$1,
-              onTap: () => _selectAction(chip.$2),
-            ),
+            (chip) =>
+                _chipBtn(label: chip.$1, onTap: () => _selectAction(chip.$2)),
           )
           .toList(growable: false),
     );
@@ -488,22 +510,22 @@ class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
   }
 
   Widget _resultTitle(String text) => Text(
-        text,
-        style: const TextStyle(
-          color: AppColors.primaryText,
-          fontWeight: FontWeight.w800,
-          fontSize: 13.5,
-        ),
-      );
+    text,
+    style: const TextStyle(
+      color: AppColors.primaryText,
+      fontWeight: FontWeight.w800,
+      fontSize: 13.5,
+    ),
+  );
 
   Widget _resultBody(String text) => Text(
-        text,
-        style: const TextStyle(
-          color: AppColors.secondaryText,
-          fontSize: 12.2,
-          height: 1.42,
-        ),
-      );
+    text,
+    style: const TextStyle(
+      color: AppColors.secondaryText,
+      fontSize: 12.2,
+      height: 1.42,
+    ),
+  );
 
   Widget _primaryBtn({
     required String label,
@@ -697,11 +719,7 @@ class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
             Wrap(
               spacing: 8,
               runSpacing: 8,
-              children: [
-                'فصل',
-                'مویشی',
-                'دیگر',
-              ]
+              children: ['فصل', 'مویشی', 'دیگر']
                   .map(
                     (label) => _chipBtn(
                       label: label,
@@ -776,7 +794,9 @@ class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
         children: [
           _resultTitle('لسٹنگ بہتر کیسے بنے؟'),
           const SizedBox(height: 10),
-          _resultBody('1) واضح تصویر اور درست مقام شامل کریں\n2) صاف عنوان لکھیں\n3) منڈی ریٹ کے قریب قیمت رکھیں\n4) ضرورت ہو تو نمایاں لسٹنگ منتخب کریں'),
+          _resultBody(
+            '1) واضح تصویر اور درست مقام شامل کریں\n2) صاف عنوان لکھیں\n3) منڈی ریٹ کے قریب قیمت رکھیں\n4) ضرورت ہو تو نمایاں لسٹنگ منتخب کریں',
+          ),
           const SizedBox(height: 12),
           _secondaryBtn(
             label: 'لسٹنگ کھولیں',
@@ -892,7 +912,9 @@ class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
         children: [
           _resultTitle('قریبی لسٹنگ دیکھیں'),
           const SizedBox(height: 8),
-          _resultBody('اپنے قریب موجود لسٹنگ سے نقل و حمل کم رہتی ہے اور سودا جلدی ممکن ہوتا ہے۔ ہوم میں قریبی حصے کو دیکھیں۔'),
+          _resultBody(
+            'اپنے قریب موجود لسٹنگ سے نقل و حمل کم رہتی ہے اور سودا جلدی ممکن ہوتا ہے۔ ہوم میں قریبی حصے کو دیکھیں۔',
+          ),
         ],
       ),
     );
@@ -905,7 +927,9 @@ class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
         children: [
           _resultTitle('فروخت کنندہ سے رابطہ'),
           const SizedBox(height: 8),
-          _resultBody('ہمیشہ محفوظ رابطے کے ذریعے بات کریں، پیشگی ادائیگی احتیاط سے کریں، اور مشکوک سودے کی اطلاع دیں۔'),
+          _resultBody(
+            'ہمیشہ محفوظ رابطے کے ذریعے بات کریں، پیشگی ادائیگی احتیاط سے کریں، اور مشکوک سودے کی اطلاع دیں۔',
+          ),
         ],
       ),
     );
@@ -918,7 +942,9 @@ class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
         children: [
           _resultTitle('یہ ایپ کیسے کام کرتی ہے؟'),
           const SizedBox(height: 8),
-          _resultBody('یہاں آپ خرید و فروخت دونوں کر سکتے ہیں۔ پہلے منڈی دیکھیں، پھر ضرورت کے مطابق خریدار یا فروخت کنندہ پروفائل بنائیں۔'),
+          _resultBody(
+            'یہاں آپ خرید و فروخت دونوں کر سکتے ہیں۔ پہلے منڈی دیکھیں، پھر ضرورت کے مطابق خریدار یا فروخت کنندہ پروفائل بنائیں۔',
+          ),
         ],
       ),
     );
@@ -931,7 +957,9 @@ class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
         children: [
           _resultTitle('خریدار یا فروخت کنندہ؟'),
           const SizedBox(height: 8),
-          _resultBody('اگر آپ مال بیچنا چاہتے ہیں تو فروخت کنندہ بنیں۔ اگر خریدنا چاہتے ہیں تو خریدار بنیں۔ بعد میں کردار تبدیل بھی کیا جا سکتا ہے۔'),
+          _resultBody(
+            'اگر آپ مال بیچنا چاہتے ہیں تو فروخت کنندہ بنیں۔ اگر خریدنا چاہتے ہیں تو خریدار بنیں۔ بعد میں کردار تبدیل بھی کیا جا سکتا ہے۔',
+          ),
           const SizedBox(height: 12),
           _primaryBtn(
             label: 'اکاؤنٹ بنانے کی رہنمائی',
@@ -953,7 +981,9 @@ class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
         children: [
           _resultTitle('منڈی دیکھیں'),
           const SizedBox(height: 8),
-          _resultBody('مارکیٹ میں نئی لسٹنگز، فیچرڈ آئٹمز اور قریبی منڈی ریٹ دیکھیں۔ پھر مناسب قدم منتخب کریں۔'),
+          _resultBody(
+            'مارکیٹ میں نئی لسٹنگز، فیچرڈ آئٹمز اور قریبی منڈی ریٹ دیکھیں۔ پھر مناسب قدم منتخب کریں۔',
+          ),
           const SizedBox(height: 12),
           _primaryBtn(
             label: 'منڈی کھولیں',
@@ -990,22 +1020,40 @@ class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: AppColors.softGlassBorder),
             ),
-            child: Text(
-              _chatResponse!,
-              style: const TextStyle(
-                color: AppColors.primaryText,
-                fontSize: 12.4,
-                height: 1.35,
+            child: MarkdownBody(
+              data: _chatResponse!,
+              selectable: true,
+              styleSheet: MarkdownStyleSheet(
+                p: const TextStyle(
+                  color: AppColors.primaryText,
+                  fontSize: 12.4,
+                  height: 1.35,
+                ),
+                strong: const TextStyle(
+                  color: AppColors.primaryText,
+                  fontWeight: FontWeight.w800,
+                ),
+                listBullet: const TextStyle(
+                  color: AppColors.primaryText,
+                  fontSize: 12.4,
+                ),
               ),
             ),
           ),
+        ],
+        if (_isChatLoading) ...[
+          _buildTypingIndicator(),
+          const SizedBox(height: 8),
         ],
         Row(
           children: [
             Expanded(
               child: TextField(
                 controller: _chatCtrl,
-                style: const TextStyle(color: AppColors.primaryText, fontSize: 13),
+                style: const TextStyle(
+                  color: AppColors.primaryText,
+                  fontSize: 13,
+                ),
                 decoration: InputDecoration(
                   hintText: 'اپنا سوال یہاں لکھیں',
                   hintStyle: const TextStyle(
@@ -1015,8 +1063,10 @@ class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
                   filled: true,
                   fillColor: AppColors.cardSurface,
                   isDense: true,
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 11,
+                  ),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                     borderSide: const BorderSide(color: AppColors.divider),
@@ -1032,14 +1082,17 @@ class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
                 ),
                 onSubmitted: (_) => _submitChat(),
                 textInputAction: TextInputAction.send,
+                enabled: !_isChatLoading,
               ),
             ),
             const SizedBox(width: 8),
             Material(
-              color: AppColors.accentGold,
+              color: _isChatLoading
+                  ? AppColors.accentGold.withValues(alpha: 0.5)
+                  : AppColors.accentGold,
               borderRadius: BorderRadius.circular(12),
               child: InkWell(
-                onTap: _submitChat,
+                onTap: _isChatLoading ? null : _submitChat,
                 borderRadius: BorderRadius.circular(12),
                 child: const Padding(
                   padding: EdgeInsets.all(11),
@@ -1057,25 +1110,238 @@ class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
     );
   }
 
-  void _submitChat() {
+  Widget _buildTypingIndicator() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+      margin: const EdgeInsets.only(bottom: 2),
+      decoration: BoxDecoration(
+        color: AppColors.cardSurface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.softGlassBorder),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: List<Widget>.generate(3, (int i) {
+          final bool active = _typingPhase == i;
+          return AnimatedContainer(
+            duration: const Duration(milliseconds: 220),
+            margin: const EdgeInsets.only(right: 6),
+            width: active ? 9 : 7,
+            height: active ? 9 : 7,
+            decoration: BoxDecoration(
+              color: active
+                  ? AppColors.accentGold
+                  : AppColors.primaryText.withValues(alpha: 0.35),
+              shape: BoxShape.circle,
+            ),
+          );
+        }),
+      ),
+    );
+  }
+
+  bool _containsUrduScript(String text) {
+    return RegExp(r'[\u0600-\u06FF]').hasMatch(text);
+  }
+
+  bool _liveContextCacheFresh() {
+    final at = _cachedLiveMarketContextAt;
+    if (at == null) return false;
+    return DateTime.now().difference(at) <= _liveContextTtl;
+  }
+
+  String _pickFirstNonEmptyString(
+    Map<String, dynamic> data,
+    List<String> keys,
+  ) {
+    for (final key in keys) {
+      final value = (data[key] ?? '').toString().trim();
+      if (value.isNotEmpty) {
+        return value;
+      }
+    }
+    return '';
+  }
+
+  double? _toDouble(dynamic value) {
+    if (value == null) return null;
+    if (value is num) return value.toDouble();
+    final cleaned = value.toString().replaceAll(',', '').trim();
+    return double.tryParse(cleaned);
+  }
+
+  String _formatRate(double value) {
+    if (value == value.roundToDouble()) {
+      return value.toStringAsFixed(0);
+    }
+    return value.toStringAsFixed(2);
+  }
+
+  Future<QuerySnapshot<Map<String, dynamic>>> _fetchRateSnapshot() async {
+    final col = FirebaseFirestore.instance
+        .collection('mandi_rates')
+        .where('province', whereIn: _punjabProvinceQueryValues);
+    try {
+      return await col
+          .orderBy('rateDate', descending: true)
+          .limit(14)
+          .get()
+          .timeout(const Duration(milliseconds: 1300));
+    } catch (_) {
+      try {
+        return await col
+            .orderBy('updatedAt', descending: true)
+            .limit(14)
+            .get()
+            .timeout(const Duration(milliseconds: 1300));
+      } catch (_) {
+        return await col
+            .limit(14)
+            .get()
+            .timeout(const Duration(milliseconds: 1300));
+      }
+    }
+  }
+
+  Future<String> _fetchLiveMarketContextFromFirestore() async {
+    final snapshot = await _fetchRateSnapshot();
+    final entries = <String>[];
+
+    for (final doc in snapshot.docs) {
+      final data = doc.data();
+      final normalizedCity = (data['city'] ?? '')
+          .toString()
+          .trim()
+          .toLowerCase();
+      if (normalizedCity == 'karachi' || normalizedCity == 'کراچی') {
+        continue;
+      }
+      final commodity = _pickFirstNonEmptyString(data, const <String>[
+        'commodityName',
+        'cropType',
+        'itemName',
+        'product',
+        'commodity',
+        'name',
+      ]);
+      final city = _pickFirstNonEmptyString(data, const <String>[
+        'city',
+        'district',
+        'marketName',
+        'mandiName',
+      ]);
+      final rate =
+          _toDouble(data['price']) ??
+          _toDouble(data['averagePrice']) ??
+          _toDouble(data['rate']) ??
+          _toDouble(data['pricePerUnit']) ??
+          _toDouble(data['fqp']);
+
+      if (commodity.isEmpty || city.isEmpty || rate == null || rate <= 0) {
+        continue;
+      }
+
+      entries.add('$city $commodity ${_formatRate(rate)} Rs');
+      if (entries.length >= 8) break;
+    }
+
+    if (entries.isEmpty) {
+      return 'Live Market Context: unavailable.';
+    }
+    return 'Live Market Context: ${entries.join(', ')}.';
+  }
+
+  Future<String> _getLiveMarketContext() async {
+    if (_liveContextCacheFresh() &&
+        (_cachedLiveMarketContext ?? '').trim().isNotEmpty) {
+      return _cachedLiveMarketContext!;
+    }
+
+    if (_liveMarketContextInFlight != null) {
+      return _liveMarketContextInFlight!;
+    }
+
+    _liveMarketContextInFlight = (() async {
+      try {
+        final context = await _fetchLiveMarketContextFromFirestore();
+        _cachedLiveMarketContext = context;
+        _cachedLiveMarketContextAt = DateTime.now();
+        return context;
+      } catch (_) {
+        return _cachedLiveMarketContext ?? 'Live Market Context: unavailable.';
+      } finally {
+        _liveMarketContextInFlight = null;
+      }
+    })();
+
+    return _liveMarketContextInFlight!;
+  }
+
+  void _setChatLoading(bool value) {
+    if (!mounted) return;
+    if (value) {
+      _typingTimer?.cancel();
+      _typingPhase = 0;
+      _typingTimer = Timer.periodic(const Duration(milliseconds: 340), (_) {
+        if (!mounted) return;
+        setState(() {
+          _typingPhase = (_typingPhase + 1) % 3;
+        });
+      });
+      setState(() {
+        _isChatLoading = true;
+      });
+      return;
+    }
+
+    _typingTimer?.cancel();
+    _typingTimer = null;
+    setState(() {
+      _isChatLoading = false;
+      _typingPhase = 0;
+    });
+  }
+
+  Future<void> _submitChat() async {
     final q = _chatCtrl.text.trim();
-    if (q.isEmpty) return;
+    if (q.isEmpty || _isChatLoading) return;
     _chatCtrl.clear();
     FocusScope.of(context).unfocus();
 
-    final lower = q.toLowerCase();
-    String response;
-    if (lower.contains('rate') || lower.contains('ریٹ') || lower.contains('قیمت')) {
-      response = 'پہلے منڈی ریٹ دیکھیں، پھر قیمت یا بولی طے کریں۔ اوپر "منڈی ریٹ دیکھیں" سے فوری رہنمائی ملے گی۔';
-    } else if (lower.contains('boli') || lower.contains('bid') || lower.contains('auction') || lower.contains('بولی')) {
-      response = 'بولی میں وقت ختم ہونے سے پہلے مناسب قیمت دیں۔ اوپر "بولی کیسے لگتی ہے؟" سے آسان طریقہ دیکھیں۔';
-    } else if (lower.contains('listing') || lower.contains('sell') || lower.contains('لسٹنگ')) {
-      response = 'اپنا مال شامل کرنے کے لیے اوپر "لسٹنگ کیسے پوسٹ ہوتی ہے؟" کھولیں، مرحلہ وار رہنمائی مل جائے گی۔';
-    } else {
-      response = 'آپ کا سوال موصول ہوا۔ اوپر موجود رہنمائی کارڈز سے متعلقہ معلومات فوراً دیکھیں۔';
-    }
+    _setChatLoading(true);
 
-    setState(() => _chatResponse = response);
+    try {
+      final liveMarketContext = await _getLiveMarketContext().timeout(
+        const Duration(milliseconds: 1500),
+        onTimeout: () =>
+            _cachedLiveMarketContext ?? 'Live Market Context: unavailable.',
+      );
+      final languageHint = _containsUrduScript(q)
+          ? 'User input uses Urdu script. Reply naturally in Urdu script.'
+          : 'User input uses Roman/English script. Reply naturally in polite Roman Urdu.';
+      final prompt =
+          '$_madadgarSystemInstruction\n$_liveContextUsageInstruction\n$languageHint\n$liveMarketContext\n\nUser query:\n$q';
+
+      final response = await _aiService.getAIResponse(prompt);
+      final text = response.trim().isEmpty
+          ? 'معذرت، اس وقت جواب دستیاب نہیں۔ براہِ کرم دوبارہ کوشش کریں۔'
+          : response.trim();
+
+      if (!mounted) return;
+      setState(() {
+        _chatResponse = text;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _chatResponse = _containsUrduScript(q)
+            ? 'معذرت، ابھی جواب دینے میں مسئلہ آرہا ہے۔ براہِ کرم کچھ دیر بعد دوبارہ کوشش کریں۔'
+            : 'Maazrat, is waqt jawab dene mein masla aa raha hai. Meharbani karke thori dair baad dobara koshish karein.';
+      });
+    } finally {
+      _setChatLoading(false);
+    }
   }
 }
 

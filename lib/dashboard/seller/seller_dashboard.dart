@@ -33,16 +33,15 @@ class _SellerDashboardState extends State<SellerDashboard> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeShowAssistantWelcome());
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _maybeShowAssistantWelcome(),
+    );
   }
 
   Future<void> _maybeShowAssistantWelcome() async {
     final seen = await AssistantPrefsService.hasSeenWelcome();
     if (seen || !mounted) return;
-    await AarhatAssistantWelcomeSheet.show(
-      context,
-      userData: widget.userData,
-    );
+    await AarhatAssistantWelcomeSheet.show(context, userData: widget.userData);
   }
 
   String get _sellerUid {
@@ -169,17 +168,11 @@ class _SellerDashboardState extends State<SellerDashboard> {
           actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           title: const Text(
             'Logout / لاگ آؤٹ',
-            style: TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w800,
-            ),
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
           ),
           content: const Text(
             'Are you sure you want to log out?\nکیا آپ واقعی لاگ آؤٹ کرنا چاہتے ہیں؟',
-            style: TextStyle(
-              color: Colors.white70,
-              height: 1.35,
-            ),
+            style: TextStyle(color: Colors.white70, height: 1.35),
           ),
           actions: <Widget>[
             TextButton(
@@ -220,13 +213,16 @@ class _SellerDashboardState extends State<SellerDashboard> {
         elevation: 0,
         backgroundColor: Colors.transparent,
         titleSpacing: 12,
-        title: const Text(
-          'Seller Dashboard / سیلر ڈیش بورڈ',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            color: AppColors.primaryText,
-            fontWeight: FontWeight.w700,
+        title: const FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(
+            'Seller Dashboard / سیلر ڈیش بورڈ',
+            maxLines: 1,
+            style: TextStyle(
+              color: AppColors.primaryText,
+              fontWeight: FontWeight.w700,
+            ),
           ),
         ),
         actions: [
@@ -242,7 +238,7 @@ class _SellerDashboardState extends State<SellerDashboard> {
         onRefresh: _refreshDashboard,
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(14, 10, 14, 24),
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 100),
           children: [
             _buildPendingVerificationBanner(),
             _buildGreetingCard(),
@@ -376,13 +372,16 @@ class _SellerDashboardState extends State<SellerDashboard> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          'Assalam-o-Alaikum / السلام علیکم',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: AppColors.secondaryText,
-                            fontSize: 13,
+                        const FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            'Assalam-o-Alaikum / السلام علیکم',
+                            maxLines: 1,
+                            style: TextStyle(
+                              color: AppColors.secondaryText,
+                              fontSize: 13,
+                            ),
                           ),
                         ),
                         const SizedBox(height: 4),
@@ -752,8 +751,7 @@ class _SellerDashboardState extends State<SellerDashboard> {
                       alerts.add(
                         const _ActionAlert(
                           title: 'Price Alert / قیمت الرٹ',
-                          subtitle:
-                              'کچھ ریٹس مارکیٹ قیمت سے نمایاں مختلف ہیں',
+                          subtitle: 'کچھ ریٹس مارکیٹ قیمت سے نمایاں مختلف ہیں',
                           color: Color(0xFFFFA726),
                           icon: Icons.trending_down_rounded,
                         ),
@@ -773,8 +771,7 @@ class _SellerDashboardState extends State<SellerDashboard> {
                       alerts.add(
                         const _ActionAlert(
                           title: 'Security Alert / سیکیورٹی الرٹ',
-                          subtitle:
-                              'نظام نے ممکنہ مشکوک سرگرمی نشان زد کی',
+                          subtitle: 'نظام نے ممکنہ مشکوک سرگرمی نشان زد کی',
                           color: Color(0xFFE53935),
                           icon: Icons.report_problem_rounded,
                         ),
@@ -985,9 +982,7 @@ class _SellerDashboardState extends State<SellerDashboard> {
             style: TextStyle(color: _gold, fontWeight: FontWeight.w700),
           ),
           SizedBox(height: 8),
-          _StatusOkLine(
-            text: 'Listings are verified / لسٹنگز تصدیق شدہ ہیں',
-          ),
+          _StatusOkLine(text: 'Listings are verified / لسٹنگز تصدیق شدہ ہیں'),
           _StatusOkLine(text: 'No fraud flags / کوئی فراڈ الرٹ موجود نہیں'),
           _StatusOkLine(
             text:
@@ -1020,13 +1015,11 @@ class _SellerDashboardState extends State<SellerDashboard> {
           children: const [
             _SecurePoint(
               en: 'Buyer and seller connect directly after bid acceptance',
-              ur:
-                  'بولی منظور ہونے کے بعد خریدار اور فروخت کنندہ براہِ راست رابطہ کرتے ہیں',
+              ur: 'بولی منظور ہونے کے بعد خریدار اور فروخت کنندہ براہِ راست رابطہ کرتے ہیں',
             ),
             _SecurePoint(
               en: 'Verify listing and contact details before completing the deal',
-              ur:
-                  'لسٹنگ اور رابطے کی تصدیق کے بعد سودا مکمل کریں',
+              ur: 'لسٹنگ اور رابطے کی تصدیق کے بعد سودا مکمل کریں',
             ),
             _SecurePoint(
               en: 'The system actively monitors suspicious activity',
@@ -1051,8 +1044,10 @@ class _SellerDashboardState extends State<SellerDashboard> {
   }
 
   String _resolveVerificationStatus(Map<String, dynamic> data) {
-    final status =
-        (data['verificationStatus'] ?? '').toString().trim().toLowerCase();
+    final status = (data['verificationStatus'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
     if (status == 'approved' || status == 'verified') return 'approved';
     if (status == 'rejected') return 'rejected';
     return 'pending';
@@ -1067,8 +1062,10 @@ class _SellerDashboardState extends State<SellerDashboard> {
 
   Future<Map<String, dynamic>> _loadSellerProfile() async {
     if (_sellerUid.isEmpty) return widget.userData;
-    final doc =
-        await FirebaseFirestore.instance.collection('users').doc(_sellerUid).get();
+    final doc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(_sellerUid)
+        .get();
     return doc.data() ?? widget.userData;
   }
 

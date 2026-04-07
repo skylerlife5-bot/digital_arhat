@@ -303,7 +303,7 @@ service cloud.firestore {
 
     match /mandi_rates/{rateId} {
       allow read: if true;
-      allow write: if true;
+      allow write: if isAdminUid();
     }
 
     match /pakistan_mandi_rates/{rateId} {

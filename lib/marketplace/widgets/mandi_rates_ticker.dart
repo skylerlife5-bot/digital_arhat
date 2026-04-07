@@ -21,7 +21,7 @@ const List<String> _pulseMessages = <String>[
 ///
 /// Two kinds of items are rendered:
 /// 1. **Price row** — only when [rate.isTickerPriceEligible] is true:
-///    `گندم • گوجرانوالہ • Rs. 3800 • per_100kg`
+///    `گندم • Rs. 3800 • منڈی، گوجرانوالہ`
 /// 2. **Pulse message** — when confidence is too low to show a numeric price:
 ///    `مارکیٹ پلس: پاکستان کے سرکاری نرخ جاری ہیں`
 sealed class _TickerItem {
@@ -337,8 +337,7 @@ String _cityFallbackMessage(LiveMandiRate rate) {
 String _normalizeTickerCityLabel(String cityDisplay) {
   final city = cityDisplay.trim();
   if (city.isEmpty || city == 'پاکستان') return 'پاکستان';
-  if (city.contains('منڈی')) return city;
-  return 'منڈی، $city';
+  return city.replaceAll('منڈی،', '').replaceAll('منڈی', '').trim();
 }
 
 bool _isWheatTickerLine(_TickerDisplayCandidate item) {
@@ -437,11 +436,14 @@ List<_TickerItem> _buildTickerItems(List<LiveMandiRate> rates) {
     final bool isWheat =
         MandiHomePresenter.isWheatRate(rate) || commodityUrdu == 'گندم';
     final String forcedCommodity = isWheat ? 'گندم' : commodityUrdu;
-    final String forcedCity = normalizedCity == 'پاکستان'
-        ? 'منڈی، پاکستان'
+    final String forcedCity = normalizedCity.isEmpty
+        ? 'پاکستان'
         : normalizedCity;
-    final String line = _forceReplaceEnglishCommoditySegments(
-      '$forcedCommodity • $forcedCity • ${row.priceDisplay}',
+    final String line = MandiDisplayUtils.formatUrduRateLine(
+      commodity: _forceReplaceEnglishCommoditySegments(forcedCommodity),
+      price: rate.price,
+      unitRaw: rate.unit,
+      city: forcedCity,
     );
     final String dedupeKey = buildTickerDisplayKeyForDedupe(
       commodityUrdu: commodityUrdu,
@@ -725,6 +727,7 @@ class _MandiRatesTickerState extends State<MandiRatesTicker> {
         maxLines: 1,
         overflow: TextOverflow.fade,
         softWrap: false,
+        textDirection: TextDirection.rtl,
         style: TextStyle(
           color: Colors.white.withValues(alpha: 0.72),
           fontSize: 11.2,
@@ -822,20 +825,20 @@ class _MandiRatesTickerState extends State<MandiRatesTicker> {
                 return Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 4),
                   child: switch (item) {
-                  _PriceTickerItem(
-                    :final rate,
-                    :final displayLine,
-                    :final displayPriority,
-                  ) =>
-                    _buildPriceWidget(
-                      rate: rate,
-                      line: displayLine,
-                      displayPriority: displayPriority,
+                    _PriceTickerItem(
+                      :final rate,
+                      :final displayLine,
+                      :final displayPriority,
+                    ) =>
+                      _buildPriceWidget(
+                        rate: rate,
+                        line: displayLine,
+                        displayPriority: displayPriority,
+                      ),
+                    _PulseTickerItem(:final message) => _buildPulseWidget(
+                      message,
                     ),
-                  _PulseTickerItem(:final message) => _buildPulseWidget(
-                    message,
-                  ),
-                },
+                  },
                 );
               },
             ),

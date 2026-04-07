@@ -2328,8 +2328,9 @@ class _AddListingScreenState extends State<AddListingScreen> {
           }
 
           if ((plan.applied['localArea'] ?? '').toString().trim().isNotEmpty) {
-            _localAreaController.text = (plan.applied['localArea'] as String)
-                .trim();
+            final mergedVillage = (plan.applied['localArea'] as String).trim();
+            _localAreaController.text = mergedVillage;
+            _villageController.text = mergedVillage;
             changed = true;
             debugPrint('[VoiceListing] applied_field=localArea');
           }
@@ -2504,6 +2505,10 @@ class _AddListingScreenState extends State<AddListingScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
+          if (_isVoiceListening) ...<Widget>[
+            const _VoiceListeningPulse(),
+            const SizedBox(height: 10),
+          ],
           ElevatedButton.icon(
             onPressed:
                 (_isSubmitting || _isVoiceAssistLoading || _isVoiceListening)
@@ -2529,6 +2534,10 @@ class _AddListingScreenState extends State<AddListingScreen> {
               style: TextStyle(fontWeight: FontWeight.w700),
             ),
           ),
+          if (_isVoiceAssistLoading) ...<Widget>[
+            const SizedBox(height: 8),
+            const _VoiceProcessingShimmer(),
+          ],
           const SizedBox(height: 6),
           Text(
             'Bolain, hum details samajh kar form bhar denge',
@@ -2725,6 +2734,10 @@ class _AddListingScreenState extends State<AddListingScreen> {
   }
 
   String _resolveCityForPayload() {
+    final typedCity = _cityController.text.trim();
+    if (typedCity.isNotEmpty) {
+      return typedCity;
+    }
     return (_selectedCity ?? '').trim();
   }
 
@@ -3291,7 +3304,7 @@ class _AddListingScreenState extends State<AddListingScreen> {
     );
 
     final bool requestedFeaturedListing = _featuredListing;
-    
+
     // CRITICAL: Featured listing requires valid payment data
     if (requestedFeaturedListing && _featuredPaymentData == null) {
       if (!mounted) return;
@@ -3310,7 +3323,7 @@ class _AddListingScreenState extends State<AddListingScreen> {
       });
       return;
     }
-    
+
     // Validate payment data if featured is requested
     if (requestedFeaturedListing && _featuredPaymentData != null) {
       if (!_featuredPaymentData!.isComplete) {
@@ -3347,9 +3360,7 @@ class _AddListingScreenState extends State<AddListingScreen> {
     if (resolvedCity.length < 2) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('City required / شہر منتخب کریں'),
-        ),
+        const SnackBar(content: Text('City required / شہر منتخب کریں')),
       );
       setState(() {
         _isSubmitting = false;
@@ -3376,7 +3387,9 @@ class _AddListingScreenState extends State<AddListingScreen> {
       tehsil: resolvedTehsil,
       district: resolvedDistrict,
     );
-    final String resolvedVillage = _villageController.text.trim();
+    final String resolvedVillage = _villageController.text.trim().isNotEmpty
+        ? _villageController.text.trim()
+        : _localAreaController.text.trim();
 
     final normalizedUnitType = MandiUnitMapper.normalizeUnitType(
       rawUnit: _selectedUnitType.wireValue,
@@ -3487,7 +3500,10 @@ class _AddListingScreenState extends State<AddListingScreen> {
       'paymentRef': requestedFeaturedListing && _featuredPaymentData != null
           ? _featuredPaymentData!.paymentRef
           : null,
-      'paymentProofFileName': requestedFeaturedListing && _featuredPaymentData != null && _featuredPaymentData!.proofImage != null
+      'paymentProofFileName':
+          requestedFeaturedListing &&
+              _featuredPaymentData != null &&
+              _featuredPaymentData!.proofImage != null
           ? _featuredPaymentData!.proofImage!.name
           : null,
       'promotionPaymentSubmittedAt': promotionRequested
@@ -3562,7 +3578,10 @@ class _AddListingScreenState extends State<AddListingScreen> {
       'images': _allListingImages,
       'video': _video,
       'audioPath': _recordedAudioPath,
-      'paymentProofImage': requestedFeaturedListing && _featuredPaymentData != null && _featuredPaymentData!.proofImage != null
+      'paymentProofImage':
+          requestedFeaturedListing &&
+              _featuredPaymentData != null &&
+              _featuredPaymentData!.proofImage != null
           ? _featuredPaymentData!.proofImage
           : null,
     };
@@ -3926,7 +3945,7 @@ class _AddListingScreenState extends State<AddListingScreen> {
       validator: (_) => validator?.call(value),
       builder: (fieldState) {
         return InkWell(
-            onTap: (_isSubmitting || !enabled)
+          onTap: (_isSubmitting || !enabled)
               ? null
               : () => _openSearchSheet(
                   title: label,
@@ -4856,7 +4875,9 @@ class _AddListingScreenState extends State<AddListingScreen> {
                           decimal: true,
                         ),
                         style: const TextStyle(color: AppColors.primaryText),
-                        decoration: _fieldDecoration('Price (Rs.) / قیمت'),
+                        decoration: _fieldDecoration(
+                          'Price per Unit (Rs.) / فی اکائی قیمت',
+                        ),
                         validator: (value) {
                           if ((value ?? '').trim().isEmpty) {
                             return 'Price is required / قیمت لازمی ہے';
@@ -4934,50 +4955,39 @@ class _AddListingScreenState extends State<AddListingScreen> {
                               _selectedTehsil = selected;
                               _selectedCity = null;
                               _cityController.clear();
-                              _localAreaController.clear();
                               _fraudPrecheck = _runFraudPrecheck();
                             });
                           },
                         ),
-                        second: _buildSearchableSelectorField(
-                          label: 'City / شہر',
-                          value: _selectedCity,
-                          options: _cityOptions,
-                          optionLabelBuilder: _locationOptionLabel,
-                          helperText: (_selectedTehsil ?? '').trim().isEmpty
-                              ? 'Tehsil pehle select karein / پہلے تحصیل منتخب کریں'
-                              : 'City required / شہر منتخب کریں',
-                          enabled:
-                              (_selectedTehsil ?? '').trim().isNotEmpty,
-                          validator: (_) {
-                            if ((_selectedCity ?? '').trim().isEmpty) {
-                              return 'City required / شہر منتخب کریں';
+                        second: TextFormField(
+                          controller: _cityController,
+                          style: const TextStyle(color: AppColors.primaryText),
+                          decoration: _fieldDecoration(
+                            'City / شہر',
+                            helperText: 'Type city manually / شہر خود لکھیں',
+                          ),
+                          validator: (value) {
+                            if ((value ?? '').trim().isEmpty) {
+                              return 'City required / شہر درج کریں';
                             }
                             return null;
                           },
-                          onSelected: (selected) {
+                          onChanged: (value) {
                             setState(() {
-                              _selectedCity = selected.trim();
-                              _cityController.text = selected.trim();
+                              _selectedCity = value.trim();
                               _fraudPrecheck = _runFraudPrecheck();
                             });
-                            unawaited(_refreshMarketIntelligence());
                           },
                         ),
                       ),
                       const SizedBox(height: 12),
                       TextFormField(
-                        controller: _localAreaController,
+                        controller: _villageController,
                         style: const TextStyle(color: AppColors.primaryText),
                         decoration: _fieldDecoration(
-                          'Local Area / محلہ یا علاقہ (Optional)',
-                          helperText: 'City ke andar specific area likhein',
+                          'Village or Local Area / گاؤں یا محلہ',
+                          hint: 'Optional / اختیاری',
                         ),
-                        onChanged: (_) {
-                          setState(() {
-                            _fraudPrecheck = _runFraudPrecheck();
-                          });
-                        },
                       ),
                       const SizedBox(height: 12),
                       _sectionHeader(
@@ -4985,18 +4995,8 @@ class _AddListingScreenState extends State<AddListingScreen> {
                         'Add condition, quality, and delivery notes / معیار، حالت اور ترسیل کی تفصیل لکھیں',
                       ),
                       TextFormField(
-                        controller: _villageController,
-                        style: const TextStyle(color: AppColors.primaryText),
-                        decoration: _fieldDecoration(
-                          'Village / گاؤں (Optional)',
-                          hint:
-                              'Optional for rural locations / دیہی علاقوں کے لیے اختیاری',
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextFormField(
                         controller: _descriptionController,
-                        maxLines: 3,
+                        maxLines: 4,
                         style: const TextStyle(color: AppColors.primaryText),
                         decoration: _fieldDecoration(
                           'Description / تفصیل',
@@ -5135,12 +5135,16 @@ class _AddListingScreenState extends State<AddListingScreen> {
                                 if (value) {
                                   // Open payment modal when trying to enable
                                   if (!mounted) return;
-                                  final result = await showModalBottomSheet<FeaturedListingPaymentData>(
-                                    context: context,
-                                    isScrollControlled: true,
-                                    backgroundColor: Colors.transparent,
-                                    builder: (context) => const FeaturedListingPaymentModal(),
-                                  );
+                                  final result =
+                                      await showModalBottomSheet<
+                                        FeaturedListingPaymentData
+                                      >(
+                                        context: context,
+                                        isScrollControlled: true,
+                                        backgroundColor: Colors.transparent,
+                                        builder: (context) =>
+                                            const FeaturedListingPaymentModal(),
+                                      );
                                   if (result != null) {
                                     setState(() {
                                       _featuredListing = true;
@@ -5310,6 +5314,141 @@ class _AddListingScreenState extends State<AddListingScreen> {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _VoiceListeningPulse extends StatefulWidget {
+  const _VoiceListeningPulse();
+
+  @override
+  State<_VoiceListeningPulse> createState() => _VoiceListeningPulseState();
+}
+
+class _VoiceListeningPulseState extends State<_VoiceListeningPulse>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, _) {
+        final double t = _controller.value;
+        final double outer = 28 + (14 * t);
+        final double alpha = 0.24 * (1 - t);
+        return SizedBox(
+          height: 72,
+          child: Center(
+            child: Stack(
+              alignment: Alignment.center,
+              children: <Widget>[
+                Container(
+                  width: outer,
+                  height: outer,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: AppColors.accentGold.withValues(alpha: alpha),
+                  ),
+                ),
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: AppColors.accentGold.withValues(alpha: 0.22),
+                    border: Border.all(
+                      color: AppColors.accentGold.withValues(alpha: 0.7),
+                    ),
+                  ),
+                  child: const Icon(
+                    Icons.mic_rounded,
+                    color: AppColors.accentGold,
+                    size: 18,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _VoiceProcessingShimmer extends StatefulWidget {
+  const _VoiceProcessingShimmer();
+
+  @override
+  State<_VoiceProcessingShimmer> createState() =>
+      _VoiceProcessingShimmerState();
+}
+
+class _VoiceProcessingShimmerState extends State<_VoiceProcessingShimmer>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1300),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 8,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(99),
+        child: AnimatedBuilder(
+          animation: _controller,
+          builder: (context, _) {
+            return ShaderMask(
+              shaderCallback: (Rect bounds) {
+                final double x = (_controller.value * 2) - 1;
+                return LinearGradient(
+                  begin: Alignment(-1.2 + x, 0),
+                  end: Alignment(-0.2 + x, 0),
+                  colors: <Color>[
+                    AppColors.primaryText.withValues(alpha: 0.14),
+                    AppColors.accentGold.withValues(alpha: 0.85),
+                    AppColors.primaryText.withValues(alpha: 0.14),
+                  ],
+                ).createShader(bounds);
+              },
+              blendMode: BlendMode.srcATop,
+              child: Container(
+                width: double.infinity,
+                color: AppColors.primaryText.withValues(alpha: 0.22),
+              ),
+            );
+          },
         ),
       ),
     );

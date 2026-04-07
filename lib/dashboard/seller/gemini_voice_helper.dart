@@ -29,15 +29,10 @@ class GeminiVoiceDraft {
 }
 
 class GeminiVoiceHelper {
-  static const String extractionPrompt =
-      'You are an assistant for a Pakistan mandi app. '
-      'Convert the user transcript into STRICT JSON only. '
-      'No markdown, no code fences, no explanation, no extra keys. '
-      'Use this exact schema with string values only: '
-      '{"category":"","subcategory":"","quantity":"","unit":"","price":"","province":"","district":"","tehsil":"","localArea":"","description":""}. '
-      'If a value is unknown, return empty string for that field. '
-      'Keep Pakistani names as spoken. '
-      'Quantity and price should be plain numeric text when possible.';
+  static const String extractionSystemInstruction =
+      "System Instruction: 'You are an expert data extraction AI for a Pakistani agricultural app (Digital Arhat). The user will speak in Urdu, Roman Urdu, or Punjabi. Extract the product listing details and return ONLY a valid, raw JSON object. Do not include markdown formatting like ```json. "
+      "Fields needed: category (e.g., Wheat, Rice, Vegetables), quantity (extract the number), unit (e.g., Mann, Kg, Bori), pricePerUnit (extract the number), village, description. "
+      "If a user says '50 mann gandum', set category: 'Wheat', quantity: '50', unit: 'Mann'. If a field is missing, set its value to null.'";
 
   static Future<GeminiVoiceDraft> extractDraft({
     required MandiIntelligenceService ai,
@@ -48,45 +43,63 @@ class GeminiVoiceHelper {
     }
 
     String raw = '';
+    final fallbackData = _localFallbackParse(transcript);
+
+    Map<String, String> buildMergedData(Map<String, dynamic> jsonMap) {
+      String pick(List<String> keys, String fallbackKey) {
+        for (final key in keys) {
+          final dynamic rawValue = jsonMap[key];
+          if (rawValue == null) {
+            continue;
+          }
+          final String text = rawValue.toString().trim();
+          if (text.isNotEmpty && text.toLowerCase() != 'null') {
+            return text;
+          }
+        }
+        return (fallbackData[fallbackKey] ?? '').trim();
+      }
+
+      return <String, String>{
+        'category': pick(const <String>['category'], 'category'),
+        'subcategory': (fallbackData['subcategory'] ?? '').trim(),
+        'quantity': pick(const <String>['quantity'], 'quantity'),
+        'unit': pick(const <String>['unit'], 'unit'),
+        'price': pick(const <String>['pricePerUnit', 'price'], 'price'),
+        'province': (fallbackData['province'] ?? '').trim(),
+        'district': (fallbackData['district'] ?? '').trim(),
+        'tehsil': (fallbackData['tehsil'] ?? '').trim(),
+        'localArea': pick(const <String>['village', 'localArea'], 'localArea'),
+        'description': pick(const <String>['description'], 'description'),
+      };
+    }
+
     try {
       debugPrint('[VOICE] gemini_started');
       final String prompt =
-          '$extractionPrompt\n\nUser transcript:\n${transcript.trim()}';
+          '$extractionSystemInstruction\n\nUser transcript:\n${transcript.trim()}\n\nReturn only raw JSON.';
       raw = await ai.getAIResponse(prompt);
       debugPrint('[VOICE] gemini_response=$raw');
 
-      final Map<String, dynamic> jsonMap = _decodeBestEffortJson(raw);
-      debugPrint('[VoiceListing] gemini_json_parse_success');
-
-      String field(String key) {
-        final value = (jsonMap[key] ?? '').toString().trim();
-        return value;
+      Map<String, dynamic> jsonMap = <String, dynamic>{};
+      try {
+        jsonMap = _decodeBestEffortJson(raw);
+        debugPrint('[VoiceListing] gemini_json_parse_success');
+      } catch (parseError) {
+        debugPrint('[VoiceListing] gemini_json_parse_failed error=$parseError');
       }
 
       return GeminiVoiceDraft(
         rawResponse: raw,
         usedFallback: false,
-        data: <String, String>{
-          'category': field('category'),
-          'subcategory': field('subcategory'),
-          'quantity': field('quantity'),
-          'unit': field('unit'),
-          'price': field('price'),
-          'province': field('province'),
-          'district': field('district'),
-          'tehsil': field('tehsil'),
-          'localArea': field('localArea'),
-          'description': field('description'),
-        },
+        data: buildMergedData(jsonMap),
       );
     } catch (geminiError) {
       debugPrint('[VOICE] gemini_failed=$geminiError');
-      debugPrint('[VoiceListing] gemini_json_parse_failed error=$geminiError');
       debugPrint('[VOICE] fallback_started');
       debugPrint('[VoiceListing] local_fallback_parse_started');
 
       try {
-        final fallbackData = _localFallbackParse(transcript);
         debugPrint('[VOICE] fallback_success');
         debugPrint('[VoiceListing] local_fallback_parse_success');
         return GeminiVoiceDraft(
@@ -95,7 +108,9 @@ class GeminiVoiceHelper {
           data: fallbackData,
         );
       } catch (fallbackError) {
-        debugPrint('[VoiceListing] local_fallback_parse_failed error=$fallbackError');
+        debugPrint(
+          '[VoiceListing] local_fallback_parse_failed error=$fallbackError',
+        );
         rethrow;
       }
     }
@@ -187,65 +202,130 @@ class GeminiVoiceHelper {
   // Maps same keywords → exact subcategory label from CategoryConstants
   // Public so add_listing_screen can re-run the keyword scan on transcript.
   static const Map<String, String> subcategoryKeywords = {
-    'aalu': 'Potato / آلو', 'aloo': 'Potato / آلو', 'alu': 'Potato / آلو',
+    'aalu': 'Potato / آلو',
+    'aloo': 'Potato / آلو',
+    'alu': 'Potato / آلو',
     'potato': 'Potato / آلو',
-    'pyaz': 'Onion / پیاز', 'piaz': 'Onion / پیاز', 'onion': 'Onion / پیاز',
-    'tamatar': 'Tomato / ٹماٹر', 'tomato': 'Tomato / ٹماٹر',
-    'mirch': 'Chili / مرچ', 'chili': 'Chili / مرچ', 'chilli': 'Chili / مرچ',
-    'shimla mirch': 'Capsicum / شملہ مرچ', 'capsicum': 'Capsicum / شملہ مرچ',
-    'lehsan': 'Garlic / لہسن', 'garlic': 'Garlic / لہسن',
-    'adrak': 'Ginger / ادرک', 'ginger': 'Ginger / ادرک',
-    'bhindi': 'Okra / بھنڈی', 'bindi': 'Okra / بھنڈی', 'okra': 'Okra / بھنڈی',
-    'baigan': 'Brinjal / بینگن', 'brinjal': 'Brinjal / بینگن',
-    'gobi': 'Cauliflower / پھول گوبھی', 'gobhi': 'Cauliflower / پھول گوبھی',
+    'pyaz': 'Onion / پیاز',
+    'piaz': 'Onion / پیاز',
+    'onion': 'Onion / پیاز',
+    'tamatar': 'Tomato / ٹماٹر',
+    'tomato': 'Tomato / ٹماٹر',
+    'mirch': 'Chili / مرچ',
+    'chili': 'Chili / مرچ',
+    'chilli': 'Chili / مرچ',
+    'shimla mirch': 'Capsicum / شملہ مرچ',
+    'capsicum': 'Capsicum / شملہ مرچ',
+    'lehsan': 'Garlic / لہسن',
+    'garlic': 'Garlic / لہسن',
+    'adrak': 'Ginger / ادرک',
+    'ginger': 'Ginger / ادرک',
+    'bhindi': 'Okra / بھنڈی',
+    'bindi': 'Okra / بھنڈی',
+    'okra': 'Okra / بھنڈی',
+    'baigan': 'Brinjal / بینگن',
+    'brinjal': 'Brinjal / بینگن',
+    'gobi': 'Cauliflower / پھول گوبھی',
+    'gobhi': 'Cauliflower / پھول گوبھی',
     'cauliflower': 'Cauliflower / پھول گوبھی',
-    'palak': 'Spinach / پالک', 'spinach': 'Spinach / پالک',
-    'matar': 'Peas / مٹر', 'peas': 'Peas / مٹر',
-    'gajar': 'Carrot / گاجر', 'carrot': 'Carrot / گاجر',
-    'mooli': 'Radish / مولی', 'radish': 'Radish / مولی',
-    'shalgam': 'Turnip / شلجم', 'turnip': 'Turnip / شلجم',
-    'gehun': 'Wheat / گندم', 'gandum': 'Wheat / گندم', 'wheat': 'Wheat / گندم',
-    'chawal': 'Processed Rice / چاول', 'rice': 'Processed Rice / چاول',
-    'dhan': 'Rice Crop (Paddy) / دھان', 'paddy': 'Rice Crop (Paddy) / دھان',
-    'kapas': 'Cotton / کپاس', 'cotton': 'Cotton / کپاس',
-    'ganna': 'Sugarcane / گنا', 'sugarcane': 'Sugarcane / گنا',
-    'makki': 'Maize / مکئی', 'maize': 'Maize / مکئی', 'corn': 'Maize / مکئی',
-    'chana': 'Gram / چنا', 'gram': 'Gram / چنا',
-    'sarson': 'Mustard / سرسوں', 'mustard': 'Mustard / سرسوں',
-    'barley': 'Barley / جو', 'jo': 'Barley / جو',
-    'bajra': 'Millet / باجرا', 'millet': 'Millet / باجرا',
-    'jawar': 'Sorghum / جوار', 'jowar': 'Sorghum / جوار', 'sorghum': 'Sorghum / جوار',
-    'aam': 'Mango / آم', 'mango': 'Mango / آم',
-    'kinnow': 'Kinnow / کینو', 'kinnu': 'Kinnow / کینو',
-    'orange': 'Orange / مالٹا', 'malta': 'Orange / مالٹا',
-    'seb': 'Apple / سیب', 'apple': 'Apple / سیب',
-    'kela': 'Banana / کیلا', 'banana': 'Banana / کیلا',
-    'amrood': 'Guava / امرود', 'guava': 'Guava / امرود',
-    'khajur': 'Dates / کھجور', 'dates': 'Dates / کھجور',
-    'anaar': 'Pomegranate / انار', 'pomegranate': 'Pomegranate / انار',
-    'angoor': 'Grapes / انگور', 'grapes': 'Grapes / انگور',
-    'tarbuz': 'Watermelon / تربوز', 'watermelon': 'Watermelon / تربوز',
-    'kharboza': 'Melon / خربوزہ', 'melon': 'Melon / خربوزہ',
-    'gaye': 'Cow / گائے', 'gaay': 'Cow / گائے', 'cow': 'Cow / گائے',
-    'bhains': 'Buffalo / بھینس', 'buffalo': 'Buffalo / بھینس',
-    'bail': 'Bull / بیل', 'bull': 'Bull / بیل',
-    'bakra': 'Goat / بکری', 'bakri': 'Goat / بکری', 'goat': 'Goat / بکری',
-    'bhair': 'Sheep / بھیڑ', 'sheep': 'Sheep / بھیڑ',
-    'oont': 'Camel / اونٹ', 'camel': 'Camel / اونٹ',
-    'bachhra': 'Calf / بچھڑا', 'calf': 'Calf / بچھڑا',
-    'murgi': 'Desi Chicken / دیسی مرغی', 'chicken': 'Desi Chicken / دیسی مرغی',
+    'palak': 'Spinach / پالک',
+    'spinach': 'Spinach / پالک',
+    'matar': 'Peas / مٹر',
+    'peas': 'Peas / مٹر',
+    'gajar': 'Carrot / گاجر',
+    'carrot': 'Carrot / گاجر',
+    'mooli': 'Radish / مولی',
+    'radish': 'Radish / مولی',
+    'shalgam': 'Turnip / شلجم',
+    'turnip': 'Turnip / شلجم',
+    'gehun': 'Wheat / گندم',
+    'gandum': 'Wheat / گندم',
+    'wheat': 'Wheat / گندم',
+    'chawal': 'Processed Rice / چاول',
+    'rice': 'Processed Rice / چاول',
+    'dhan': 'Rice Crop (Paddy) / دھان',
+    'paddy': 'Rice Crop (Paddy) / دھان',
+    'kapas': 'Cotton / کپاس',
+    'cotton': 'Cotton / کپاس',
+    'ganna': 'Sugarcane / گنا',
+    'sugarcane': 'Sugarcane / گنا',
+    'makki': 'Maize / مکئی',
+    'maize': 'Maize / مکئی',
+    'corn': 'Maize / مکئی',
+    'chana': 'Gram / چنا',
+    'gram': 'Gram / چنا',
+    'sarson': 'Mustard / سرسوں',
+    'mustard': 'Mustard / سرسوں',
+    'barley': 'Barley / جو',
+    'jo': 'Barley / جو',
+    'bajra': 'Millet / باجرا',
+    'millet': 'Millet / باجرا',
+    'jawar': 'Sorghum / جوار',
+    'jowar': 'Sorghum / جوار',
+    'sorghum': 'Sorghum / جوار',
+    'aam': 'Mango / آم',
+    'mango': 'Mango / آم',
+    'kinnow': 'Kinnow / کینو',
+    'kinnu': 'Kinnow / کینو',
+    'orange': 'Orange / مالٹا',
+    'malta': 'Orange / مالٹا',
+    'seb': 'Apple / سیب',
+    'apple': 'Apple / سیب',
+    'kela': 'Banana / کیلا',
+    'banana': 'Banana / کیلا',
+    'amrood': 'Guava / امرود',
+    'guava': 'Guava / امرود',
+    'khajur': 'Dates / کھجور',
+    'dates': 'Dates / کھجور',
+    'anaar': 'Pomegranate / انار',
+    'pomegranate': 'Pomegranate / انار',
+    'angoor': 'Grapes / انگور',
+    'grapes': 'Grapes / انگور',
+    'tarbuz': 'Watermelon / تربوز',
+    'watermelon': 'Watermelon / تربوز',
+    'kharboza': 'Melon / خربوزہ',
+    'melon': 'Melon / خربوزہ',
+    'gaye': 'Cow / گائے',
+    'gaay': 'Cow / گائے',
+    'cow': 'Cow / گائے',
+    'bhains': 'Buffalo / بھینس',
+    'buffalo': 'Buffalo / بھینس',
+    'bail': 'Bull / بیل',
+    'bull': 'Bull / بیل',
+    'bakra': 'Goat / بکری',
+    'bakri': 'Goat / بکری',
+    'goat': 'Goat / بکری',
+    'bhair': 'Sheep / بھیڑ',
+    'sheep': 'Sheep / بھیڑ',
+    'oont': 'Camel / اونٹ',
+    'camel': 'Camel / اونٹ',
+    'bachhra': 'Calf / بچھڑا',
+    'calf': 'Calf / بچھڑا',
+    'murgi': 'Desi Chicken / دیسی مرغی',
+    'chicken': 'Desi Chicken / دیسی مرغی',
     'broiler': 'Broiler / برائلر',
-    'anda': 'Eggs / انڈے', 'eggs': 'Eggs / انڈے',
-    'doodh': 'Raw Milk / کچا دودھ', 'milk': 'Raw Milk / کچا دودھ', 'dudh': 'Raw Milk / کچا دودھ',
-    'dahi': 'Yogurt / دہی', 'yogurt': 'Yogurt / دہی',
+    'anda': 'Eggs / انڈے',
+    'eggs': 'Eggs / انڈے',
+    'doodh': 'Raw Milk / کچا دودھ',
+    'milk': 'Raw Milk / کچا دودھ',
+    'dudh': 'Raw Milk / کچا دودھ',
+    'dahi': 'Yogurt / دہی',
+    'yogurt': 'Yogurt / دہی',
     'ghee': 'Desi Ghee / دیسی گھی',
-    'badam': 'Almond / بادام', 'almond': 'Almond / بادام',
-    'akhrot': 'Walnut / اخروٹ', 'walnut': 'Walnut / اخروٹ',
-    'pista': 'Pistachio / پستہ', 'pistachio': 'Pistachio / پستہ',
-    'kishmish': 'Raisins / کشمش', 'raisins': 'Raisins / کشمش',
-    'haldi': 'Turmeric / ہلدی', 'turmeric': 'Turmeric / ہلدی',
-    'dhania': 'Coriander / دھنیا', 'coriander': 'Coriander / دھنیا',
-    'zeera': 'Cumin / زیرہ', 'cumin': 'Cumin / زیرہ',
+    'badam': 'Almond / بادام',
+    'almond': 'Almond / بادام',
+    'akhrot': 'Walnut / اخروٹ',
+    'walnut': 'Walnut / اخروٹ',
+    'pista': 'Pistachio / پستہ',
+    'pistachio': 'Pistachio / پستہ',
+    'kishmish': 'Raisins / کشمش',
+    'raisins': 'Raisins / کشمش',
+    'haldi': 'Turmeric / ہلدی',
+    'turmeric': 'Turmeric / ہلدی',
+    'dhania': 'Coriander / دھنیا',
+    'coriander': 'Coriander / دھنیا',
+    'zeera': 'Cumin / زیرہ',
+    'cumin': 'Cumin / زیرہ',
   };
 
   static const Map<String, String> _provinceAliases = {
@@ -396,7 +476,9 @@ class GeminiVoiceHelper {
       if (lower.contains(keyword)) {
         data['category'] = categoryKeywords[keyword]!;
         data['subcategory'] = subcategoryKeywords[keyword] ?? '';
-        debugPrint('[VOICE] fallback_category=${data['category']} subcategory=${data['subcategory']}');
+        debugPrint(
+          '[VOICE] fallback_category=${data['category']} subcategory=${data['subcategory']}',
+        );
         break;
       }
     }
@@ -435,7 +517,10 @@ class GeminiVoiceHelper {
     } else {
       final allNumbers = RegExp(r'\b(\d+(?:[.,]\d+)?)\b').allMatches(lower);
       if (allNumbers.length > 1) {
-        final price = (allNumbers.elementAt(1).group(1) ?? '').replaceAll(',', '');
+        final price = (allNumbers.elementAt(1).group(1) ?? '').replaceAll(
+          ',',
+          '',
+        );
         if (price.isNotEmpty) {
           data['price'] = price;
         }
@@ -454,7 +539,9 @@ class GeminiVoiceHelper {
           data['province'] = entry.key;
           data['localArea'] = district;
           locationFound = true;
-          debugPrint('[VOICE] fallback_location=district:$district province:${entry.key}');
+          debugPrint(
+            '[VOICE] fallback_location=district:$district province:${entry.key}',
+          );
           break outer;
         }
       }
@@ -496,7 +583,10 @@ class GeminiVoiceHelper {
     }
     if (foundProvince.isNotEmpty) {
       desc = desc.replaceAll(
-        RegExp('\\b${RegExp.escape(foundProvince.split(' ').first)}\\b', caseSensitive: false),
+        RegExp(
+          '\\b${RegExp.escape(foundProvince.split(' ').first)}\\b',
+          caseSensitive: false,
+        ),
         ' ',
       );
     }
@@ -511,8 +601,10 @@ class GeminiVoiceHelper {
     }
     // Strip connectors like "se", "ka", "ki", "ke"
     desc = desc.replaceAll(
-      RegExp(r'\b(se|ka|ki|ke|wala|walay|ki|hai|hain|mera|meri)\b',
-          caseSensitive: false),
+      RegExp(
+        r'\b(se|ka|ki|ke|wala|walay|ki|hai|hain|mera|meri)\b',
+        caseSensitive: false,
+      ),
       ' ',
     );
     desc = desc.replaceAll(RegExp(r'\s+'), ' ').trim();
@@ -525,9 +617,9 @@ class GeminiVoiceHelper {
   }
 
   static double? parsePositiveNumber(String raw) {
-    final cleaned = normalizeVoiceText(raw)
-      .replaceAll(RegExp(r'[^0-9.,]'), '')
-        .replaceAll(',', '');
+    final cleaned = normalizeVoiceText(
+      raw,
+    ).replaceAll(RegExp(r'[^0-9.,]'), '').replaceAll(',', '');
     final value = double.tryParse(cleaned);
     if (value == null || value <= 0) return null;
     return value;

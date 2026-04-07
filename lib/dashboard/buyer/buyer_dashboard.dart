@@ -307,7 +307,8 @@ class BuyerNotificationsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    final authUser = FirebaseAuth.instance.currentUser;
+    final uid = authUser?.uid ?? '';
 
     if (uid.isEmpty) {
       return const _AlertsGuestLockedView();
@@ -518,7 +519,8 @@ class _BuyerAccountTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    final authUser = FirebaseAuth.instance.currentUser;
+    final uid = authUser?.uid ?? '';
     final name = (userData['fullName'] ?? userData['name'] ?? 'خریدار')
         .toString()
         .trim();
@@ -531,7 +533,14 @@ class _BuyerAccountTab extends StatelessWidget {
         .trim()
         .toLowerCase();
     final bool verified = userData['isVerified'] == true || userData['isApproved'] == true;
-    final bool isGuest = uid.isEmpty;
+    final bool isGuest = authUser == null || uid.isEmpty;
+    final String verificationStatus =
+      (userData['verificationStatus'] ?? '').toString().trim().toLowerCase();
+    final bool showPendingReviewCard =
+        !isGuest &&
+        !verified &&
+        verificationStatus != 'verified' &&
+        verificationStatus == 'pending';
     final String roleLabel = role == 'admin'
         ? 'Admin'
         : (role == 'seller' || role == 'arhat')
@@ -665,7 +674,11 @@ class _BuyerAccountTab extends StatelessWidget {
                 '${district.isEmpty ? 'Pakistan' : district}${province.isEmpty ? '' : ', $province'}',
           ),
           const SizedBox(height: PremiumSpacing.s1),
-          const VerificationStatusWidget(),
+          if (showPendingReviewCard)
+            const VerificationStatusWidget(
+              isVerified: false,
+              isPending: true,
+            ),
           if (!isGuest) ...[
             const SizedBox(height: PremiumSpacing.s2),
             BuyerTrustWidget(userData: userData),
@@ -704,6 +717,26 @@ class _BuyerAccountTab extends StatelessWidget {
               label: 'لاگ آؤٹ / Logout',
               icon: Icons.logout_rounded,
               onPressed: () async {
+                final bool? shouldLogout = await showDialog<bool>(
+                  context: context,
+                  builder: (dialogContext) {
+                    return AlertDialog(
+                      title: const Text('لاگ آؤٹ'),
+                      content: const Text('کیا آپ واقعی لاگ آؤٹ کرنا چاہتے ہیں؟'),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(dialogContext, false),
+                          child: const Text('نہیں'),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.pop(dialogContext, true),
+                          child: const Text('ہاں'),
+                        ),
+                      ],
+                    );
+                  },
+                );
+                if (shouldLogout != true) return;
                 await FirebaseAuth.instance.signOut();
                 await AuthService().clearPersistedSessionUid();
                 if (!context.mounted) return;

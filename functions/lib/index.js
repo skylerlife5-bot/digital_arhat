@@ -123,6 +123,9 @@ function requireString(value, field) {
         throw new https_1.HttpsError("invalid-argument", `${field} is required`);
     return text;
 }
+function optionalStringOrEmpty(value) {
+    return (value || "").toString().trim();
+}
 function requirePositiveNumber(value, field) {
     const n = (0, utils_1.toNumber)(value, NaN);
     if (!Number.isFinite(n) || n <= 0) {
@@ -911,7 +914,7 @@ async function createListingSecureInternal(uid, data) {
     const product = requireString(listingData.product, "listingData.product");
     const province = requireString(listingData.province, "listingData.province");
     const district = requireString(listingData.district, "listingData.district");
-    const village = requireString(listingData.village, "listingData.village");
+    const village = optionalStringOrEmpty(listingData.village);
     const description = requireString(listingData.description, "listingData.description");
     const price = requirePositiveNumber(listingData.price, "listingData.price");
     const quantity = requirePositiveNumber(listingData.quantity, "listingData.quantity");

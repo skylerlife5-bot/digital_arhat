@@ -73,6 +73,7 @@ dependencies:
   google_mlkit_face_detection: 0.13.2
   google_mlkit_text_recognition: 0.15.1
   google_mlkit_commons: 0.11.1
+  flutter_markdown: ^0.7.7+1
 
   # 🏁 QR & Delivery Verification
   qr_flutter: 4.1.0

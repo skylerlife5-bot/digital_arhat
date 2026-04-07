@@ -42,7 +42,7 @@ class MandiRateCard extends StatelessWidget {
     final commodity = row.commodityDisplay;
     final city = row.cityDisplay;
     final priceLine = row.priceDisplay;
-    final unitLine = formatUnitDisplay(rate.unit);
+    final unitLine = MandiDisplayUtils.formatUnit(rate.unit);
     final badges = <String>[
       if (rate.isLive) 'تازہ',
       rate.freshnessLabel,

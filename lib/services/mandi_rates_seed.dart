@@ -27,33 +27,33 @@ class MandiRatesSeed {
   // Lahore-focused catalog (40+ items) - HARDCODED REALISTIC VALUES (NO FALLBACK)
   static const List<MandiRateSeedItem> lahoreCatalog = <MandiRateSeedItem>[
     // --- Meats (kg) ---
-    MandiRateSeedItem(id: 'live_chicken', urduName: 'زندہ مرغی', unit: 'per_kg', isTickerEligible: true, basePrice: 620, group: 'meat'),
-    MandiRateSeedItem(id: 'chicken_meat', urduName: 'مرغی کا گوشت', unit: 'per_kg', isTickerEligible: true, basePrice: 890, group: 'meat'),
-    MandiRateSeedItem(id: 'beef', urduName: 'بڑا گوشت', unit: 'per_kg', isTickerEligible: true, basePrice: 1220, group: 'meat'),
-    MandiRateSeedItem(id: 'mutton', urduName: 'چھوٹا گوشت', unit: 'per_kg', isTickerEligible: true, basePrice: 2380, group: 'meat'),
+    MandiRateSeedItem(id: 'live_chicken', urduName: 'زندہ مرغی', unit: 'per_kg', isTickerEligible: true, basePrice: 380, group: 'meat'),
+    MandiRateSeedItem(id: 'chicken_meat', urduName: 'مرغی کا گوشت', unit: 'per_kg', isTickerEligible: true, basePrice: 530, group: 'meat'),
+    MandiRateSeedItem(id: 'beef', urduName: 'بڑا گوشت', unit: 'per_kg', isTickerEligible: true, basePrice: 1400, group: 'meat'),
+    MandiRateSeedItem(id: 'mutton', urduName: 'چھوٹا گوشت', unit: 'per_kg', isTickerEligible: true, basePrice: 2600, group: 'meat'),
 
     // --- Bulk / grains (40kg standard) ---
-    MandiRateSeedItem(id: 'wheat', urduName: 'گندم', unit: 'per_40kg', isTickerEligible: true, basePrice: 4100, group: 'grain'),
-    MandiRateSeedItem(id: 'rice_irri', urduName: 'چاول اری', unit: 'per_40kg', isTickerEligible: true, basePrice: 6200, group: 'grain'),
-    MandiRateSeedItem(id: 'rice_basmati', urduName: 'چاول باسمتی', unit: 'per_40kg', isTickerEligible: true, basePrice: 12800, group: 'grain'),
+    MandiRateSeedItem(id: 'wheat', urduName: 'گندم', unit: 'per_40kg', isTickerEligible: true, basePrice: 3850, group: 'grain'),
+    MandiRateSeedItem(id: 'rice_irri', urduName: 'چاول اری', unit: 'per_40kg', isTickerEligible: true, basePrice: 5800, group: 'grain'),
+    MandiRateSeedItem(id: 'rice_basmati', urduName: 'چاول باسمتی', unit: 'per_40kg', isTickerEligible: true, basePrice: 9800, group: 'grain'),
     MandiRateSeedItem(id: 'lentil_masoor', urduName: 'دال مسور', unit: 'per_40kg', isTickerEligible: true, basePrice: 9200, group: 'grain'),
     MandiRateSeedItem(id: 'lentil_moong', urduName: 'دال مونگ', unit: 'per_40kg', isTickerEligible: true, basePrice: 10400, group: 'grain'),
     MandiRateSeedItem(id: 'lentil_mash', urduName: 'دال ماش', unit: 'per_40kg', isTickerEligible: true, basePrice: 11500, group: 'grain'),
     MandiRateSeedItem(id: 'gram', urduName: 'چنا', unit: 'per_40kg', isTickerEligible: true, basePrice: 7900, group: 'grain'),
-    MandiRateSeedItem(id: 'sugar', urduName: 'چینی', unit: 'per_50kg', isTickerEligible: true, basePrice: 7400, group: 'grain'),
+    MandiRateSeedItem(id: 'sugar', urduName: 'چینی', unit: 'per_50kg', isTickerEligible: true, basePrice: 7025, group: 'grain'),
 
     // --- Essentials ---
-    MandiRateSeedItem(id: 'flour_20kg', urduName: 'آٹا', unit: 'per_20kg', isTickerEligible: true, basePrice: 2850, group: 'essential'),
-    MandiRateSeedItem(id: 'cooking_oil_5l', urduName: 'ککنگ آئل', unit: 'per_5litre', isTickerEligible: true, basePrice: 2950, group: 'essential'),
-    MandiRateSeedItem(id: 'eggs', urduName: 'انڈے', unit: 'per_dozen', isTickerEligible: true, basePrice: 340, group: 'essential'),
-    MandiRateSeedItem(id: 'milk', urduName: 'دودھ', unit: 'per_litre', isTickerEligible: true, basePrice: 230, group: 'essential'),
+    MandiRateSeedItem(id: 'flour_20kg', urduName: 'آٹا', unit: 'per_20kg', isTickerEligible: true, basePrice: 1950, group: 'essential'),
+    MandiRateSeedItem(id: 'cooking_oil_5l', urduName: 'ککنگ آئل', unit: 'per_5litre', isTickerEligible: true, basePrice: 2800, group: 'essential'),
+    MandiRateSeedItem(id: 'eggs', urduName: 'انڈے', unit: 'per_dozen', isTickerEligible: true, basePrice: 320, group: 'essential'),
+    MandiRateSeedItem(id: 'milk', urduName: 'دودھ', unit: 'per_litre', isTickerEligible: true, basePrice: 220, group: 'essential'),
 
     // --- Vegetables (kg) ---
-    MandiRateSeedItem(id: 'potato', urduName: 'آلو', unit: 'per_kg', isTickerEligible: true, basePrice: 95, group: 'veg'),
-    MandiRateSeedItem(id: 'onion', urduName: 'پیاز', unit: 'per_kg', isTickerEligible: true, basePrice: 170, group: 'veg'),
-    MandiRateSeedItem(id: 'tomato', urduName: 'ٹماٹر', unit: 'per_kg', isTickerEligible: true, basePrice: 160, group: 'veg'),
-    MandiRateSeedItem(id: 'garlic', urduName: 'لہسن', unit: 'per_kg', isTickerEligible: true, basePrice: 540, group: 'veg'),
-    MandiRateSeedItem(id: 'ginger', urduName: 'ادرک', unit: 'per_kg', isTickerEligible: true, basePrice: 620, group: 'veg'),
+    MandiRateSeedItem(id: 'potato', urduName: 'آلو', unit: 'per_kg', isTickerEligible: true, basePrice: 80, group: 'veg'),
+    MandiRateSeedItem(id: 'onion', urduName: 'پیاز', unit: 'per_kg', isTickerEligible: true, basePrice: 150, group: 'veg'),
+    MandiRateSeedItem(id: 'tomato', urduName: 'ٹماٹر', unit: 'per_kg', isTickerEligible: true, basePrice: 120, group: 'veg'),
+    MandiRateSeedItem(id: 'garlic', urduName: 'لہسن', unit: 'per_kg', isTickerEligible: true, basePrice: 480, group: 'veg'),
+    MandiRateSeedItem(id: 'ginger', urduName: 'ادرک', unit: 'per_kg', isTickerEligible: true, basePrice: 580, group: 'veg'),
     MandiRateSeedItem(id: 'lemon', urduName: 'لیموں', unit: 'per_kg', isTickerEligible: false, basePrice: 300, group: 'veg'),
     MandiRateSeedItem(id: 'spinach', urduName: 'پالک', unit: 'per_kg', isTickerEligible: false, basePrice: 80, group: 'veg'),
     MandiRateSeedItem(id: 'cauliflower', urduName: 'پھول گوبھی', unit: 'per_kg', isTickerEligible: false, basePrice: 130, group: 'veg'),
@@ -65,8 +65,8 @@ class MandiRatesSeed {
     MandiRateSeedItem(id: 'coriander', urduName: 'دھنیا', unit: 'per_kg', isTickerEligible: false, basePrice: 160, group: 'veg'),
 
     // --- Fruits (kg or dozen) ---
-    MandiRateSeedItem(id: 'apple', urduName: 'سیب', unit: 'per_kg', isTickerEligible: false, basePrice: 360, group: 'fruit'),
-    MandiRateSeedItem(id: 'banana', urduName: 'کیلا', unit: 'per_dozen', isTickerEligible: false, basePrice: 280, group: 'fruit'),
+    MandiRateSeedItem(id: 'apple', urduName: 'سیب', unit: 'per_kg', isTickerEligible: false, basePrice: 320, group: 'fruit'),
+    MandiRateSeedItem(id: 'banana', urduName: 'کیلا', unit: 'per_dozen', isTickerEligible: false, basePrice: 240, group: 'fruit'),
     MandiRateSeedItem(id: 'guava', urduName: 'امرود', unit: 'per_kg', isTickerEligible: false, basePrice: 190, group: 'fruit'),
     MandiRateSeedItem(id: 'citrus', urduName: 'مالٹا', unit: 'per_kg', isTickerEligible: false, basePrice: 220, group: 'fruit'),
     MandiRateSeedItem(id: 'orange', urduName: 'سنگترہ', unit: 'per_kg', isTickerEligible: false, basePrice: 230, group: 'fruit'),
@@ -83,7 +83,7 @@ class MandiRatesSeed {
 
     // --- Additional essentials ---
     MandiRateSeedItem(id: 'mustard_oil_5l', urduName: 'سرسوں کا تیل', unit: 'per_5litre', isTickerEligible: false, basePrice: 3450, group: 'essential'),
-    MandiRateSeedItem(id: 'desi_ghee_1kg', urduName: 'دیسی گھی', unit: 'per_kg', isTickerEligible: false, basePrice: 1650, group: 'essential'),
+    MandiRateSeedItem(id: 'desi_ghee_1kg', urduName: 'دیسی گھی', unit: 'per_kg', isTickerEligible: false, basePrice: 1800, group: 'essential'),
     MandiRateSeedItem(id: 'tea_900g', urduName: 'چائے', unit: 'per_kg', isTickerEligible: false, basePrice: 1750, group: 'essential'),
     MandiRateSeedItem(id: 'salt_800g', urduName: 'نمک', unit: 'per_kg', isTickerEligible: false, basePrice: 75, group: 'essential'),
     MandiRateSeedItem(id: 'red_chili_powder', urduName: 'لال مرچ پاؤڈر', unit: 'per_kg', isTickerEligible: false, basePrice: 1100, group: 'essential'),
