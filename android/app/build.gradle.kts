@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "com.yourname.digital_arhat"
+    namespace = "com.digitalarhat.app"
     compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
