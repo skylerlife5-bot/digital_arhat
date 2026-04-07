@@ -23,7 +23,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.yourname.digital_arhat"
+        applicationId = "com.digitalarhat.app"
         minSdk = flutter.minSdkVersion
         targetSdk = 34
         
