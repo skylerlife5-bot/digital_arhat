@@ -359,6 +359,26 @@ class MandiHomePresenter {
     final unit = _normalizeDigitsToAscii(unitRaw.trim().toLowerCase());
     if (unit.isEmpty) return '';
 
+    final rawUnit = unit.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (rawUnit == 'per 40 kg' ||
+        rawUnit == 'per 40kg' ||
+        rawUnit == 'rs/40kg' ||
+        rawUnit == 'pkr/40kg' ||
+        rawUnit == '/40 kg') {
+      return 'per_40kg';
+    }
+    if (rawUnit == 'per 100 kg' ||
+        rawUnit == 'per 100kg' ||
+        rawUnit == 'rs/100kg' ||
+        rawUnit == '/100 kg') {
+      return 'per_100kg';
+    }
+    if (rawUnit == 'per kg' ||
+        rawUnit == 'pkr/kg' ||
+        rawUnit == '/kg') {
+      return 'per_kg';
+    }
+
     final compact = unit
         .replaceAll(RegExp(r'[\s\/_\-]+'), '')
         .replaceAll('rupees', '')
@@ -600,7 +620,9 @@ class MandiHomePresenter {
         (raw.contains('food') && isPunjab)) {
       return 1;
     }
-    if (raw.contains('amis') && isPunjab) return 2;
+    if (raw.contains('officialmarketadministration')) return 2;
+    if (raw.contains('local') && raw.contains('amis')) return 2;
+    if (raw.contains('amis')) return 2;
     if (raw.contains('lahore') && isOfficial) return 3;
     if ((raw.contains('karachi') || isSindh) && isOfficial) return 4;
     if (raw.contains('pbs') || raw.contains('spi')) return 5;
