@@ -46,6 +46,8 @@
         android:label="Digital Arhat"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:usesCleartextTraffic="false"
         android:requestLegacyExternalStorage="true">
 
         <meta-data

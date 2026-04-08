@@ -312,11 +312,9 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow read: if isAdminUid() ||
-          (isSignedIn() && request.auth.uid == userId) ||
-          canReadUserForLogin(userId);
+      allow read: if isSignedIn() && request.auth.uid == userId;
       allow create: if isSignedIn() && userId == request.auth.uid;
-      allow update: if isAdminUid() || (isSignedIn() && request.auth.uid == userId);
+      allow update: if isSignedIn() && request.auth.uid == userId;
       allow delete: if isSignedIn() && request.auth.uid == userId;
 
       match /watchlist/{listingId} {
@@ -325,8 +323,8 @@ service cloud.firestore {
       }
 
       match /transactions/{transactionId} {
-        allow read: if isAdminUid() || (isSignedIn() && userId == request.auth.uid);
-        allow create, update, delete: if isAdminUid();
+        allow read: if isSignedIn() && userId == request.auth.uid;
+        allow create, update, delete: if isSignedIn() && userId == request.auth.uid;
       }
     }
 
@@ -375,7 +373,11 @@ service cloud.firestore {
     }
 
     match /deals/{dealId} {
-      allow read: if isSignedIn();
+      allow read: if isSignedIn() &&
+          (
+            resource.data.buyerId == request.auth.uid ||
+            resource.data.sellerId == request.auth.uid
+          );
       allow create: if isSignedIn() &&
           request.resource.data.listingId is string &&
           request.resource.data.listingId.size() > 0 &&
@@ -384,13 +386,11 @@ service cloud.firestore {
           request.resource.data.sellerId is string &&
           request.resource.data.sellerId.size() > 0 &&
           (
-            isAdminUid() ||
             request.resource.data.buyerId == request.auth.uid ||
             request.resource.data.sellerId == request.auth.uid
           );
       allow update: if isSignedIn() &&
           (
-            isAdminUid() ||
             isSellerDealOutcomeUpdate() ||
             (
               !changesDealOutcomeFields() &&
@@ -403,7 +403,11 @@ service cloud.firestore {
               immutableField('listingId')
             )
           );
-      allow delete: if isAdminUid();
+      allow delete: if isSignedIn() &&
+          (
+            resource.data.buyerId == request.auth.uid ||
+            resource.data.sellerId == request.auth.uid
+          );
 
       match /messages/{messageId} {
         allow read: if isSignedIn();
@@ -427,7 +431,6 @@ service cloud.firestore {
     match /notifications/{notificationId} {
       allow read: if isSignedIn() &&
           (
-            isAdminUid() ||
             resource.data.toUid == request.auth.uid ||
             resource.data.userId == request.auth.uid
           );
@@ -435,6 +438,7 @@ service cloud.firestore {
       allow create: if isSignedIn() &&
           request.resource.data.toUid is string &&
           request.resource.data.toUid.size() > 0 &&
+          request.auth.uid == request.resource.data.toUid &&
           request.resource.data.userId == request.resource.data.toUid &&
           request.resource.data.type is string &&
           request.resource.data.type in [
@@ -458,14 +462,17 @@ service cloud.firestore {
 
       allow update: if isSignedIn() &&
           (
-            isAdminUid() ||
             resource.data.toUid == request.auth.uid
           ) &&
           request.resource.data.diff(resource.data).changedKeys().hasOnly([
             'isRead'
           ]);
 
-      allow delete: if isAdminUid();
+      allow delete: if isSignedIn() &&
+          (
+            resource.data.toUid == request.auth.uid ||
+            resource.data.userId == request.auth.uid
+          );
     }
 
     match /{document=**} {

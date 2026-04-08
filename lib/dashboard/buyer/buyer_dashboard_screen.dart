@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import '../../routes.dart';
 import '../../services/auth_service.dart';
 import '../../services/buyer_engagement_service.dart';
+import '../../screens/eid_mandi_screen.dart';
 import '../../theme/app_colors.dart';
 import 'bid_bottom_sheet.dart';
 import 'buyer_listing_detail_screen.dart';
@@ -271,6 +272,13 @@ class _BuyerDashboardScreenState extends State<BuyerDashboardScreen> {
                       'Core marketplace: Browse live bids and winning bids with confidence',
                 ),
                 const SizedBox(height: 10),
+                StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  stream: _approvedListingsStream(),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(24),
                           child: CircularProgressIndicator(color: _gold),
                         ),
                       );
@@ -411,6 +419,13 @@ class _BuyerDashboardScreenState extends State<BuyerDashboardScreen> {
                       'Track your bids, accepted offers, and seller contact unlock progress',
                 ),
                 const SizedBox(height: 10),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.fromLTRB(10, 9, 10, 9),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        Colors.white.withValues(alpha: 0.08),
                         Colors.white.withValues(alpha: 0.05),
                       ],
                       begin: Alignment.topLeft,

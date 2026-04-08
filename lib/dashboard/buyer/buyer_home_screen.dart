@@ -28,6 +28,7 @@ import '../../marketplace/utils/mandi_display_utils.dart';
 import '../../marketplace/services/mandi_home_presenter.dart';
 import '../../marketplace/screens/all_mandi_rates_screen.dart';
 import '../../marketplace/services/pakistan_mandi_priority_registry.dart';
+import '../../screens/eid_mandi_screen.dart';
 import 'bid_bottom_sheet.dart';
 import 'watchlist_screen.dart';
 
@@ -4011,226 +4012,102 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
   }
 
   Widget _buildBakraMandiEntryCard() {
-    Future<void> openEntry([String? animalType]) async {
-      await _analyticsService.logEvent(
-        event: 'bakra_mandi_home_card_open',
-        data: <String, dynamic>{
-          'surface': 'buyer_home',
-          'animalType': animalType ?? 'all',
-        },
-      );
-      if (!mounted) return;
-      Navigator.of(context).pushNamed(
-        Routes.bakraMandiEntry,
-        arguments: <String, dynamic>{'animalType': animalType},
-      );
-    }
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final bool compact = constraints.maxWidth < 360;
-        final double ctaHeight = compact ? 36 : 40;
-        final double miniCardAspectRatio = compact ? 1.42 : 1.48;
-        final double miniLabelFontSize = compact ? 9.2 : 9.7;
-        final EdgeInsets miniLabelPadding = EdgeInsets.fromLTRB(
-          compact ? 8 : 9,
-          compact ? 16 : 18,
-          compact ? 8 : 9,
-          compact ? 7 : 8,
-        );
-
-        return Container(
-          padding: EdgeInsets.fromLTRB(10, compact ? 9 : 10, 10, 10),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            gradient: const LinearGradient(
-              colors: <Color>[Color(0xFF194B30), Color(0xFF24563A)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () {
+          debugPrint('Bakra Mandi Banner Tapped!');
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => const EidMandiScreen(),
             ),
-            border: Border.all(color: AppColors.softGlassBorder),
+          );
+        },
+        child: Container(
+          height: 100,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: <Color>[
+                Colors.teal.shade800,
+                Colors.teal.shade600,
+              ],
+            ),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: Colors.amber.withValues(alpha: 0.5),
+              width: 1.5,
+            ),
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: Row(
             children: [
-              Text(
-                'عید بکرا منڈی',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w800,
-                  fontSize: compact ? 16.5 : 17.5,
+              Padding(
+                padding: const EdgeInsets.all(12.0),
+                child: CircleAvatar(
+                  backgroundColor: Colors.amber.withValues(alpha: 0.2),
+                  child: const Text(
+                    '🐐',
+                    style: TextStyle(fontSize: 28),
+                  ),
                 ),
               ),
-              Text(
-                'Eid Bakra Mandi',
-                style: TextStyle(
-                  color: Colors.white70,
-                  fontWeight: FontWeight.w600,
-                  fontSize: compact ? 11 : 11.8,
-                ),
-              ),
-              SizedBox(height: compact ? 4 : 5),
-              Text(
-                'قربانی کے جانور خریدیں یا فروخت کریں',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600,
-                  fontSize: compact ? 11.2 : 11.8,
-                ),
-              ),
-              SizedBox(height: compact ? 6 : 7),
-              GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: _bakraMiniCardItems.length,
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  mainAxisSpacing: 6,
-                  crossAxisSpacing: 6,
-                  childAspectRatio: miniCardAspectRatio,
-                ),
-                itemBuilder: (context, index) {
-                  final item = _bakraMiniCardItems[index];
-                  return Container(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.14),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
                       ),
-                      boxShadow: const <BoxShadow>[
-                        BoxShadow(
-                          color: Color(0x19000000),
-                          blurRadius: 8,
-                          offset: Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(14),
-                      child: Material(
-                        color: Colors.transparent,
-                        child: InkWell(
-                          onTap: () => openEntry(item.type),
-                          child: Stack(
-                            fit: StackFit.expand,
-                            children: [
-                              Positioned.fill(
-                                child: Image.asset(
-                                  item.assetPath,
-                                  fit: item.imageFit,
-                                  alignment: item.imageAlignment,
-                                  errorBuilder: (context, error, stackTrace) =>
-                                      Container(
-                                        decoration: BoxDecoration(
-                                          gradient: LinearGradient(
-                                            begin: Alignment.topCenter,
-                                            end: Alignment.bottomCenter,
-                                            colors: <Color>[
-                                              Colors.white.withValues(
-                                                alpha: 0.16,
-                                              ),
-                                              Colors.white.withValues(
-                                                alpha: 0.05,
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                        alignment: Alignment.center,
-                                        child: Icon(
-                                          item.fallbackIcon,
-                                          color: Colors.white54,
-                                          size: 28,
-                                        ),
-                                      ),
-                                ),
-                              ),
-                              Positioned.fill(
-                                child: DecoratedBox(
-                                  decoration: BoxDecoration(
-                                    gradient: LinearGradient(
-                                      begin: Alignment.topCenter,
-                                      end: Alignment.bottomCenter,
-                                      colors: <Color>[
-                                        Colors.black.withValues(alpha: 0.03),
-                                        Colors.black.withValues(alpha: 0.00),
-                                        Colors.black.withValues(alpha: 0.26),
-                                        Colors.black.withValues(alpha: 0.64),
-                                      ],
-                                      stops: const <double>[0, 0.38, 0.68, 1],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              Positioned(
-                                left: 0,
-                                right: 0,
-                                bottom: 0,
-                                child: Container(
-                                  padding: miniLabelPadding,
-                                  alignment: Alignment.bottomCenter,
-                                  decoration: BoxDecoration(
-                                    gradient: LinearGradient(
-                                      begin: Alignment.topCenter,
-                                      end: Alignment.bottomCenter,
-                                      colors: <Color>[
-                                        Colors.black.withValues(alpha: 0.08),
-                                        Colors.black.withValues(alpha: 0.24),
-                                      ],
-                                    ),
-                                  ),
-                                  child: Text(
-                                    item.label,
-                                    textAlign: TextAlign.center,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: miniLabelFontSize + 1,
-                                      fontWeight: FontWeight.w700,
-                                      height: 1.1,
-                                      letterSpacing: 0.3,
-                                      shadows: const <Shadow>[
-                                        Shadow(
-                                          color: Color(0x80000000),
-                                          blurRadius: 6,
-                                          offset: Offset(0, 1),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
+                      decoration: BoxDecoration(
+                        color: Colors.red,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: const Text(
+                        'LIVE',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
                     ),
-                  );
-                },
+                    const SizedBox(height: 4),
+                    const Text(
+                      'عید بکرا منڈی',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const Text(
+                      'عید بکرا منڈی لائیو ہے - جانور دیکھنے کے لیے یہاں کلک کریں',
+                      style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 12,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
               ),
-              SizedBox(height: compact ? 8 : 9),
-              SizedBox(
-                width: double.infinity,
-                height: ctaHeight,
-                child: FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppColors.accentGold,
-                    foregroundColor: AppColors.ctaTextDark,
-                    padding: EdgeInsets.zero,
-                  ),
-                  onPressed: () => openEntry(),
-                  icon: Icon(Icons.visibility_rounded, size: compact ? 16 : 18),
-                  label: Text(
-                    'جانور دیکھیں / Explore Animals',
-                    style: TextStyle(fontSize: compact ? 12 : 12.8),
-                  ),
+              const Padding(
+                padding: EdgeInsets.all(16.0),
+                child: Icon(
+                  Icons.arrow_forward_ios,
+                  color: Colors.amber,
+                  size: 16,
                 ),
               ),
             ],
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 

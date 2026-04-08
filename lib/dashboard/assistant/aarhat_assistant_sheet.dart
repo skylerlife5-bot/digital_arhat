@@ -101,9 +101,9 @@ class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
   static Future<String>? _liveMarketContextInFlight;
 
   static const String _madadgarSystemInstruction =
-      "System Instruction: 'You are the official Digital Arhat Support Assistant. You help farmers, buyers, and sellers in Pakistan use the app. Speak in highly polite, natural Roman Urdu or Urdu script depending on the user's input. Be concise and professional. You understand terms like Kachi Arhat, Pakki Arhat, and Mandi rates. If asked a question unrelated to agriculture, the app, or farming, politely decline to answer.'";
+      "System Instruction: 'You are Madadgar, an expert, respectful, and highly experienced Agricultural Broker (Arhti) from Punjab, Pakistan. You speak in a warm, professional Roman Urdu tone. You address the user as Bhai jaan or Kisan bhai. You never sound like a robot; you sound like a seasoned trader giving insider advice.'";
   static const String _liveContextUsageInstruction =
-      "Always use the provided Live Market Context to answer rate queries. If the requested rate is not in the context, tell the user you don't have today's rate for that item.";
+      "Always use the provided Live Market Context to answer rate queries. If the requested rate is not in the context, tell the user you don't have today's rate for that item. Use the market trend context to explicitly mention whether market is Tezi (📈) or Mandi (📉).";
 
   int _auctionStep = 0;
   String? _auctionItemType;
@@ -253,28 +253,33 @@ class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
 
   @override
   Widget build(BuildContext context) {
-    final double topPadding = MediaQuery.of(context).viewPadding.top + 56;
+    // 1. Get strict dimensions once — no Scaffold, no resizeToAvoidBottomInset.
+    final double screenHeight = MediaQuery.of(context).size.height;
+    final double keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
 
-    return Scaffold(
-      resizeToAvoidBottomInset: true,
-      backgroundColor: Colors.transparent,
-      body: FadeTransition(
-        opacity: _fadeAnim,
-        child: SlideTransition(
-          position: _slideAnim,
-          child: Container(
-            margin: EdgeInsets.only(top: topPadding),
-            decoration: const BoxDecoration(
-              color: Color(0xFF0E3B2E),
-              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-            ),
+    // 2. Return a strict Container — breaks the unbounded measurement cycle.
+    return FadeTransition(
+      opacity: _fadeAnim,
+      child: SlideTransition(
+        position: _slideAnim,
+        child: Container(
+          height: screenHeight * 0.85,
+          // Handle keyboard manually instead of relying on Scaffold.
+          padding: EdgeInsets.only(bottom: keyboardHeight),
+          decoration: const BoxDecoration(
+            color: Color(0xFF0E3B2E),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: SafeArea(
+            top: false,
             child: Column(
               mainAxisSize: MainAxisSize.max,
               children: [
                 const _DragHandle(),
-                Expanded(
+                // Top area is Flexible so it never expands unboundedly.
+                Flexible(
                   child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -295,7 +300,102 @@ class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
                     ),
                   ),
                 ),
-                _buildChatSection(),
+                const Divider(color: Color(0x26FFFFFF), height: 1),
+                const SizedBox(height: 10),
+                // Chat list — bounded solely by this Expanded, no shrinkWrap.
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: _buildChatSection(),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                // FAQ chips (horizontal scroll).
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    physics: const BouncingScrollPhysics(),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: _buildFaqChips(),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // Input area.
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _chatCtrl,
+                          style: const TextStyle(
+                            color: AppColors.primaryText,
+                            fontSize: 13,
+                          ),
+                          decoration: InputDecoration(
+                            hintText: 'اپنا سوال یہاں لکھیں',
+                            hintStyle: const TextStyle(
+                              color: AppColors.secondaryText,
+                              fontSize: 12,
+                            ),
+                            filled: true,
+                            fillColor: AppColors.cardSurface,
+                            isDense: true,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 11,
+                            ),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide:
+                                  const BorderSide(color: AppColors.divider),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide:
+                                  const BorderSide(color: AppColors.divider),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: const BorderSide(
+                                color: AppColors.accentGold,
+                              ),
+                            ),
+                          ),
+                          onSubmitted: (_) => _submitChat(),
+                          textInputAction: TextInputAction.send,
+                          enabled: !_isChatLoading,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Material(
+                        color: _isChatLoading
+                            ? AppColors.accentGold.withValues(alpha: 0.5)
+                            : AppColors.accentGold,
+                        borderRadius: BorderRadius.circular(12),
+                        child: InkWell(
+                          onTap: _isChatLoading ? null : _submitChat,
+                          borderRadius: BorderRadius.circular(12),
+                          child: const Padding(
+                            padding: EdgeInsets.all(11),
+                            child: Icon(
+                              Icons.send_rounded,
+                              color: AppColors.ctaTextDark,
+                              size: 20,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
               ],
             ),
           ),
@@ -1001,173 +1101,82 @@ class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
     );
   }
 
+  // Chat message list only — bounded by the Expanded in build().
   Widget _buildChatSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        const Divider(color: Color(0x26FFFFFF), height: 1),
-        const SizedBox(height: 10),
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: ListView.builder(
-              controller: _chatScrollController,
-              itemCount: _chatMessages.length + (_isChatLoading ? 1 : 0),
-              itemBuilder: (context, index) {
-                if (_isChatLoading && index == _chatMessages.length) {
-                  return Align(
-                    alignment: Alignment.centerLeft,
-                    child: _buildTypingIndicator(),
-                  );
-                }
+    return ListView.builder(
+      controller: _chatScrollController,
+      itemCount: _chatMessages.length + (_isChatLoading ? 1 : 0),
+      itemBuilder: (context, index) {
+        if (_isChatLoading && index == _chatMessages.length) {
+          return Align(
+            alignment: Alignment.centerLeft,
+            child: _buildTypingIndicator(),
+          );
+        }
 
-                final item = _chatMessages[index];
-                final isUser = item.isUser;
+        final item = _chatMessages[index];
+        final isUser = item.isUser;
 
-                return Align(
-                  alignment: isUser
-                      ? Alignment.centerRight
-                      : Alignment.centerLeft,
-                  child: Container(
-                    constraints: const BoxConstraints(maxWidth: 320),
-                    margin: const EdgeInsets.only(bottom: 8),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 10,
-                    ),
-                    decoration: BoxDecoration(
-                      color: isUser
-                          ? const Color(0xFF1B8F4F)
-                          : const Color(0xFFE9EDF0),
-                      borderRadius: BorderRadius.circular(14).copyWith(
-                        bottomRight: isUser
-                            ? const Radius.circular(4)
-                            : const Radius.circular(14),
-                        bottomLeft: isUser
-                            ? const Radius.circular(14)
-                            : const Radius.circular(4),
-                      ),
-                      border: Border.all(
-                        color: isUser
-                            ? const Color(0xFF239E5A).withValues(alpha: 0.85)
-                            : const Color(0xFFD2D9DE),
-                      ),
-                    ),
-                    child: isUser
-                        ? Text(
-                            item.text,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 12.8,
-                              height: 1.35,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          )
-                        : MarkdownBody(
-                            data: item.text,
-                            selectable: true,
-                            styleSheet: MarkdownStyleSheet(
-                              p: const TextStyle(
-                                color: Color(0xFF1C252E),
-                                fontSize: 12.6,
-                                height: 1.35,
-                              ),
-                              strong: const TextStyle(
-                                color: Color(0xFF11161C),
-                                fontWeight: FontWeight.w800,
-                              ),
-                              listBullet: const TextStyle(
-                                color: Color(0xFF1C252E),
-                                fontSize: 12.6,
-                              ),
-                            ),
-                          ),
-                  ),
-                );
-              },
+        return Align(
+          alignment:
+              isUser ? Alignment.centerRight : Alignment.centerLeft,
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 320),
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 10,
             ),
-          ),
-        ),
-        const SizedBox(height: 10),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            physics: const BouncingScrollPhysics(),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: _buildFaqChips(),
+            decoration: BoxDecoration(
+              color: isUser
+                  ? const Color(0xFF1B8F4F)
+                  : const Color(0xFFE9EDF0),
+              borderRadius: BorderRadius.circular(14).copyWith(
+                bottomRight: isUser
+                    ? const Radius.circular(4)
+                    : const Radius.circular(14),
+                bottomLeft: isUser
+                    ? const Radius.circular(14)
+                    : const Radius.circular(4),
+              ),
+              border: Border.all(
+                color: isUser
+                    ? const Color(0xFF239E5A).withValues(alpha: 0.85)
+                    : const Color(0xFFD2D9DE),
+              ),
             ),
+            child: isUser
+                ? Text(
+                    item.text,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12.8,
+                      height: 1.35,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  )
+                : MarkdownBody(
+                    data: item.text,
+                    selectable: true,
+                    styleSheet: MarkdownStyleSheet(
+                      p: const TextStyle(
+                        color: Color(0xFF1C252E),
+                        fontSize: 12.6,
+                        height: 1.35,
+                      ),
+                      strong: const TextStyle(
+                        color: Color(0xFF11161C),
+                        fontWeight: FontWeight.w800,
+                      ),
+                      listBullet: const TextStyle(
+                        color: Color(0xFF1C252E),
+                        fontSize: 12.6,
+                      ),
+                    ),
+                  ),
           ),
-        ),
-        const SizedBox(height: 8),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _chatCtrl,
-                  style: const TextStyle(
-                    color: AppColors.primaryText,
-                    fontSize: 13,
-                  ),
-                  decoration: InputDecoration(
-                    hintText: 'اپنا سوال یہاں لکھیں',
-                    hintStyle: const TextStyle(
-                      color: AppColors.secondaryText,
-                      fontSize: 12,
-                    ),
-                    filled: true,
-                    fillColor: AppColors.cardSurface,
-                    isDense: true,
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 11,
-                    ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(color: AppColors.divider),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(color: AppColors.divider),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(color: AppColors.accentGold),
-                    ),
-                  ),
-                  onSubmitted: (_) => _submitChat(),
-                  textInputAction: TextInputAction.send,
-                  enabled: !_isChatLoading,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Material(
-                color: _isChatLoading
-                    ? AppColors.accentGold.withValues(alpha: 0.5)
-                    : AppColors.accentGold,
-                borderRadius: BorderRadius.circular(12),
-                child: InkWell(
-                  onTap: _isChatLoading ? null : _submitChat,
-                  borderRadius: BorderRadius.circular(12),
-                  child: const Padding(
-                    padding: EdgeInsets.all(11),
-                    child: Icon(
-                      Icons.send_rounded,
-                      color: AppColors.ctaTextDark,
-                      size: 20,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        SizedBox(height: MediaQuery.of(context).viewInsets.bottom + 12),
-      ],
+        );
+      },
     );
   }
 
@@ -1285,6 +1294,18 @@ class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
         text.contains('منڈی');
   }
 
+        bool _hasSmartBidIntent(String text) {
+          final q = _normalizeToken(text);
+          return q.contains('boli') ||
+          q.contains('bid') ||
+          q.contains('khareedna') ||
+          q.contains('kharidna') ||
+          q.contains('mashwara') ||
+          text.contains('بولی') ||
+          text.contains('خریدنا') ||
+          text.contains('مشورہ');
+        }
+
         Set<String> _queryTokens(String text) {
           return _normalizeToken(text)
           .split(' ')
@@ -1353,6 +1374,48 @@ class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
     return (quintalPrice / 100) * 40;
   }
 
+  double? _readPreviousQuintalRate(Map<String, dynamic> data) {
+    return _toDouble(data['previousPrice']) ??
+        _toDouble(data['previousRate']) ??
+        _toDouble(data['lastPrice']) ??
+        _toDouble(data['yesterdayPrice']) ??
+        _toDouble(data['prevPrice']) ??
+        _toDouble(data['prevRate']);
+  }
+
+  String _trendLineForRate({
+    required double currentQuintalRate,
+    required Map<String, dynamic> data,
+  }) {
+    final previous = _readPreviousQuintalRate(data);
+    if (previous != null && previous > 0) {
+      final deltaPct = ((currentQuintalRate - previous) / previous) * 100;
+      if (deltaPct <= -2.0) {
+        return 'Market aaj thori Naram (Mandi) hai 📉';
+      }
+      return 'Market mein aaj Tezi hai 📈';
+    }
+
+    final avg = _toDouble(data['averagePrice']) ?? _toDouble(data['avgPrice']);
+    final low = _toDouble(data['minPrice']) ?? _toDouble(data['lowPrice']);
+    final high = _toDouble(data['maxPrice']) ?? _toDouble(data['highPrice']);
+
+    if (avg != null && avg > 0) {
+      return currentQuintalRate >= avg
+          ? 'Market mein aaj Tezi hai 📈'
+          : 'Market aaj thori Naram (Mandi) hai 📉';
+    }
+
+    if (low != null && low > 0 && high != null && high > low) {
+      final midpoint = (low + high) / 2;
+      return currentQuintalRate >= midpoint
+          ? 'Market mein aaj Tezi hai 📈'
+          : 'Market aaj thori Naram (Mandi) hai 📉';
+    }
+
+    return 'Market mein aaj Tezi hai 📈';
+  }
+
   DateTime? _readRateTimestamp(Map<String, dynamic> data) {
     final dynamic value =
         data['syncedAt'] ?? data['rateDate'] ?? data['updatedAt'] ?? data['createdAt'];
@@ -1390,7 +1453,15 @@ class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
         '${_formatRate(chosen.mannRate)} rupaye fi 40 kilo (Mann) hai. '
         'Ye rate 40kg (Mann) ka hai. '
         'Formula: (${_formatRate(chosen.rawQuintalRate)} / 100) * 40 = ${_formatRate(chosen.mannRate)}. '
-        '$freshness.$locationText';
+        '$freshness.$locationText\n'
+        '${chosen.trendLine}';
+  }
+
+  String _formatSmartBidAdvice(_CommodityRateMatch chosen) {
+    final suggestedBid = chosen.mannRate * 0.95;
+    return '${chosen.commodityLabel} ka market rate ${_formatRate(chosen.mannRate)} hai. '
+        'Mera mashwara hai ke aap apni boli ${_formatRate(suggestedBid)} rupaye se shuru karein taake apko faida ho. '
+        '${chosen.trendLine}';
   }
 
   String _buildGeneralFallbackReply(String query) {
@@ -1467,6 +1538,7 @@ class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
     }
 
     final hasRateIntent = _hasRateIntent(query);
+    final hasSmartBidIntent = _hasSmartBidIntent(query);
     final localTokens = <String>{
       _normalizeToken((widget.userData['district'] ?? '').toString()),
       _normalizeToken((widget.userData['city'] ?? '').toString()),
@@ -1520,6 +1592,10 @@ class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
         mannRate: _convertQuintalToMann(rawQuintalRate),
         rateDate: rateDate,
         locationScore: locationScore,
+        trendLine: _trendLineForRate(
+          currentQuintalRate: rawQuintalRate,
+          data: data,
+        ),
       );
 
       if (locationScore > 0 &&
@@ -1531,13 +1607,17 @@ class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
       }
     }
 
-    if (!hasRateIntent && bestOverall == null) {
+    if (!hasRateIntent && !hasSmartBidIntent && bestOverall == null) {
       return null;
     }
 
     final chosen = bestLocal ?? bestOverall;
     if (chosen == null) {
       return null;
+    }
+
+    if (hasSmartBidIntent) {
+      return _formatSmartBidAdvice(chosen);
     }
 
     return _formatCommodityRateMessage(chosen);
@@ -1646,8 +1726,11 @@ class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
           continue;
         }
 
+        final trendContext = (rawRate ?? 0) > 5000
+            ? 'Market trend is Tezi (High).'
+            : 'Market trend is Naram/Mandi (Low).';
         entries.add(
-          '$city $commodity ${_formatRate(rate)} Rs per 40kg (Mann), $freshness',
+          '$city $commodity ${_formatRate(rate)} Rs per 40kg (Mann), $freshness, $trendContext',
         );
         if (entries.length >= 8) break;
       }
@@ -1782,6 +1865,7 @@ class _CommodityRateMatch {
     required this.mannRate,
     required this.rateDate,
     required this.locationScore,
+    required this.trendLine,
   });
 
   final String commodityLabel;
@@ -1791,6 +1875,7 @@ class _CommodityRateMatch {
   final double mannRate;
   final DateTime? rateDate;
   final int locationScore;
+  final String trendLine;
 
   bool isBetterThan(_CommodityRateMatch other) {
     if (locationScore != other.locationScore) {
