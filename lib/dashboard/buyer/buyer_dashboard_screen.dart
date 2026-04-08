@@ -263,21 +263,14 @@ class _BuyerDashboardScreenState extends State<BuyerDashboardScreen> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 24),
                 const _SectionTitle(
-                  icon: Icons.storefront_rounded,
-                  title: 'Active Mandi Listings / منڈی کی فعال آفرز',
+                  icon: Icons.gavel_rounded,
+                  title: 'Live Auctions & Offers / براہِ راست نیلام',
                   subtitle:
-                      'Browse live offers and compare bids with confidence',
+                      'Core marketplace: Browse live bids and winning bids with confidence',
                 ),
-                const SizedBox(height: 8),
-                StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                  stream: _approvedListingsStream(),
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Center(
-                        child: Padding(
-                          padding: EdgeInsets.all(24),
+                const SizedBox(height: 10),
                           child: CircularProgressIndicator(color: _gold),
                         ),
                       );
@@ -410,21 +403,14 @@ class _BuyerDashboardScreenState extends State<BuyerDashboardScreen> {
                     );
                   },
                 ),
-                const SizedBox(height: 14),
+                const SizedBox(height: 24),
                 const _SectionTitle(
                   icon: Icons.receipt_long_rounded,
-                  title: 'My Bid Activity / میری بولی سرگرمی',
+                  title: 'My Bid History / میری بولی سرگرمی',
                   subtitle:
-                      'Track bids, accepted offers, and contact unlock progress',
+                      'Track your bids, accepted offers, and seller contact unlock progress',
                 ),
-                const SizedBox(height: 8),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.fromLTRB(10, 9, 10, 9),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [
-                        Colors.white.withValues(alpha: 0.08),
+                const SizedBox(height: 10),
                         Colors.white.withValues(alpha: 0.05),
                       ],
                       begin: Alignment.topLeft,
