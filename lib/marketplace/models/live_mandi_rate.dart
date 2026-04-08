@@ -135,6 +135,7 @@ class LiveMandiRate {
     this.rowConfidence = MandiRowConfidence.unknown,
     this.sourceReliabilityLevel = MandiSourceReliabilityLevel.unknown,
     this.flags = const <String>[],
+    this.isMocked = false,
   });
 
   final String id;
@@ -201,6 +202,9 @@ class LiveMandiRate {
 
   /// Machine-readable flags explaining confidence reduction / rejection.
   final List<String> flags;
+
+  /// UI-only safety flag. Cloud official records must always be non-mocked.
+  final bool isMocked;
 
   // ---------------------------------------------------------------------------
   // Convenience getters
@@ -405,6 +409,7 @@ class LiveMandiRate {
     MandiRowConfidence? rowConfidence,
     MandiSourceReliabilityLevel? sourceReliabilityLevel,
     List<String>? flags,
+    bool? isMocked,
   }) {
     return LiveMandiRate(
       id: id ?? this.id,
@@ -462,6 +467,7 @@ class LiveMandiRate {
       rowConfidence: rowConfidence ?? this.rowConfidence,
       sourceReliabilityLevel: sourceReliabilityLevel ?? this.sourceReliabilityLevel,
       flags: flags ?? this.flags,
+      isMocked: isMocked ?? this.isMocked,
     );
   }
 
@@ -470,7 +476,7 @@ class LiveMandiRate {
     final age = DateTime.now().toUtc().difference(timestamp.toUtc());
     if (age.inMinutes <= 30) return MandiFreshnessStatus.live;
     if (age.inHours <= 6) return MandiFreshnessStatus.recent;
-    if (age.inHours > 24) return MandiFreshnessStatus.stale;
+    if (age.inHours > 72) return MandiFreshnessStatus.stale;
     return MandiFreshnessStatus.aging;
   }
 
@@ -490,6 +496,9 @@ class LiveMandiRate {
       return MandiSourceTrust.trustedLiveSource;
     }
     if (value.contains('amis') ||
+        value.contains('amis_local_residential') ||
+        value.contains('amis_(local)') ||
+        value.contains('amis_local') ||
         value.contains('lahore_official') ||
         value.contains('karachi_official') ||
         value.contains('official')) {
@@ -504,6 +513,20 @@ class LiveMandiRate {
       return MandiSourceTrust.trustedRecentSource;
     }
     return MandiSourceTrust.unknownSource;
+  }
+
+  static bool _isOfficialAmisSource({
+    required String source,
+    required String sourceId,
+  }) {
+    final sourceToken = source.trim().toLowerCase();
+    final sourceIdToken = sourceId.trim().toLowerCase();
+    final isExactOfficial = sourceToken == 'amis_lahore_official';
+    return isExactOfficial ||
+        sourceIdToken == 'amis_local_residential' ||
+        sourceIdToken.contains('amis_lahore_official') ||
+        sourceToken == 'amis (local)' ||
+        sourceToken.contains('amis_lahore_official');
   }
 
   static MandiFreshnessStatus _parseFreshness(
@@ -661,9 +684,30 @@ class LiveMandiRate {
     ]);
     final syncedAt = pickOptionalDate(const <String>['syncedAt', 'updatedAt']);
     final source = pickText(const <String>['source'], fallback: 'live_feed');
+    final sourceId = pickText(const <String>['sourceId']);
     final sourceType = pickText(const <String>['sourceType', 'ingestionSource']);
     final contributorType = pickText(const <String>['contributorType']);
-    final sourceTrust = _classifySource(source);
+    final sourceTrust = _classifySource('$source|$sourceId|$sourceType');
+    final metadata = (data['metadata'] is Map<String, dynamic>)
+        ? Map<String, dynamic>.from(data['metadata'] as Map<String, dynamic>)
+        : <String, dynamic>{};
+    final explicitMockFlag = data['isMocked'] == true ||
+        metadata['isMocked'] == true;
+    final isOfficialAmis = _isOfficialAmisSource(
+      source: source,
+      sourceId: sourceId,
+    );
+    final isExactLahoreOfficialSource =
+        source.trim().toLowerCase() == 'amis_lahore_official';
+    final isMocked = isOfficialAmis ? false : explicitMockFlag;
+    if (isOfficialAmis) {
+      metadata['seedFallback'] = false;
+      metadata['isMocked'] = false;
+    }
+    if (isExactLahoreOfficialSource) {
+      metadata['seedFallback'] = false;
+      metadata['isMocked'] = false;
+    }
     final freshnessStatus = _parseFreshness(
       data['freshnessStatus'],
       lastUpdated,
@@ -696,7 +740,7 @@ class LiveMandiRate {
       unit: pickText(const <String>['unit'], fallback: 'per 40kg'),
       trend: trend,
       source: source,
-      sourceId: pickText(const <String>['sourceId']),
+      sourceId: sourceId,
       sourceType: sourceType,
       lastUpdated: lastUpdated,
       syncedAt: syncedAt,
@@ -721,9 +765,7 @@ class LiveMandiRate {
       submissionTimestamp: pickOptionalDate(const <String>['submissionTimestamp']),
       isNearby: data['isNearby'] == true,
       isAiCleaned: data['isAiCleaned'] == true,
-      metadata: (data['metadata'] is Map<String, dynamic>)
-          ? Map<String, dynamic>.from(data['metadata'] as Map<String, dynamic>)
-          : <String, dynamic>{},
+        metadata: metadata,
       categoryId: pickText(const <String>[
         'categoryId',
         'category',
@@ -756,6 +798,7 @@ class LiveMandiRate {
       rowConfidence: _parseRowConfidence(data['rowConfidence']),
       sourceReliabilityLevel: _parseSourceReliability(data['sourceReliabilityLevel']),
       flags: _parseFlags(data['flags']),
+      isMocked: isMocked,
     );
   }
 

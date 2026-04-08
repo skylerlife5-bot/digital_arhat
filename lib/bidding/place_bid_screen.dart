@@ -142,7 +142,10 @@ class _PlaceBidScreenState extends State<PlaceBidScreen> {
         truthy(data['cnicVerified']) ||
         truthy(data['isCnicVerified']) ||
         truthy(data['isCNICVerified']) ||
-        verificationStatus == _verificationApproved;
+        truthy(data['is_verified']) ||
+        truthy(data['isVerified']) ||
+        verificationStatus == _verificationApproved ||
+        verificationStatus == 'verified';
 
     if (isApproved) return _verificationApproved;
     if (verificationStatus == _verificationPendingReview) {
@@ -833,6 +836,10 @@ class _PlaceBidScreenState extends State<PlaceBidScreen> {
 
   String _humanizeError(Object error) {
     final message = error.toString().replaceAll('Exception: ', '').trim();
+    if (message.toLowerCase() == 'verification_required' ||
+        message.toLowerCase().contains('verification_required')) {
+      return 'بولی لگانے کے لیے شناختی کارڈ کی تصدیق ضروری ہے۔ براہِ کرم پہلے اپنا اکاؤنٹ تصدیق کروائیں۔';
+    }
     if (message.toLowerCase().contains('permission-denied')) {
       if (FirebaseAuth.instance.currentUser == null) {
         return 'Please sign in to place a bid.';

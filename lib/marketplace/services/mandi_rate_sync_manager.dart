@@ -20,11 +20,12 @@ class MandiRatesSyncState {
 
   bool get isStale {
     if (rates.isEmpty) return true;
-    final freshest = rates
-      .map((item) => item.lastUpdated.toUtc())
-      .reduce((a, b) => a.isAfter(b) ? a : b);
+    final freshest = lastSyncedAt?.toUtc() ??
+        rates
+            .map((item) => (item.syncedAt ?? item.lastUpdated).toUtc())
+            .reduce((a, b) => a.isAfter(b) ? a : b);
     return DateTime.now().toUtc().difference(freshest) >
-      const Duration(hours: 24);
+        const Duration(hours: 72);
   }
 
   static const MandiRatesSyncState initial = MandiRatesSyncState(

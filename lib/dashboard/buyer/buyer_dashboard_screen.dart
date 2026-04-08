@@ -210,6 +210,8 @@ class _BuyerDashboardScreenState extends State<BuyerDashboardScreen> {
               padding: const EdgeInsets.fromLTRB(14, 10, 14, 18),
               children: [
                 _TopBanner(name: _buyerName),
+                const SizedBox(height: 6),
+                _VerificationBanner(userData: widget.userData),
                 const SizedBox(height: 10),
                 Container(
                   padding: const EdgeInsets.all(10),
@@ -779,6 +781,125 @@ class _TopBanner extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Shows an amber verification notice banner when the buyers' CNIC is not yet
+/// approved. Disappears automatically once admin marks the account as verified.
+class _VerificationBanner extends StatelessWidget {
+  const _VerificationBanner({required this.userData});
+
+  final Map<String, dynamic> userData;
+
+  static bool _isTruthy(dynamic v) {
+    if (v is bool) return v;
+    if (v is num) return v != 0;
+    final t = (v ?? '').toString().trim().toLowerCase();
+    return t == 'true' || t == '1' || t == 'yes';
+  }
+
+  static bool _isVerified(Map<String, dynamic> data) {
+    final vs = (data['verificationStatus'] ?? '').toString().trim().toLowerCase();
+    return _isTruthy(data['cnicVerified']) ||
+        _isTruthy(data['isCnicVerified']) ||
+        _isTruthy(data['isCNICVerified']) ||
+        _isTruthy(data['is_verified']) ||
+        _isTruthy(data['isVerified']) ||
+        vs == 'approved' ||
+        vs == 'verified';
+  }
+
+  static bool _isPendingReview(Map<String, dynamic> data) {
+    final vs = (data['verificationStatus'] ?? '').toString().trim().toLowerCase();
+    return vs == 'pending_review';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return const SizedBox.shrink();
+
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
+      builder: (context, snap) {
+        final data = snap.data?.data() ?? userData;
+        if (_isVerified(data)) return const SizedBox.shrink();
+
+        final pending = _isPendingReview(data);
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 2),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: pending
+                ? const Color(0xFF1A1400)
+                : const Color(0xFF1A0A00),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: pending
+                  ? const Color(0xFFD4AF37).withValues(alpha: 0.55)
+                  : const Color(0xFFFF6B00).withValues(alpha: 0.65),
+            ),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Icon(
+                pending ? Icons.hourglass_top_rounded : Icons.verified_user_outlined,
+                color: pending ? const Color(0xFFD4AF37) : const Color(0xFFFF8C00),
+                size: 20,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      pending
+                          ? 'تصدیق زیرِ جائزہ ہے – منظوری کا انتظار کریں'
+                          : 'بولی لگانے کے لیے اپنے اکاؤنٹ کی تصدیق کروائیں',
+                      style: TextStyle(
+                        color: pending
+                            ? const Color(0xFFD4AF37)
+                            : const Color(0xFFFF8C00),
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      pending
+                          ? 'Your CNIC is under review – you will be able to bid once approved'
+                          : 'Verify your ID before placing your first bid',
+                      style: const TextStyle(color: Colors.white60, fontSize: 11.5),
+                    ),
+                  ],
+                ),
+              ),
+              if (!pending) ...[
+                const SizedBox(width: 8),
+                TextButton(
+                  onPressed: () =>
+                      Navigator.of(context).pushNamed('/masterSignUp'),
+                  style: TextButton.styleFrom(
+                    backgroundColor: const Color(0xFFFF6B00).withValues(alpha: 0.15),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  ),
+                  child: const Text(
+                    'تصدیق کریں',
+                    style: TextStyle(
+                      color: Color(0xFFFF8C00),
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
     );
   }
 }

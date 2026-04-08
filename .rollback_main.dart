@@ -54,9 +54,6 @@ class InitializationService {
   }
 
   static Future<void> _initializeAll() async {
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
     _firebaseReady = true;
 
     try {

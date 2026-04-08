@@ -55,6 +55,16 @@ class _LiveMandiRatesSectionState extends State<LiveMandiRatesSection> {
   static const Set<String> _homeCommodityAllowlist =
       MandiHomePresenter.homeCommodityAllowlist;
 
+  bool _isExplicitOfficialAmisRate(LiveMandiRate item) {
+    final source = item.source.trim().toLowerCase();
+    final sourceId = item.sourceId.trim().toLowerCase();
+    return source == 'amis_lahore_official' ||
+      sourceId == 'amis_local_residential' ||
+        sourceId.contains('amis_lahore_official') ||
+        source == 'amis (local)' ||
+        source.contains('amis_lahore_official');
+  }
+
   @override
   void initState() {
     super.initState();
@@ -74,11 +84,15 @@ class _LiveMandiRatesSectionState extends State<LiveMandiRatesSection> {
         sourceRates = locationScoped;
       }
 
-      // Display layer guard: show only user-city commodities.
-      sourceRates = MandiHomePresenter.filterRatesByUserCity(
+      // Trust cloud: keep service-provided scope and allow Punjab-wide fallback
+      // when city/district exact matches are unavailable.
+      final cityScoped = MandiHomePresenter.filterRatesByUserCity(
         rates: sourceRates,
         userCity: loc.city,
       );
+      if (cityScoped.isNotEmpty) {
+        sourceRates = cityScoped;
+      }
       if (_countAllowlistedRates(sourceRates) == 0) {
         debugPrint('[MANDI_FIRESTORE_ERROR] LiveMandiRatesSection: no allowlisted rates for city=${loc.city} – Firestore mandi_rates collection may be empty');
         sourceRates = const <LiveMandiRate>[];
@@ -1613,22 +1627,30 @@ class _LiveMandiRatesSectionState extends State<LiveMandiRatesSection> {
     final tickerRates = _tickerRates;
     final cardRates = _cardRates;
     final stale = rates.isNotEmpty && _state.isStale;
+    final hasExplicitOfficialAmis = rates.any(_isExplicitOfficialAmisRate);
     final hasLiveOrRecent = rates.any(
       (item) => item.isLiveFresh || item.isRecentFresh,
     );
     final hasAgingOnly = rates.isNotEmpty && !hasLiveOrRecent;
+
+    final titleText = _isNationalFallbackActive
+        ? 'Latest Punjab Mandi Rates / پنجاب کی تازہ منڈی ریٹس'
+        : 'آپ کے قریب منڈی ریٹس';
+    final subtitleText = _isNationalFallbackActive
+        ? 'Punjab-wide fallback from official cloud data\nصوبہ پنجاب کے تازہ سرکاری ریٹس'
+        : 'صاف، تازہ اور تصدیق شدہ منڈی قیمتیں';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            const Expanded(
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'آپ کے قریب منڈی ریٹس',
+                    titleText,
                     style: TextStyle(
                       color: AppColors.primaryText,
                       fontWeight: FontWeight.w800,
@@ -1637,7 +1659,7 @@ class _LiveMandiRatesSectionState extends State<LiveMandiRatesSection> {
                   ),
                   SizedBox(height: 2),
                   Text(
-                    'صاف، تازہ اور تصدیق شدہ منڈی قیمتیں',
+                    subtitleText,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -1685,6 +1707,18 @@ class _LiveMandiRatesSectionState extends State<LiveMandiRatesSection> {
               'ڈیٹا پرانا ہو سکتا ہے۔ سب دیکھیں میں جا کر ریفریش کریں۔',
               style: TextStyle(
                 color: AppColors.urgencyRed,
+                fontSize: 10.8,
+                height: 1.25,
+              ),
+            ),
+          ),
+        if (rates.isNotEmpty && hasExplicitOfficialAmis)
+          const Padding(
+            padding: EdgeInsets.only(bottom: 6),
+            child: Text(
+              'Official Verified Rates / سرکاری تصدیق شدہ ریٹس',
+              style: TextStyle(
+                color: AppColors.secondaryText,
                 fontSize: 10.8,
                 height: 1.25,
               ),

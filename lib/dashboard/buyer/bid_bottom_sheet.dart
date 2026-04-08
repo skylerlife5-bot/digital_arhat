@@ -33,7 +33,90 @@ class BidBottomSheet extends StatefulWidget {
 class _BidBottomSheetState extends State<BidBottomSheet> {
   static const Color _gold = AppColors.accentGold;
   static const Color _darkGreen = AppColors.background;
+  static const String _verificationApproved = 'approved';
+  static const String _verificationPendingReview = 'pending_review';
   static final Map<String, DateTime> _localThrottle = <String, DateTime>{};
+
+  bool _truthy(dynamic v) {
+    if (v is bool) return v;
+    if (v is num) return v != 0;
+    final t = (v ?? '').toString().trim().toLowerCase();
+    return t == 'true' || t == '1' || t == 'yes';
+  }
+
+  Future<String> _getVerificationState(String uid) async {
+    final userSnap = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .get();
+    final data = userSnap.data() ?? <String, dynamic>{};
+    final String vs =
+        (data['verificationStatus'] ?? '').toString().trim().toLowerCase();
+    final bool approved =
+        _truthy(data['cnicVerified']) ||
+        _truthy(data['isCnicVerified']) ||
+        _truthy(data['isCNICVerified']) ||
+        _truthy(data['is_verified']) ||
+        _truthy(data['isVerified']) ||
+        vs == _verificationApproved ||
+        vs == 'verified';
+    if (approved) return _verificationApproved;
+    if (vs == _verificationPendingReview) return _verificationPendingReview;
+    return 'unverified';
+  }
+
+  Future<bool> _handleVerificationGate(String uid) async {
+    final state = await _getVerificationState(uid);
+    if (state == _verificationApproved) return true;
+
+    if (state == _verificationPendingReview) {
+      if (!mounted) return false;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('آپ کی تصدیق زیرِ جائزہ ہے'),
+          content: const Text(
+            'آپ کی معلومات کا جائزہ لیا جا رہا ہے۔ منظوری کے بعد آپ بولی لگا سکیں گے۔',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('ٹھیک ہے'),
+            ),
+          ],
+        ),
+      );
+      return false;
+    }
+
+    // Unverified
+    if (!mounted) return false;
+    final action = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('بولی لگانے کے لیے تصدیق ضروری ہے'),
+        content: const Text(
+          'آپ منڈی دیکھ سکتے ہیں، لیکن پہلی بار بولی لگانے کے لیے شناخت کی تصدیق مکمل کرنا لازمی ہے۔',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop('later'),
+            child: const Text('بعد میں'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop('verify'),
+            child: const Text('ابھی تصدیق کریں'),
+          ),
+        ],
+      ),
+    );
+    if (action == 'verify' && mounted) {
+      Navigator.of(context).pushNamed('/masterSignUp');
+    }
+    return false;
+  }
+
+
 
   final BiddingService _biddingService = BiddingService();
   final MandiIntelligenceService _aiService = MandiIntelligenceService();
@@ -152,6 +235,9 @@ class _BidBottomSheetState extends State<BidBottomSheet> {
     final raw = error.toString().replaceAll('Exception: ', '').trim();
     final lower = raw.toLowerCase();
 
+    if (lower == 'verification_required' || lower.contains('verification_required')) {
+      return 'بولی لگانے کے لیے شناختی کارڈ کی تصدیق ضروری ہے۔ براہِ کرم پہلے اپنا اکاؤنٹ تصدیق کروائیں۔';
+    }
     if (lower.contains('permission-denied')) {
       return 'Could not place bid. Please try again / بولی جمع نہ ہو سکی، دوبارہ کوشش کریں';
     }
@@ -190,6 +276,9 @@ class _BidBottomSheetState extends State<BidBottomSheet> {
       _snack('Please sign in to place a bid.\nبولی لگانے کے لیے سائن اِن کریں۔');
       return;
     }
+
+    final bool canBid = await _handleVerificationGate(currentUser.uid);
+    if (!canBid) return;
 
     final enteredText = _bidController.text.trim();
     if (enteredText.isEmpty) {

@@ -195,6 +195,617 @@ class BuyerHomeScreen extends StatefulWidget {
   State<BuyerHomeScreen> createState() => _BuyerHomeScreenState();
 }
 
+class _AdvancedFiltersResult {
+  const _AdvancedFiltersResult({
+    required this.category,
+    required this.subcategory,
+    required this.province,
+    required this.district,
+    required this.tehsil,
+    required this.city,
+    required this.saleType,
+    required this.sort,
+    required this.minPrice,
+    required this.maxPrice,
+    required this.minQty,
+    required this.maxQty,
+    required this.verifiedOnly,
+    required this.qurbaniOnly,
+  });
+
+  final MandiType? category;
+  final String? subcategory;
+  final String? province;
+  final String? district;
+  final String? tehsil;
+  final String? city;
+  final String saleType;
+  final String sort;
+  final double? minPrice;
+  final double? maxPrice;
+  final double? minQty;
+  final double? maxQty;
+  final bool verifiedOnly;
+  final bool qurbaniOnly;
+}
+
+class _AdvancedFiltersSheet extends StatefulWidget {
+  const _AdvancedFiltersSheet({
+    required this.initialCategory,
+    required this.initialSubcategory,
+    required this.initialProvince,
+    required this.initialDistrict,
+    required this.initialTehsil,
+    required this.initialCity,
+    required this.initialSaleType,
+    required this.initialSort,
+    required this.initialMinPrice,
+    required this.initialMaxPrice,
+    required this.initialMinQty,
+    required this.initialMaxQty,
+    required this.initialVerifiedOnly,
+    required this.initialQurbaniOnly,
+    required this.homeCategoryLabel,
+    required this.subcategoryOptionsForCategory,
+    required this.provinceOptionsForFilters,
+    required this.districtOptionsForFilters,
+    required this.tehsilOptionsForFilters,
+    required this.cityOptionsForFilters,
+    required this.bilingualLocationLabel,
+    required this.provinceUrduByEn,
+    required this.districtUrduByEn,
+    required this.tehsilUrduByEn,
+    required this.cityUrduByEn,
+    required this.isQurbaniSeason,
+  });
+
+  final MandiType? initialCategory;
+  final String? initialSubcategory;
+  final String? initialProvince;
+  final String? initialDistrict;
+  final String? initialTehsil;
+  final String? initialCity;
+  final String initialSaleType;
+  final String initialSort;
+  final double? initialMinPrice;
+  final double? initialMaxPrice;
+  final double? initialMinQty;
+  final double? initialMaxQty;
+  final bool initialVerifiedOnly;
+  final bool initialQurbaniOnly;
+  final String Function(MandiType type) homeCategoryLabel;
+  final List<MarketSubcategoryOption> Function(MandiType? category)
+      subcategoryOptionsForCategory;
+  final List<String> Function() provinceOptionsForFilters;
+  final List<String> Function(String province) districtOptionsForFilters;
+  final List<String> Function(String district) tehsilOptionsForFilters;
+  final List<String> Function(String district, String tehsil)
+      cityOptionsForFilters;
+  final String Function(String english, Map<String, String> urduMap)
+      bilingualLocationLabel;
+  final Map<String, String> provinceUrduByEn;
+  final Map<String, String> districtUrduByEn;
+  final Map<String, String> tehsilUrduByEn;
+  final Map<String, String> cityUrduByEn;
+  final bool isQurbaniSeason;
+
+  @override
+  State<_AdvancedFiltersSheet> createState() => _AdvancedFiltersSheetState();
+}
+
+class _AdvancedFiltersSheetState extends State<_AdvancedFiltersSheet> {
+  late final TextEditingController _minController;
+  late final TextEditingController _maxController;
+  late final TextEditingController _minQtyController;
+  late final TextEditingController _maxQtyController;
+
+  late MandiType? _tempCategory;
+  late String? _tempSubcategory;
+  late String? _tempProvince;
+  late String? _tempDistrict;
+  late String? _tempTehsil;
+  late String? _tempCity;
+  late String _tempSaleType;
+  late String _tempSort;
+  late bool _tempVerifiedOnly;
+  late bool _tempQurbaniOnly;
+
+  @override
+  void initState() {
+    super.initState();
+    _minController = TextEditingController(
+      text: widget.initialMinPrice?.toStringAsFixed(0) ?? '',
+    );
+    _maxController = TextEditingController(
+      text: widget.initialMaxPrice?.toStringAsFixed(0) ?? '',
+    );
+    _minQtyController = TextEditingController(
+      text: widget.initialMinQty?.toStringAsFixed(0) ?? '',
+    );
+    _maxQtyController = TextEditingController(
+      text: widget.initialMaxQty?.toStringAsFixed(0) ?? '',
+    );
+
+    _tempCategory = widget.initialCategory;
+    _tempSubcategory = widget.initialSubcategory;
+    _tempProvince = widget.initialProvince;
+    _tempDistrict = widget.initialDistrict;
+    _tempTehsil = widget.initialTehsil;
+    _tempCity = widget.initialCity;
+    _tempSaleType = widget.initialSaleType;
+    _tempSort = widget.initialSort;
+    _tempVerifiedOnly = widget.initialVerifiedOnly;
+    _tempQurbaniOnly = widget.initialQurbaniOnly;
+  }
+
+  @override
+  void dispose() {
+    _minController.dispose();
+    _maxController.dispose();
+    _minQtyController.dispose();
+    _maxQtyController.dispose();
+    super.dispose();
+  }
+
+  Widget _sectionHeader(String title) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: AppColors.cardSurface,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.softGlassBorder),
+      ),
+      child: Text(
+        title,
+        style: const TextStyle(
+          color: AppColors.primaryText,
+          fontWeight: FontWeight.w700,
+          fontSize: 12,
+        ),
+      ),
+    );
+  }
+
+  InputDecoration _fieldDecoration(String label) {
+    return InputDecoration(
+      labelText: label,
+      labelStyle: const TextStyle(color: AppColors.secondaryText),
+      filled: true,
+      fillColor: AppColors.cardSurface,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: AppColors.divider),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: AppColors.divider),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: AppColors.accentGold),
+      ),
+    );
+  }
+
+  List<DropdownMenuItem<String?>> _locationMenuItems(
+    List<String> values,
+    Map<String, String> urduLookup,
+  ) {
+    return <DropdownMenuItem<String?>>[
+      const DropdownMenuItem<String?>(
+        value: null,
+        child: Text('All / سب'),
+      ),
+      ...values.map(
+        (value) => DropdownMenuItem<String?>(
+          value: value,
+          child: Text(widget.bilingualLocationLabel(value, urduLookup)),
+        ),
+      ),
+    ];
+  }
+
+  void _applyAndClose() {
+    FocusScope.of(context).unfocus();
+    Navigator.of(context).pop(
+      _AdvancedFiltersResult(
+        category: _tempCategory,
+        subcategory: _tempSubcategory,
+        province: _tempProvince,
+        district: _tempDistrict,
+        tehsil: _tempTehsil,
+        city: _tempCity,
+        saleType: _tempSaleType,
+        sort: _tempSort,
+        minPrice: double.tryParse(_minController.text.trim()),
+        maxPrice: double.tryParse(_maxController.text.trim()),
+        minQty: double.tryParse(_minQtyController.text.trim()),
+        maxQty: double.tryParse(_maxQtyController.text.trim()),
+        verifiedOnly: _tempVerifiedOnly,
+        qurbaniOnly: _tempQurbaniOnly,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final districtOptions = (_tempProvince ?? '').trim().isEmpty
+        ? const <String>[]
+        : widget.districtOptionsForFilters(_tempProvince!);
+    final tehsilOptions = (_tempDistrict ?? '').trim().isEmpty
+        ? const <String>[]
+        : widget.tehsilOptionsForFilters(_tempDistrict!);
+    final cityOptions = ((_tempDistrict ?? '').trim().isEmpty ||
+            (_tempTehsil ?? '').trim().isEmpty)
+        ? const <String>[]
+        : widget.cityOptionsForFilters(_tempDistrict!, _tempTehsil!);
+    final allSubcategories = widget.subcategoryOptionsForCategory(
+      _tempCategory,
+    );
+
+    return SafeArea(
+      child: GestureDetector(
+        onTap: () => FocusScope.of(context).unfocus(),
+        behavior: HitTestBehavior.opaque,
+        child: Padding(
+          padding: EdgeInsets.only(
+            left: 14,
+            right: 14,
+            top: 14,
+            bottom: MediaQuery.of(context).viewInsets.bottom + 14,
+          ),
+          child: SizedBox(
+            height: MediaQuery.of(context).size.height * 0.85,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Advanced Filters / اعلی فلٹرز',
+                  style: TextStyle(
+                    color: AppColors.primaryText,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Expanded(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _sectionHeader('Sort / ترتیب'),
+                        const SizedBox(height: 10),
+                        DropdownButtonFormField<String>(
+                          initialValue: _tempSort,
+                          dropdownColor: AppColors.background,
+                          decoration: _fieldDecoration('Sort / ترتیب'),
+                          style: const TextStyle(color: AppColors.primaryText),
+                          items: const <DropdownMenuItem<String>>[
+                            DropdownMenuItem(
+                              value: 'newest',
+                              child: Text('Newest / تازہ ترین'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'nearest',
+                              child: Text('Nearest / قریب ترین'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'lowest_price',
+                              child: Text('Lowest Price / کم قیمت'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'highest_price',
+                              child: Text('Highest Price / زیادہ قیمت'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'ending_soon',
+                              child: Text(
+                                'Ending Soon / جلد ختم ہونے والی بولی',
+                              ),
+                            ),
+                            DropdownMenuItem(
+                              value: 'highest_bid',
+                              child: Text('Highest Bid / سب سے بڑی بولی'),
+                            ),
+                          ],
+                          onChanged: (value) {
+                            if (value == null || !mounted) return;
+                            setState(() => _tempSort = value);
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                        _sectionHeader('Sale Type / فروخت کی قسم'),
+                        const SizedBox(height: 10),
+                        DropdownButtonFormField<String>(
+                          initialValue: _tempSaleType,
+                          dropdownColor: AppColors.background,
+                          decoration: _fieldDecoration(
+                            'Sale Type / فروخت کی قسم',
+                          ),
+                          style: const TextStyle(color: AppColors.primaryText),
+                          items: const <DropdownMenuItem<String>>[
+                            DropdownMenuItem(
+                              value: 'all',
+                              child: Text('All / سب'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'auction',
+                              child: Text('Auction / بولی'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'fixed',
+                              child: Text('Fixed Price / مقرر قیمت'),
+                            ),
+                          ],
+                          onChanged: (value) {
+                            if (value == null || !mounted) return;
+                            setState(() => _tempSaleType = value);
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                        _sectionHeader('Category / زمرہ'),
+                        const SizedBox(height: 10),
+                        DropdownButtonFormField<MandiType?>(
+                          initialValue: _tempCategory,
+                          dropdownColor: AppColors.background,
+                          decoration: _fieldDecoration('Category / زمرہ'),
+                          style: const TextStyle(color: AppColors.primaryText),
+                          items: <DropdownMenuItem<MandiType?>>[
+                            const DropdownMenuItem<MandiType?>(
+                              value: null,
+                              child: Text('All / سب'),
+                            ),
+                            ...MarketHierarchy.categories.map(
+                              (cat) => DropdownMenuItem<MandiType?>(
+                                value: cat.mandiType,
+                                child: Text(
+                                  widget.homeCategoryLabel(cat.mandiType),
+                                ),
+                              ),
+                            ),
+                          ],
+                          onChanged: (value) {
+                            if (!mounted) return;
+                            setState(() {
+                              _tempCategory = value;
+                              _tempSubcategory = null;
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 10),
+                        DropdownButtonFormField<String?>(
+                          initialValue: _tempSubcategory,
+                          dropdownColor: AppColors.background,
+                          decoration: _fieldDecoration('Subcategory / ذیلی زمرہ'),
+                          style: const TextStyle(color: AppColors.primaryText),
+                          items: <DropdownMenuItem<String?>>[
+                            const DropdownMenuItem<String?>(
+                              value: null,
+                              child: Text('All / سب'),
+                            ),
+                            ...allSubcategories.map(
+                              (option) => DropdownMenuItem<String?>(
+                                value: option.id,
+                                child: Text(option.bilingualLabel),
+                              ),
+                            ),
+                          ],
+                          onChanged: (value) {
+                            if (!mounted) return;
+                            setState(() => _tempSubcategory = value);
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                        _sectionHeader('Location Filters / مقام کے فلٹرز'),
+                        const SizedBox(height: 10),
+                        DropdownButtonFormField<String?>(
+                          initialValue: _tempProvince,
+                          dropdownColor: AppColors.background,
+                          decoration: _fieldDecoration('Province / صوبہ'),
+                          style: const TextStyle(color: AppColors.primaryText),
+                          items: _locationMenuItems(
+                            widget.provinceOptionsForFilters(),
+                            widget.provinceUrduByEn,
+                          ),
+                          onChanged: (value) {
+                            if (!mounted) return;
+                            setState(() {
+                              _tempProvince = value;
+                              _tempDistrict = null;
+                              _tempTehsil = null;
+                              _tempCity = null;
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 10),
+                        DropdownButtonFormField<String?>(
+                          initialValue: _tempDistrict,
+                          dropdownColor: AppColors.background,
+                          decoration: _fieldDecoration('District / ضلع'),
+                          style: const TextStyle(color: AppColors.primaryText),
+                          items: _locationMenuItems(
+                            districtOptions,
+                            widget.districtUrduByEn,
+                          ),
+                          onChanged: (value) {
+                            if (!mounted) return;
+                            setState(() {
+                              _tempDistrict = value;
+                              _tempTehsil = null;
+                              _tempCity = null;
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 10),
+                        DropdownButtonFormField<String?>(
+                          initialValue: _tempTehsil,
+                          dropdownColor: AppColors.background,
+                          decoration: _fieldDecoration('Tehsil / تحصیل'),
+                          style: const TextStyle(color: AppColors.primaryText),
+                          items: _locationMenuItems(
+                            tehsilOptions,
+                            widget.tehsilUrduByEn,
+                          ),
+                          onChanged: (value) {
+                            if (!mounted) return;
+                            setState(() {
+                              _tempTehsil = value;
+                              _tempCity = null;
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 10),
+                        DropdownButtonFormField<String?>(
+                          initialValue: _tempCity,
+                          dropdownColor: AppColors.background,
+                          decoration: _fieldDecoration('City / شہر'),
+                          style: const TextStyle(color: AppColors.primaryText),
+                          items: <DropdownMenuItem<String?>>[
+                            const DropdownMenuItem<String?>(
+                              value: null,
+                              child: Text('All / سب'),
+                            ),
+                            ...cityOptions.map(
+                              (value) => DropdownMenuItem<String?>(
+                                value: value,
+                                child: Text(
+                                  widget.bilingualLocationLabel(
+                                    value,
+                                    widget.cityUrduByEn,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                          onChanged: (value) {
+                            if (!mounted) return;
+                            setState(() => _tempCity = value);
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                        _sectionHeader('Price Range / قیمت کی حد'),
+                        const SizedBox(height: 10),
+                        TextField(
+                          controller: _minController,
+                          keyboardType: TextInputType.number,
+                          style: const TextStyle(color: AppColors.primaryText),
+                          decoration: _fieldDecoration(
+                            'Min Price / کم از کم قیمت',
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        TextField(
+                          controller: _maxController,
+                          keyboardType: TextInputType.number,
+                          style: const TextStyle(color: AppColors.primaryText),
+                          decoration: _fieldDecoration(
+                            'Max Price / زیادہ سے زیادہ قیمت',
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        _sectionHeader('Quantity / مقدار'),
+                        const SizedBox(height: 10),
+                        TextField(
+                          controller: _minQtyController,
+                          keyboardType: TextInputType.number,
+                          style: const TextStyle(color: AppColors.primaryText),
+                          decoration: _fieldDecoration('Min Quantity / کم مقدار'),
+                        ),
+                        const SizedBox(height: 10),
+                        TextField(
+                          controller: _maxQtyController,
+                          keyboardType: TextInputType.number,
+                          style: const TextStyle(color: AppColors.primaryText),
+                          decoration: _fieldDecoration(
+                            'Max Quantity / زیادہ مقدار',
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        _sectionHeader('Seller Filters / بیچنے والے کے فلٹرز'),
+                        const SizedBox(height: 8),
+                        SwitchListTile(
+                          value: _tempVerifiedOnly,
+                          activeThumbColor: AppColors.accentGold,
+                          title: const Text(
+                            'Verified Sellers Only / صرف تصدیق شدہ فروخت کنندہ',
+                            style: TextStyle(color: AppColors.primaryText),
+                          ),
+                          onChanged: (value) {
+                            if (!mounted) return;
+                            setState(() => _tempVerifiedOnly = value);
+                          },
+                        ),
+                        if (widget.isQurbaniSeason)
+                          SwitchListTile(
+                            value: _tempQurbaniOnly,
+                            activeThumbColor: AppColors.accentGold,
+                            title: const Text(
+                              'Qurbani Only / صرف قربانی',
+                              style: TextStyle(color: AppColors.primaryText),
+                            ),
+                            onChanged: (value) {
+                              if (!mounted) return;
+                              setState(() => _tempQurbaniOnly = value);
+                            },
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.only(top: 10),
+                  decoration: BoxDecoration(
+                    border: Border(
+                      top: BorderSide(
+                        color: AppColors.primaryText.withValues(alpha: 0.12),
+                      ),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () {
+                            FocusScope.of(context).unfocus();
+                            Navigator.of(context).pop();
+                          },
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppColors.primaryText,
+                            side: BorderSide(
+                              color: AppColors.primaryText.withValues(
+                                alpha: 0.35,
+                              ),
+                            ),
+                          ),
+                          child: const Text('Cancel / منسوخ کریں'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: _applyAndClose,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.accentGold,
+                            foregroundColor: AppColors.ctaTextDark,
+                          ),
+                          child: const Text('Apply Filters / فلٹر لاگو کریں'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
   static const bool _mandiDebugLogs = true;
   static const List<String> _homeTickerPreferredCommodities = <String>[
@@ -653,9 +1264,9 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
       return _MandiStageFetchResult(
         docs: merged.values.toList(growable: false),
         stageUsed: _MandiFetchStage.exactCity,
-        contextLabelUr: 'وسیع مارکٹ',
+        contextLabelUr: 'پنجاب',
         fallbackNoteUr:
-            'آپ کے علاقے میں براہ راست منڈی ریٹس کی موجودگی کے بغیر، ہم پورے ملک سے سب سے تازہ ریٹس دکھا رہے ہیں۔',
+            'آپ کے شہر/ضلع میں ریٹس دستیاب نہ ہونے پر پنجاب بھر کی تازہ سرکاری منڈی قیمتیں دکھائی جا رہی ہیں۔',
       );
     }
 
@@ -4495,579 +5106,66 @@ class _BuyerHomeScreenState extends State<BuyerHomeScreen> {
       _subcategoryLabelById(_selectedSubcategoryId);
 
   Future<void> _openAdvancedFilters() async {
-    final minController = TextEditingController(
-      text: _minPriceFilter?.toStringAsFixed(0) ?? '',
-    );
-    final maxController = TextEditingController(
-      text: _maxPriceFilter?.toStringAsFixed(0) ?? '',
-    );
-    final minQtyController = TextEditingController(
-      text: _minQuantityFilter?.toStringAsFixed(0) ?? '',
-    );
-    final maxQtyController = TextEditingController(
-      text: _maxQuantityFilter?.toStringAsFixed(0) ?? '',
-    );
-
-    MandiType? tempCategory = _selectedCategory;
-    String? tempSubcategory = _selectedSubcategoryId;
-    String? tempProvince = _selectedProvinceFilter;
-    String? tempDistrict = _selectedDistrictFilter;
-    String? tempTehsil = _selectedTehsilFilter;
-    String? tempCity = _selectedCityFilter;
-    String tempSaleType = _selectedSaleType;
-    String tempSort = _selectedSort;
-    bool tempVerifiedOnly = _verifiedOnly;
-    bool tempQurbaniOnly = _qurbaniOnly;
-
-    await showModalBottomSheet<void>(
+    final appliedFilters = await showModalBottomSheet<_AdvancedFiltersResult>(
       context: context,
       isScrollControlled: true,
       backgroundColor: AppColors.background,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
-            Widget sectionHeader(String title) {
-              return Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 7,
-                ),
-                decoration: BoxDecoration(
-                  color: AppColors.cardSurface,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: AppColors.softGlassBorder),
-                ),
-                child: Text(
-                  title,
-                  style: const TextStyle(
-                    color: AppColors.primaryText,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 12,
-                  ),
-                ),
-              );
-            }
-
-            InputDecoration fieldDecoration(String label) {
-              return InputDecoration(
-                labelText: label,
-                labelStyle: const TextStyle(color: AppColors.secondaryText),
-                filled: true,
-                fillColor: AppColors.cardSurface,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: AppColors.divider),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: AppColors.divider),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: AppColors.accentGold),
-                ),
-              );
-            }
-
-            List<DropdownMenuItem<String?>> locationMenuItems(
-              List<String> values,
-              Map<String, String> urduLookup,
-            ) {
-              return <DropdownMenuItem<String?>>[
-                const DropdownMenuItem<String?>(
-                  value: null,
-                  child: Text('All / سب'),
-                ),
-                ...values.map(
-                  (value) => DropdownMenuItem<String?>(
-                    value: value,
-                    child: Text(_bilingualLocationLabel(value, urduLookup)),
-                  ),
-                ),
-              ];
-            }
-
-            final districtOptions = (tempProvince ?? '').trim().isEmpty
-                ? const <String>[]
-                : _districtOptionsForFilters(tempProvince!);
-            final tehsilOptions = (tempDistrict ?? '').trim().isEmpty
-                ? const <String>[]
-                : _tehsilOptionsForFilters(tempDistrict!);
-            final cityOptions =
-                ((tempDistrict ?? '').trim().isEmpty ||
-                    (tempTehsil ?? '').trim().isEmpty)
-                ? const <String>[]
-                : _cityOptionsForFilters(
-                    district: tempDistrict!,
-                    tehsil: tempTehsil!,
-                  );
-
-            final allSubcategories = _subcategoryOptionsForCategory(
-              tempCategory,
-            );
-
-            return SafeArea(
-              child: GestureDetector(
-                onTap: () => FocusScope.of(context).unfocus(),
-                behavior: HitTestBehavior.opaque,
-                child: Padding(
-                  padding: EdgeInsets.only(
-                    left: 14,
-                    right: 14,
-                    top: 14,
-                    bottom: MediaQuery.of(context).viewInsets.bottom + 14,
-                  ),
-                  child: SizedBox(
-                    height: MediaQuery.of(context).size.height * 0.85,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Advanced Filters / اعلی فلٹرز',
-                          style: TextStyle(
-                            color: AppColors.primaryText,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        Expanded(
-                          child: SingleChildScrollView(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                sectionHeader('Sort / ترتیب'),
-                                const SizedBox(height: 10),
-                                DropdownButtonFormField<String>(
-                                  initialValue: tempSort,
-                                  dropdownColor: AppColors.background,
-                                  decoration: fieldDecoration('Sort / ترتیب'),
-                                  style: const TextStyle(
-                                    color: AppColors.primaryText,
-                                  ),
-                                  items: const <DropdownMenuItem<String>>[
-                                    DropdownMenuItem(
-                                      value: 'newest',
-                                      child: Text('Newest / تازہ ترین'),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 'nearest',
-                                      child: Text('Nearest / قریب ترین'),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 'lowest_price',
-                                      child: Text('Lowest Price / کم قیمت'),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 'highest_price',
-                                      child: Text('Highest Price / زیادہ قیمت'),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 'ending_soon',
-                                      child: Text(
-                                        'Ending Soon / جلد ختم ہونے والی بولی',
-                                      ),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 'highest_bid',
-                                      child: Text(
-                                        'Highest Bid / سب سے بڑی بولی',
-                                      ),
-                                    ),
-                                  ],
-                                  onChanged: (value) {
-                                    if (value == null) return;
-                                    setSheetState(() => tempSort = value);
-                                  },
-                                ),
-                                const SizedBox(height: 12),
-                                sectionHeader('Sale Type / فروخت کی قسم'),
-                                const SizedBox(height: 10),
-                                DropdownButtonFormField<String>(
-                                  initialValue: tempSaleType,
-                                  dropdownColor: AppColors.background,
-                                  decoration: fieldDecoration(
-                                    'Sale Type / فروخت کی قسم',
-                                  ),
-                                  style: const TextStyle(
-                                    color: AppColors.primaryText,
-                                  ),
-                                  items: const <DropdownMenuItem<String>>[
-                                    DropdownMenuItem(
-                                      value: 'all',
-                                      child: Text('All / سب'),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 'auction',
-                                      child: Text('Auction / بولی'),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 'fixed',
-                                      child: Text('Fixed Price / مقرر قیمت'),
-                                    ),
-                                  ],
-                                  onChanged: (value) {
-                                    if (value == null) return;
-                                    setSheetState(() => tempSaleType = value);
-                                  },
-                                ),
-                                const SizedBox(height: 12),
-                                sectionHeader('Category / زمرہ'),
-                                const SizedBox(height: 10),
-                                DropdownButtonFormField<MandiType?>(
-                                  initialValue: tempCategory,
-                                  dropdownColor: AppColors.background,
-                                  decoration: fieldDecoration(
-                                    'Category / زمرہ',
-                                  ),
-                                  style: const TextStyle(
-                                    color: AppColors.primaryText,
-                                  ),
-                                  items: <DropdownMenuItem<MandiType?>>[
-                                    const DropdownMenuItem<MandiType?>(
-                                      value: null,
-                                      child: Text('All / سب'),
-                                    ),
-                                    ...MarketHierarchy.categories.map(
-                                      (cat) => DropdownMenuItem<MandiType?>(
-                                        value: cat.mandiType,
-                                        child: Text(
-                                          _homeCategoryLabel(cat.mandiType),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                  onChanged: (value) {
-                                    setSheetState(() {
-                                      tempCategory = value;
-                                      tempSubcategory = null;
-                                    });
-                                  },
-                                ),
-                                const SizedBox(height: 10),
-                                DropdownButtonFormField<String?>(
-                                  initialValue: tempSubcategory,
-                                  dropdownColor: AppColors.background,
-                                  decoration: fieldDecoration(
-                                    'Subcategory / ذیلی زمرہ',
-                                  ),
-                                  style: const TextStyle(
-                                    color: AppColors.primaryText,
-                                  ),
-                                  items: <DropdownMenuItem<String?>>[
-                                    const DropdownMenuItem<String?>(
-                                      value: null,
-                                      child: Text('All / سب'),
-                                    ),
-                                    ...allSubcategories.map(
-                                      (option) => DropdownMenuItem<String?>(
-                                        value: option.id,
-                                        child: Text(option.bilingualLabel),
-                                      ),
-                                    ),
-                                  ],
-                                  onChanged: (value) {
-                                    setSheetState(
-                                      () => tempSubcategory = value,
-                                    );
-                                  },
-                                ),
-                                const SizedBox(height: 12),
-                                sectionHeader(
-                                  'Location Filters / مقام کے فلٹرز',
-                                ),
-                                const SizedBox(height: 10),
-                                DropdownButtonFormField<String?>(
-                                  initialValue: tempProvince,
-                                  dropdownColor: AppColors.background,
-                                  decoration: fieldDecoration(
-                                    'Province / صوبہ',
-                                  ),
-                                  style: const TextStyle(
-                                    color: AppColors.primaryText,
-                                  ),
-                                  items: locationMenuItems(
-                                    _provinceOptionsForFilters(),
-                                    _provinceUrduByEn,
-                                  ),
-                                  onChanged: (value) {
-                                    setSheetState(() {
-                                      tempProvince = value;
-                                      tempDistrict = null;
-                                      tempTehsil = null;
-                                      tempCity = null;
-                                    });
-                                  },
-                                ),
-                                const SizedBox(height: 10),
-                                DropdownButtonFormField<String?>(
-                                  initialValue: tempDistrict,
-                                  dropdownColor: AppColors.background,
-                                  decoration: fieldDecoration('District / ضلع'),
-                                  style: const TextStyle(
-                                    color: AppColors.primaryText,
-                                  ),
-                                  items: locationMenuItems(
-                                    districtOptions,
-                                    _districtUrduByEn,
-                                  ),
-                                  onChanged: (value) {
-                                    setSheetState(() {
-                                      tempDistrict = value;
-                                      tempTehsil = null;
-                                      tempCity = null;
-                                    });
-                                  },
-                                ),
-                                const SizedBox(height: 10),
-                                DropdownButtonFormField<String?>(
-                                  initialValue: tempTehsil,
-                                  dropdownColor: AppColors.background,
-                                  decoration: fieldDecoration('Tehsil / تحصیل'),
-                                  style: const TextStyle(
-                                    color: AppColors.primaryText,
-                                  ),
-                                  items: locationMenuItems(
-                                    tehsilOptions,
-                                    _tehsilUrduByEn,
-                                  ),
-                                  onChanged: (value) {
-                                    setSheetState(() {
-                                      tempTehsil = value;
-                                      tempCity = null;
-                                    });
-                                  },
-                                ),
-                                const SizedBox(height: 10),
-                                DropdownButtonFormField<String?>(
-                                  initialValue: tempCity,
-                                  dropdownColor: AppColors.background,
-                                  decoration: fieldDecoration('City / شہر'),
-                                  style: const TextStyle(
-                                    color: AppColors.primaryText,
-                                  ),
-                                  items: <DropdownMenuItem<String?>>[
-                                    const DropdownMenuItem<String?>(
-                                      value: null,
-                                      child: Text('All / سب'),
-                                    ),
-                                    ...cityOptions.map(
-                                      (value) => DropdownMenuItem<String?>(
-                                        value: value,
-                                        child: Text(
-                                          _bilingualLocationLabel(
-                                            value,
-                                            _cityUrduByEn,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                  onChanged: (value) {
-                                    setSheetState(() => tempCity = value);
-                                  },
-                                ),
-                                const SizedBox(height: 12),
-                                sectionHeader('Price Range / قیمت کی حد'),
-                                const SizedBox(height: 10),
-                                TextField(
-                                  controller: minController,
-                                  keyboardType: TextInputType.number,
-                                  style: const TextStyle(
-                                    color: AppColors.primaryText,
-                                  ),
-                                  decoration: fieldDecoration(
-                                    'Min Price / کم از کم قیمت',
-                                  ),
-                                ),
-                                const SizedBox(height: 10),
-                                TextField(
-                                  controller: maxController,
-                                  keyboardType: TextInputType.number,
-                                  style: const TextStyle(
-                                    color: AppColors.primaryText,
-                                  ),
-                                  decoration: fieldDecoration(
-                                    'Max Price / زیادہ سے زیادہ قیمت',
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                sectionHeader('Quantity / مقدار'),
-                                const SizedBox(height: 10),
-                                TextField(
-                                  controller: minQtyController,
-                                  keyboardType: TextInputType.number,
-                                  style: const TextStyle(
-                                    color: AppColors.primaryText,
-                                  ),
-                                  decoration: fieldDecoration(
-                                    'Min Quantity / کم مقدار',
-                                  ),
-                                ),
-                                const SizedBox(height: 10),
-                                TextField(
-                                  controller: maxQtyController,
-                                  keyboardType: TextInputType.number,
-                                  style: const TextStyle(
-                                    color: AppColors.primaryText,
-                                  ),
-                                  decoration: fieldDecoration(
-                                    'Max Quantity / زیادہ مقدار',
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                sectionHeader(
-                                  'Seller Filters / بیچنے والے کے فلٹرز',
-                                ),
-                                const SizedBox(height: 8),
-                                SwitchListTile(
-                                  value: tempVerifiedOnly,
-                                  activeThumbColor: AppColors.accentGold,
-                                  title: const Text(
-                                    'Verified Sellers Only / صرف تصدیق شدہ فروخت کنندہ',
-                                    style: TextStyle(
-                                      color: AppColors.primaryText,
-                                    ),
-                                  ),
-                                  onChanged: (value) {
-                                    setSheetState(
-                                      () => tempVerifiedOnly = value,
-                                    );
-                                  },
-                                ),
-                                if (SeasonalMarketRules.isQurbaniSeason)
-                                  SwitchListTile(
-                                    value: tempQurbaniOnly,
-                                    activeThumbColor: AppColors.accentGold,
-                                    title: const Text(
-                                      'Qurbani Only / صرف قربانی',
-                                      style: TextStyle(
-                                        color: AppColors.primaryText,
-                                      ),
-                                    ),
-                                    onChanged: (value) {
-                                      setSheetState(
-                                        () => tempQurbaniOnly = value,
-                                      );
-                                    },
-                                  ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.only(top: 10),
-                          decoration: BoxDecoration(
-                            border: Border(
-                              top: BorderSide(
-                                color: AppColors.primaryText.withValues(
-                                  alpha: 0.12,
-                                ),
-                              ),
-                            ),
-                          ),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: OutlinedButton(
-                                  onPressed: () {
-                                    FocusScope.of(context).unfocus();
-                                    Navigator.of(context).pop();
-                                  },
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: AppColors.primaryText,
-                                    side: BorderSide(
-                                      color: AppColors.primaryText.withValues(
-                                        alpha: 0.35,
-                                      ),
-                                    ),
-                                  ),
-                                  child: const Text('Cancel / منسوخ کریں'),
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: ElevatedButton(
-                                  onPressed: () {
-                                    FocusScope.of(context).unfocus();
-                                    // Capture text-field values while the
-                                    // controllers are still guaranteed live.
-                                    final parsedMinPrice = double.tryParse(
-                                      minController.text.trim(),
-                                    );
-                                    final parsedMaxPrice = double.tryParse(
-                                      maxController.text.trim(),
-                                    );
-                                    final parsedMinQty = double.tryParse(
-                                      minQtyController.text.trim(),
-                                    );
-                                    final parsedMaxQty = double.tryParse(
-                                      maxQtyController.text.trim(),
-                                    );
-                                    // IMPORTANT: pop the bottom-sheet BEFORE
-                                    // calling setState on the parent widget.
-                                    // Calling setState first marks the parent
-                                    // dirty while the sheet's InheritedElement
-                                    // dependents are still registered; when the
-                                    // overlay tears down those elements in the
-                                    // same frame it fires the Flutter assertion
-                                    // '_dependents.isEmpty': is not true.
-                                    Navigator.of(context).pop();
-                                    if (mounted) {
-                                      setState(() {
-                                        _selectedCategory = tempCategory;
-                                        _selectedHomeCategoryId = null;
-                                        _selectedSubcategoryId =
-                                            tempSubcategory;
-                                        _selectedProvinceFilter = tempProvince;
-                                        _selectedDistrictFilter = tempDistrict;
-                                        _selectedTehsilFilter = tempTehsil;
-                                        _selectedCityFilter = tempCity;
-                                        _selectedSaleType = tempSaleType;
-                                        _selectedSort = tempSort;
-                                        _minPriceFilter = parsedMinPrice;
-                                        _maxPriceFilter = parsedMaxPrice;
-                                        _minQuantityFilter = parsedMinQty;
-                                        _maxQuantityFilter = parsedMaxQty;
-                                        _verifiedOnly = tempVerifiedOnly;
-                                        _qurbaniOnly = tempQurbaniOnly;
-                                      });
-                                      unawaited(_refreshWeatherAdvisoryOnly());
-                                    }
-                                  },
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: AppColors.accentGold,
-                                    foregroundColor: AppColors.ctaTextDark,
-                                  ),
-                                  child: const Text(
-                                    'Apply Filters / فلٹر لاگو کریں',
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            );
-          },
-        );
-      },
+      builder: (context) => _AdvancedFiltersSheet(
+        initialCategory: _selectedCategory,
+        initialSubcategory: _selectedSubcategoryId,
+        initialProvince: _selectedProvinceFilter,
+        initialDistrict: _selectedDistrictFilter,
+        initialTehsil: _selectedTehsilFilter,
+        initialCity: _selectedCityFilter,
+        initialSaleType: _selectedSaleType,
+        initialSort: _selectedSort,
+        initialMinPrice: _minPriceFilter,
+        initialMaxPrice: _maxPriceFilter,
+        initialMinQty: _minQuantityFilter,
+        initialMaxQty: _maxQuantityFilter,
+        initialVerifiedOnly: _verifiedOnly,
+        initialQurbaniOnly: _qurbaniOnly,
+        homeCategoryLabel: _homeCategoryLabel,
+        subcategoryOptionsForCategory: _subcategoryOptionsForCategory,
+        provinceOptionsForFilters: _provinceOptionsForFilters,
+        districtOptionsForFilters: _districtOptionsForFilters,
+        tehsilOptionsForFilters: _tehsilOptionsForFilters,
+        cityOptionsForFilters: (district, tehsil) => _cityOptionsForFilters(
+          district: district,
+          tehsil: tehsil,
+        ),
+        bilingualLocationLabel: _bilingualLocationLabel,
+        provinceUrduByEn: _provinceUrduByEn,
+        districtUrduByEn: _districtUrduByEn,
+        tehsilUrduByEn: _tehsilUrduByEn,
+        cityUrduByEn: _cityUrduByEn,
+        isQurbaniSeason: SeasonalMarketRules.isQurbaniSeason,
+      ),
     );
 
-    minController.dispose();
-    maxController.dispose();
-    minQtyController.dispose();
-    maxQtyController.dispose();
+    if (!mounted || appliedFilters == null) return;
+
+    setState(() {
+      _selectedCategory = appliedFilters.category;
+        _selectedHomeCategoryId = null;
+      _selectedSubcategoryId = appliedFilters.subcategory;
+      _selectedProvinceFilter = appliedFilters.province;
+      _selectedDistrictFilter = appliedFilters.district;
+      _selectedTehsilFilter = appliedFilters.tehsil;
+      _selectedCityFilter = appliedFilters.city;
+      _selectedSaleType = appliedFilters.saleType;
+      _selectedSort = appliedFilters.sort;
+      _minPriceFilter = appliedFilters.minPrice;
+      _maxPriceFilter = appliedFilters.maxPrice;
+      _minQuantityFilter = appliedFilters.minQty;
+      _maxQuantityFilter = appliedFilters.maxQty;
+      _verifiedOnly = appliedFilters.verifiedOnly;
+      _qurbaniOnly = appliedFilters.qurbaniOnly;
+    });
+    unawaited(_refreshWeatherAdvisoryOnly());
   }
 
   Future<void> _openBidSheet(
@@ -5377,8 +5475,8 @@ class _HomeIntelligenceHub extends StatelessWidget {
                     else
                       SizedBox(
                         height: MediaQuery.sizeOf(context).width < 360
-                            ? 296
-                            : 284,
+                            ? 316
+                            : 304,
                         child: ListView.builder(
                           scrollDirection: Axis.horizontal,
                           physics: const BouncingScrollPhysics(),
@@ -5421,6 +5519,7 @@ class _HomeIntelligenceHub extends StatelessWidget {
         const SizedBox(height: 14),
         _sectionCard(
           child: Column(
+            mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _sectionHeader(
@@ -5530,7 +5629,7 @@ class _HomeIntelligenceHub extends StatelessWidget {
                   )
                 else
                   SizedBox(
-                    height: 246,
+                    height: 286,
                     child: ListView.builder(
                       scrollDirection: Axis.horizontal,
                       physics: const BouncingScrollPhysics(),
@@ -5592,7 +5691,7 @@ class _HomeIntelligenceHub extends StatelessWidget {
                 )
               else
                 SizedBox(
-                  height: 248,
+                  height: 288,
                   child: ListView.builder(
                     scrollDirection: Axis.horizontal,
                     itemCount: nearbyUnique.length,
@@ -6026,11 +6125,17 @@ class _HomeIntelligenceHub extends StatelessWidget {
       locationLabel: locationLabel,
       items: visibleRows.map((entry) => entry.$1).toList(growable: false),
     );
+    final isPunjabFallbackActive =
+        (mandiSnapshotFallbackNote ?? '').trim().isNotEmpty;
+    final snapshotTitle = isPunjabFallbackActive
+        ? 'Latest Punjab Mandi Rates / پنجاب کی تازہ منڈی ریٹس'
+        : 'Nearby Mandi Snapshot / آپ کی قریبی منڈی';
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _sectionHeader(
-          title: 'Nearby Mandi Snapshot / آپ کی قریبی منڈی',
+          title: snapshotTitle,
           subtitle: 'منتخب مقامی ریٹس کا خلاصہ',
           trailing: TextButton(
             onPressed: () {
@@ -6886,137 +6991,144 @@ class _HomeIntelligenceHub extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 7),
-              Text(
-                product,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: AppColors.primaryText,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 12.5,
-                  height: 1.2,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                subcategory,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: AppColors.secondaryText,
-                  fontSize: 10.5,
-                ),
-              ),
-              const SizedBox(height: 3),
-              Text(
-                'Location / مقام: $locationDisplay',
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: AppColors.secondaryText,
-                  fontSize: 11,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                'Qty / مقدار: $quantity $unit',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: AppColors.secondaryText,
-                  fontSize: 11,
-                ),
-              ),
-              const SizedBox(height: 3),
-              Text(
-                primaryValue,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: showUrgency && hasBidActivity
-                      ? const Color(0xFFF1DE99)
-                      : AppColors.primaryText,
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              if (showUrgency && endingCritical)
-                Container(
-                  margin: const EdgeInsets.only(top: 2),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 6,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF7B1010).withValues(alpha: 0.45),
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(
-                      color: const Color(0xFFFF8F8F).withValues(alpha: 0.85),
-                    ),
-                  ),
-                  child: Text(
-                    secondaryValue,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Color(0xFFFFB0B0),
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-              if (!(showUrgency && endingCritical))
-                Text(
-                  secondaryValue,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: endingSoon && showUrgency
-                        ? const Color(0xFFFF8F8F)
-                        : AppColors.primaryText60,
-                    fontSize: 11,
-                    fontWeight: endingSoon && showUrgency
-                        ? FontWeight.w700
-                        : FontWeight.w500,
-                  ),
-                ),
-              if ((tertiaryValue ?? '').trim().isNotEmpty)
-                Row(
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: Text(
-                        tertiaryValue!,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Color(0xFFEFD88A),
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
+                    Text(
+                      product,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: AppColors.primaryText,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 12.5,
+                        height: 1.2,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subcategory,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: AppColors.secondaryText,
+                        fontSize: 10.5,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      'Location / مقام: $locationDisplay',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: AppColors.secondaryText,
+                        fontSize: 11,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Qty / مقدار: $quantity $unit',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: AppColors.secondaryText,
+                        fontSize: 11,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      primaryValue,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: showUrgency && hasBidActivity
+                            ? const Color(0xFFF1DE99)
+                            : AppColors.primaryText,
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (showUrgency && endingCritical)
+                      Container(
+                        margin: const EdgeInsets.only(top: 2),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF7B1010).withValues(alpha: 0.45),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                            color: const Color(0xFFFF8F8F).withValues(alpha: 0.85),
+                          ),
+                        ),
+                        child: Text(
+                          secondaryValue,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Color(0xFFFFB0B0),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                          ),
                         ),
                       ),
-                    ),
+                    if (!(showUrgency && endingCritical))
+                      Text(
+                        secondaryValue,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: endingSoon && showUrgency
+                              ? const Color(0xFFFF8F8F)
+                              : AppColors.primaryText60,
+                          fontSize: 11,
+                          fontWeight: endingSoon && showUrgency
+                              ? FontWeight.w700
+                              : FontWeight.w500,
+                        ),
+                      ),
+                    if ((tertiaryValue ?? '').trim().isNotEmpty)
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              tertiaryValue!,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Color(0xFFEFD88A),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    if (showUrgency && progress != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 3),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(999),
+                          child: LinearProgressIndicator(
+                            value: progress,
+                            minHeight: 4,
+                            backgroundColor: AppColors.primaryText.withValues(
+                              alpha: 0.18,
+                            ),
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              endingSoon
+                                  ? const Color(0xFFFF7A7A)
+                                  : const Color(0xFFE8C766),
+                            ),
+                          ),
+                        ),
+                      ),
                   ],
                 ),
-              if (showUrgency && progress != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 3),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(999),
-                    child: LinearProgressIndicator(
-                      value: progress,
-                      minHeight: 4,
-                      backgroundColor: AppColors.primaryText.withValues(
-                        alpha: 0.18,
-                      ),
-                      valueColor: AlwaysStoppedAnimation<Color>(
-                        endingSoon
-                            ? const Color(0xFFFF7A7A)
-                            : const Color(0xFFE8C766),
-                      ),
-                    ),
-                  ),
-                ),
-              const Spacer(),
+              ),
+              const SizedBox(height: 8),
               SizedBox(
                 width: double.infinity,
                 height: 34,

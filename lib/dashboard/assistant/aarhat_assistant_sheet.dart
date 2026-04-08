@@ -69,7 +69,7 @@ class AarhatAssistantSheet extends StatefulWidget {
 }
 
 class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   static const List<String> _punjabProvinceQueryValues = <String>[
     'Punjab',
     'punjab',
@@ -83,13 +83,14 @@ class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
   late final List<Animation<Offset>> _cardSlideAnims;
 
   final TextEditingController _chatCtrl = TextEditingController();
+  final ScrollController _chatScrollController = ScrollController();
   final MandiIntelligenceService _aiService = MandiIntelligenceService();
 
   late final AssistantUserRole _role;
   late final List<_QuickActionDef> _actions;
 
   _AssistantAction? _activeAction;
-  String? _chatResponse;
+  final List<_AssistantChatMessage> _chatMessages = <_AssistantChatMessage>[];
   bool _isChatLoading = false;
   Timer? _typingTimer;
   int _typingPhase = 0;
@@ -111,6 +112,7 @@ class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _role = AssistantRoleResolver.resolveRole(widget.userData);
     _actions = _buildQuickActionsByRole(_role);
 
@@ -174,10 +176,19 @@ class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _animCtrl.dispose();
     _chatCtrl.dispose();
+    _chatScrollController.dispose();
     _typingTimer?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeMetrics() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollChatToBottom();
+    });
   }
 
   List<_QuickActionDef> _buildQuickActionsByRole(AssistantUserRole role) {
@@ -225,7 +236,6 @@ class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
   void _selectAction(_AssistantAction action) {
     setState(() {
       _activeAction = _activeAction == action ? null : action;
-      _chatResponse = null;
       if (action == _AssistantAction.auctionVsFixed) {
         _auctionStep = 0;
         _auctionItemType = null;
@@ -245,53 +255,49 @@ class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
   Widget build(BuildContext context) {
     final double topPadding = MediaQuery.of(context).viewPadding.top + 56;
 
-    return FadeTransition(
-      opacity: _fadeAnim,
-      child: SlideTransition(
-        position: _slideAnim,
-        child: Container(
-          margin: EdgeInsets.only(top: topPadding),
-          decoration: const BoxDecoration(
-            color: Color(0xFF0E3B2E),
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const _DragHandle(),
-              Flexible(
-                child: SingleChildScrollView(
-                  padding: EdgeInsets.only(
-                    left: 16,
-                    right: 16,
-                    top: 4,
-                    bottom: MediaQuery.of(context).viewInsets.bottom + 28,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildHeader(),
-                      const SizedBox(height: 14),
-                      _buildQuickActionList(),
-                      const SizedBox(height: 12),
-                      _buildSuggestionChips(),
-                      if (_activeAction != null) ...[
+    return Scaffold(
+      resizeToAvoidBottomInset: true,
+      backgroundColor: Colors.transparent,
+      body: FadeTransition(
+        opacity: _fadeAnim,
+        child: SlideTransition(
+          position: _slideAnim,
+          child: Container(
+            margin: EdgeInsets.only(top: topPadding),
+            decoration: const BoxDecoration(
+              color: Color(0xFF0E3B2E),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.max,
+              children: [
+                const _DragHandle(),
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildHeader(),
                         const SizedBox(height: 14),
-                        AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 220),
-                          child: KeyedSubtree(
-                            key: ValueKey(_activeAction),
-                            child: _buildActionResult(),
+                        _buildSuggestionChips(),
+                        if (_activeAction != null) ...[
+                          const SizedBox(height: 14),
+                          AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 220),
+                            child: KeyedSubtree(
+                              key: ValueKey(_activeAction),
+                              child: _buildActionResult(),
+                            ),
                           ),
-                        ),
+                        ],
                       ],
-                      const SizedBox(height: 16),
-                      _buildChatSection(),
-                    ],
+                    ),
                   ),
                 ),
-              ),
-            ],
+                _buildChatSection(),
+              ],
+            ),
           ),
         ),
       ),
@@ -998,147 +1004,543 @@ class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
   Widget _buildChatSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
       children: [
         const Divider(color: Color(0x26FFFFFF), height: 1),
-        const SizedBox(height: 12),
-        const Text(
-          'کوئی سوال ہے؟',
-          style: TextStyle(
-            color: AppColors.secondaryText,
-            fontSize: 11.2,
-            fontWeight: FontWeight.w600,
+        const SizedBox(height: 10),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: ListView.builder(
+              controller: _chatScrollController,
+              itemCount: _chatMessages.length + (_isChatLoading ? 1 : 0),
+              itemBuilder: (context, index) {
+                if (_isChatLoading && index == _chatMessages.length) {
+                  return Align(
+                    alignment: Alignment.centerLeft,
+                    child: _buildTypingIndicator(),
+                  );
+                }
+
+                final item = _chatMessages[index];
+                final isUser = item.isUser;
+
+                return Align(
+                  alignment: isUser
+                      ? Alignment.centerRight
+                      : Alignment.centerLeft,
+                  child: Container(
+                    constraints: const BoxConstraints(maxWidth: 320),
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      color: isUser
+                          ? const Color(0xFF1B8F4F)
+                          : const Color(0xFFE9EDF0),
+                      borderRadius: BorderRadius.circular(14).copyWith(
+                        bottomRight: isUser
+                            ? const Radius.circular(4)
+                            : const Radius.circular(14),
+                        bottomLeft: isUser
+                            ? const Radius.circular(14)
+                            : const Radius.circular(4),
+                      ),
+                      border: Border.all(
+                        color: isUser
+                            ? const Color(0xFF239E5A).withValues(alpha: 0.85)
+                            : const Color(0xFFD2D9DE),
+                      ),
+                    ),
+                    child: isUser
+                        ? Text(
+                            item.text,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12.8,
+                              height: 1.35,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          )
+                        : MarkdownBody(
+                            data: item.text,
+                            selectable: true,
+                            styleSheet: MarkdownStyleSheet(
+                              p: const TextStyle(
+                                color: Color(0xFF1C252E),
+                                fontSize: 12.6,
+                                height: 1.35,
+                              ),
+                              strong: const TextStyle(
+                                color: Color(0xFF11161C),
+                                fontWeight: FontWeight.w800,
+                              ),
+                              listBullet: const TextStyle(
+                                color: Color(0xFF1C252E),
+                                fontSize: 12.6,
+                              ),
+                            ),
+                          ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: _buildFaqChips(),
+            ),
           ),
         ),
         const SizedBox(height: 8),
-        if (_chatResponse != null) ...[
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(12),
-            margin: const EdgeInsets.only(bottom: 8),
-            decoration: BoxDecoration(
-              color: AppColors.cardSurface,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppColors.softGlassBorder),
-            ),
-            child: MarkdownBody(
-              data: _chatResponse!,
-              selectable: true,
-              styleSheet: MarkdownStyleSheet(
-                p: const TextStyle(
-                  color: AppColors.primaryText,
-                  fontSize: 12.4,
-                  height: 1.35,
-                ),
-                strong: const TextStyle(
-                  color: AppColors.primaryText,
-                  fontWeight: FontWeight.w800,
-                ),
-                listBullet: const TextStyle(
-                  color: AppColors.primaryText,
-                  fontSize: 12.4,
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _chatCtrl,
+                  style: const TextStyle(
+                    color: AppColors.primaryText,
+                    fontSize: 13,
+                  ),
+                  decoration: InputDecoration(
+                    hintText: 'اپنا سوال یہاں لکھیں',
+                    hintStyle: const TextStyle(
+                      color: AppColors.secondaryText,
+                      fontSize: 12,
+                    ),
+                    filled: true,
+                    fillColor: AppColors.cardSurface,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 11,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: AppColors.divider),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: AppColors.divider),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: AppColors.accentGold),
+                    ),
+                  ),
+                  onSubmitted: (_) => _submitChat(),
+                  textInputAction: TextInputAction.send,
+                  enabled: !_isChatLoading,
                 ),
               ),
-            ),
-          ),
-        ],
-        if (_isChatLoading) ...[
-          _buildTypingIndicator(),
-          const SizedBox(height: 8),
-        ],
-        Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: _chatCtrl,
-                style: const TextStyle(
-                  color: AppColors.primaryText,
-                  fontSize: 13,
-                ),
-                decoration: InputDecoration(
-                  hintText: 'اپنا سوال یہاں لکھیں',
-                  hintStyle: const TextStyle(
-                    color: AppColors.secondaryText,
-                    fontSize: 12,
-                  ),
-                  filled: true,
-                  fillColor: AppColors.cardSurface,
-                  isDense: true,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 11,
-                  ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: AppColors.divider),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: AppColors.divider),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: AppColors.accentGold),
-                  ),
-                ),
-                onSubmitted: (_) => _submitChat(),
-                textInputAction: TextInputAction.send,
-                enabled: !_isChatLoading,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Material(
-              color: _isChatLoading
-                  ? AppColors.accentGold.withValues(alpha: 0.5)
-                  : AppColors.accentGold,
-              borderRadius: BorderRadius.circular(12),
-              child: InkWell(
-                onTap: _isChatLoading ? null : _submitChat,
+              const SizedBox(width: 8),
+              Material(
+                color: _isChatLoading
+                    ? AppColors.accentGold.withValues(alpha: 0.5)
+                    : AppColors.accentGold,
                 borderRadius: BorderRadius.circular(12),
-                child: const Padding(
-                  padding: EdgeInsets.all(11),
-                  child: Icon(
-                    Icons.send_rounded,
-                    color: AppColors.ctaTextDark,
-                    size: 20,
+                child: InkWell(
+                  onTap: _isChatLoading ? null : _submitChat,
+                  borderRadius: BorderRadius.circular(12),
+                  child: const Padding(
+                    padding: EdgeInsets.all(11),
+                    child: Icon(
+                      Icons.send_rounded,
+                      color: AppColors.ctaTextDark,
+                      size: 20,
+                    ),
                   ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
+        SizedBox(height: MediaQuery.of(context).viewInsets.bottom + 12),
       ],
     );
   }
 
+  List<Widget> _buildFaqChips() {
+    return _actions
+        .take(8)
+        .map(
+          (action) => Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: ActionChip(
+              backgroundColor: const Color(0xFF1B4D38).withValues(alpha: 0.85),
+              side: BorderSide(
+                color: AppColors.accentGold.withValues(alpha: 0.45),
+              ),
+              label: Text(
+                action.title,
+                style: const TextStyle(
+                  color: AppColors.primaryText,
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              onPressed: () => _selectAction(action.action),
+            ),
+          ),
+        )
+        .toList(growable: false);
+  }
+
   Widget _buildTypingIndicator() {
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-      margin: const EdgeInsets.only(bottom: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      margin: const EdgeInsets.only(bottom: 8),
+      constraints: const BoxConstraints(maxWidth: 220),
       decoration: BoxDecoration(
-        color: AppColors.cardSurface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.softGlassBorder),
+        color: const Color(0xFFE9EDF0),
+        borderRadius: BorderRadius.circular(
+          14,
+        ).copyWith(bottomLeft: const Radius.circular(4)),
+        border: Border.all(color: const Color(0xFFD2D9DE)),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: List<Widget>.generate(3, (int i) {
-          final bool active = _typingPhase == i;
-          return AnimatedContainer(
-            duration: const Duration(milliseconds: 220),
-            margin: const EdgeInsets.only(right: 6),
-            width: active ? 9 : 7,
-            height: active ? 9 : 7,
-            decoration: BoxDecoration(
-              color: active
-                  ? AppColors.accentGold
-                  : AppColors.primaryText.withValues(alpha: 0.35),
-              shape: BoxShape.circle,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Typing...',
+            style: TextStyle(
+              color: Color(0xFF55616C),
+              fontSize: 11.8,
+              fontWeight: FontWeight.w600,
             ),
-          );
-        }),
+          ),
+          const SizedBox(height: 6),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: List<Widget>.generate(3, (int i) {
+              final bool active = _typingPhase == i;
+              return AnimatedContainer(
+                duration: const Duration(milliseconds: 220),
+                margin: const EdgeInsets.only(right: 6),
+                width: active ? 9 : 7,
+                height: active ? 9 : 7,
+                decoration: BoxDecoration(
+                  color: active
+                      ? AppColors.accentGold
+                      : const Color(0xFF8A949E),
+                  shape: BoxShape.circle,
+                ),
+              );
+            }),
+          ),
+        ],
       ),
     );
+  }
+
+  void _appendMessage({required String text, required bool isUser}) {
+    setState(() {
+      _chatMessages.add(_AssistantChatMessage(text: text, isUser: isUser));
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollChatToBottom();
+    });
+  }
+
+  void _scrollChatToBottom() {
+    if (!_chatScrollController.hasClients) return;
+    _chatScrollController.animateTo(
+      _chatScrollController.position.maxScrollExtent,
+      duration: const Duration(milliseconds: 240),
+      curve: Curves.easeOut,
+    );
+  }
+
+  String _normalizeToken(String input) {
+    return input
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^\p{L}\p{N}\s]', unicode: true), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
+  bool _hasRateIntent(String text) {
+    final q = _normalizeToken(text);
+    return q.contains('rate') ||
+        q.contains('price') ||
+        q.contains('mandi') ||
+        q.contains('bhao') ||
+        text.contains('ریٹ') ||
+        text.contains('قیمت') ||
+        text.contains('بھاؤ') ||
+        text.contains('منڈی');
+  }
+
+        Set<String> _queryTokens(String text) {
+          return _normalizeToken(text)
+          .split(' ')
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toSet();
+        }
+
+  Set<String> _commodityAliases(Map<String, dynamic> data) {
+    final aliases = <String>{
+      _pickFirstNonEmptyString(data, const <String>['commodityNameUr']),
+      _pickFirstNonEmptyString(data, const <String>['commodityNameEn']),
+      _pickFirstNonEmptyString(data, const <String>['commodityName']),
+      _pickFirstNonEmptyString(data, const <String>['commodity']),
+      _pickFirstNonEmptyString(data, const <String>['cropType']),
+      _pickFirstNonEmptyString(data, const <String>['itemName']),
+      _pickFirstNonEmptyString(data, const <String>['product']),
+      _pickFirstNonEmptyString(data, const <String>['name']),
+    };
+
+    return aliases
+        .map(_normalizeToken)
+        .where((e) => e.isNotEmpty)
+        .toSet();
+  }
+
+  String? _matchCommodityAlias(String query, Set<String> aliases) {
+    final normalizedQuery = _normalizeToken(query);
+    final queryTokens = _queryTokens(query);
+    String? bestAlias;
+    int bestScore = 0;
+
+    for (final alias in aliases) {
+      if (alias.isEmpty) continue;
+
+      int score = 0;
+      if (normalizedQuery == alias) {
+        score += 100;
+      }
+      if (normalizedQuery.contains(alias) || alias.contains(normalizedQuery)) {
+        score += 60;
+      }
+
+      final aliasTokens = alias.split(' ').where((e) => e.isNotEmpty).toSet();
+      final overlap = aliasTokens.intersection(queryTokens).length;
+      score += overlap * 20;
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestAlias = alias;
+      }
+    }
+
+    return bestScore > 0 ? bestAlias : null;
+  }
+
+  double? _readRawQuintalRate(Map<String, dynamic> data) {
+    return _toDouble(data['price']) ??
+        _toDouble(data['averagePrice']) ??
+        _toDouble(data['rate']) ??
+        _toDouble(data['pricePerUnit']) ??
+        _toDouble(data['fqp']);
+  }
+
+  double _convertQuintalToMann(double quintalPrice) {
+    return (quintalPrice / 100) * 40;
+  }
+
+  DateTime? _readRateTimestamp(Map<String, dynamic> data) {
+    final dynamic value =
+        data['syncedAt'] ?? data['rateDate'] ?? data['updatedAt'] ?? data['createdAt'];
+    if (value is Timestamp) return value.toDate();
+    if (value is DateTime) return value;
+    return null;
+  }
+
+  String _formatFreshnessLabel(DateTime? value) {
+    if (value == null) return 'date unavailable';
+    final local = value.toLocal();
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final target = DateTime(local.year, local.month, local.day);
+    final difference = target.difference(today).inDays;
+    final dateText =
+        '${local.day.toString().padLeft(2, '0')}/${local.month.toString().padLeft(2, '0')}/${local.year}';
+
+    if (difference == 0) {
+      return 'Aaj ka synced rate ($dateText)';
+    }
+    if (difference == -1) {
+      return 'Kal ka synced rate ($dateText)';
+    }
+    return 'Synced date: $dateText';
+  }
+
+  String _formatCommodityRateMessage(_CommodityRateMatch chosen) {
+    final freshness = _formatFreshnessLabel(chosen.rateDate);
+    final locationText = chosen.locationLabel.isEmpty
+        ? ''
+        : ' ${chosen.locationLabel} mandi se';
+
+    return 'Punjab Mandi Board ke mutabiq ${chosen.commodityLabel} ka rate '
+        '${_formatRate(chosen.mannRate)} rupaye fi 40 kilo (Mann) hai. '
+        'Ye rate 40kg (Mann) ka hai. '
+        'Formula: (${_formatRate(chosen.rawQuintalRate)} / 100) * 40 = ${_formatRate(chosen.mannRate)}. '
+        '$freshness.$locationText';
+  }
+
+  String _buildGeneralFallbackReply(String query) {
+    final usesUrdu = _containsUrduScript(query);
+    if (usesUrdu) {
+      return 'جی، میں سن رہا ہوں۔ اگر آپ کسی فصل کا ریٹ پوچھنا چاہتے ہیں تو فصل کا نام لکھ دیں، مثلاً چاول، مکئی، کپاس یا مونگ۔';
+    }
+    return 'Ji, main sun raha hoon. Agar aap kisi fasal ka rate poochna chahte hain to fasal ka naam likh dein, misal ke taur par rice, maize, kapas ya mong.';
+  }
+
+  Future<String?> _safeAiReply({
+    required String query,
+    required String liveMarketContext,
+  }) async {
+    try {
+      final languageHint = _containsUrduScript(query)
+          ? 'User input uses Urdu script. Reply naturally in Urdu script.'
+          : 'User input uses Roman/English script. Reply naturally in polite Roman Urdu.';
+      final prompt =
+          '$_madadgarSystemInstruction\n$_liveContextUsageInstruction\n$languageHint\n$liveMarketContext\n\nUser query:\n$query';
+
+      final response = await _aiService
+          .getAIResponse(prompt)
+          .timeout(const Duration(milliseconds: 4500));
+      final text = response.trim();
+      return text.isEmpty ? null : text;
+    } catch (error) {
+      debugPrint('[Madadgar] ai_reply_failed query=$query error=$error');
+      return null;
+    }
+  }
+
+  int _locationMatchScore(Map<String, dynamic> data, Set<String> localTokens) {
+    if (localTokens.isEmpty) return 0;
+    final places = <String>{
+      _normalizeToken((data['district'] ?? '').toString()),
+      _normalizeToken((data['city'] ?? '').toString()),
+      _normalizeToken((data['tehsil'] ?? '').toString()),
+      _normalizeToken((data['marketName'] ?? '').toString()),
+      _normalizeToken((data['mandiName'] ?? '').toString()),
+    }..removeWhere((e) => e.isEmpty);
+
+    return places.where(localTokens.contains).length;
+  }
+
+  Future<QuerySnapshot<Map<String, dynamic>>> _fetchAssistantRateSnapshot() async {
+    final col = FirebaseFirestore.instance.collection('mandi_rates');
+    try {
+      return await col
+          .orderBy('syncedAt', descending: true)
+          .limit(180)
+          .get()
+          .timeout(const Duration(milliseconds: 1600));
+    } catch (_) {
+      try {
+        return await col
+            .orderBy('rateDate', descending: true)
+            .limit(180)
+            .get()
+            .timeout(const Duration(milliseconds: 1600));
+      } catch (_) {
+        return await col
+            .limit(180)
+            .get()
+            .timeout(const Duration(milliseconds: 1600));
+      }
+    }
+  }
+
+  Future<String?> _buildCommodityRateReply(String query) async {
+    final snapshot = await _fetchAssistantRateSnapshot();
+    if (snapshot.docs.isEmpty) {
+      return null;
+    }
+
+    final hasRateIntent = _hasRateIntent(query);
+    final localTokens = <String>{
+      _normalizeToken((widget.userData['district'] ?? '').toString()),
+      _normalizeToken((widget.userData['city'] ?? '').toString()),
+      _normalizeToken((widget.userData['tehsil'] ?? '').toString()),
+      _normalizeToken((widget.userData['marketName'] ?? '').toString()),
+    }..removeWhere((e) => e.isEmpty);
+
+    _CommodityRateMatch? bestLocal;
+    _CommodityRateMatch? bestOverall;
+
+    for (final doc in snapshot.docs) {
+      final data = doc.data();
+      final aliases = _commodityAliases(data);
+      if (aliases.isEmpty) {
+        continue;
+      }
+
+      final matchedAlias = _matchCommodityAlias(query, aliases);
+      if (matchedAlias == null) {
+        continue;
+      }
+
+      final rawQuintalRate = _readRawQuintalRate(data);
+      if (rawQuintalRate == null || rawQuintalRate <= 0) {
+        continue;
+      }
+
+      final commodityLabel = _pickFirstNonEmptyString(data, const <String>[
+        'commodityNameUr',
+        'commodityNameEn',
+        'commodityName',
+        'commodity',
+        'cropType',
+        'itemName',
+        'product',
+        'name',
+      ]);
+      final locationLabel = _pickFirstNonEmptyString(data, const <String>[
+        'marketName',
+        'mandiName',
+        'city',
+        'district',
+      ]);
+      final rateDate = _readRateTimestamp(data);
+      final locationScore = _locationMatchScore(data, localTokens);
+      final match = _CommodityRateMatch(
+        commodityLabel: commodityLabel,
+        matchedAlias: matchedAlias,
+        locationLabel: locationLabel,
+        rawQuintalRate: rawQuintalRate,
+        mannRate: _convertQuintalToMann(rawQuintalRate),
+        rateDate: rateDate,
+        locationScore: locationScore,
+      );
+
+      if (locationScore > 0 &&
+          (bestLocal == null || match.isBetterThan(bestLocal))) {
+        bestLocal = match;
+      }
+      if (bestOverall == null || match.isBetterThan(bestOverall)) {
+        bestOverall = match;
+      }
+    }
+
+    if (!hasRateIntent && bestOverall == null) {
+      return null;
+    }
+
+    final chosen = bestLocal ?? bestOverall;
+    if (chosen == null) {
+      return null;
+    }
+
+    return _formatCommodityRateMessage(chosen);
   }
 
   bool _containsUrduScript(String text) {
@@ -1205,51 +1607,59 @@ class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
   }
 
   Future<String> _fetchLiveMarketContextFromFirestore() async {
-    final snapshot = await _fetchRateSnapshot();
-    final entries = <String>[];
+    try {
+      final snapshot = await _fetchRateSnapshot();
+      final entries = <String>[];
 
-    for (final doc in snapshot.docs) {
-      final data = doc.data();
-      final normalizedCity = (data['city'] ?? '')
-          .toString()
-          .trim()
-          .toLowerCase();
-      if (normalizedCity == 'karachi' || normalizedCity == 'کراچی') {
-        continue;
+      for (final doc in snapshot.docs) {
+        final data = doc.data();
+        final normalizedCity = (data['city'] ?? '')
+            .toString()
+            .trim()
+            .toLowerCase();
+        if (normalizedCity == 'karachi' || normalizedCity == 'کراچی') {
+          continue;
+        }
+        final commodity = _pickFirstNonEmptyString(data, const <String>[
+          'commodityNameUr',
+          'commodityNameEn',
+          'commodityName',
+          'cropType',
+          'itemName',
+          'product',
+          'commodity',
+          'name',
+        ]);
+        final city = _pickFirstNonEmptyString(data, const <String>[
+          'city',
+          'district',
+          'marketName',
+          'mandiName',
+        ]);
+        final rawRate = _readRawQuintalRate(data);
+        final rate = rawRate == null || rawRate <= 0
+            ? null
+            : _convertQuintalToMann(rawRate);
+        final freshness = _formatFreshnessLabel(_readRateTimestamp(data));
+
+        if (commodity.isEmpty || city.isEmpty || rate == null || rate <= 0) {
+          continue;
+        }
+
+        entries.add(
+          '$city $commodity ${_formatRate(rate)} Rs per 40kg (Mann), $freshness',
+        );
+        if (entries.length >= 8) break;
       }
-      final commodity = _pickFirstNonEmptyString(data, const <String>[
-        'commodityName',
-        'cropType',
-        'itemName',
-        'product',
-        'commodity',
-        'name',
-      ]);
-      final city = _pickFirstNonEmptyString(data, const <String>[
-        'city',
-        'district',
-        'marketName',
-        'mandiName',
-      ]);
-      final rate =
-          _toDouble(data['price']) ??
-          _toDouble(data['averagePrice']) ??
-          _toDouble(data['rate']) ??
-          _toDouble(data['pricePerUnit']) ??
-          _toDouble(data['fqp']);
 
-      if (commodity.isEmpty || city.isEmpty || rate == null || rate <= 0) {
-        continue;
+      if (entries.isEmpty) {
+        return _cachedLiveMarketContext ?? 'Live Market Context: unavailable.';
       }
-
-      entries.add('$city $commodity ${_formatRate(rate)} Rs');
-      if (entries.length >= 8) break;
+      return 'Live Market Context: ${entries.join(', ')}.';
+    } catch (error) {
+      debugPrint('[Madadgar] live_context_fetch_failed error=$error');
+      return _cachedLiveMarketContext ?? 'Live Market Context: unavailable.';
     }
-
-    if (entries.isEmpty) {
-      return 'Live Market Context: unavailable.';
-    }
-    return 'Live Market Context: ${entries.join(', ')}.';
   }
 
   Future<String> _getLiveMarketContext() async {
@@ -1307,42 +1717,97 @@ class _AarhatAssistantSheetState extends State<AarhatAssistantSheet>
     final q = _chatCtrl.text.trim();
     if (q.isEmpty || _isChatLoading) return;
     _chatCtrl.clear();
+    _appendMessage(text: q, isUser: true);
     FocusScope.of(context).unfocus();
 
     _setChatLoading(true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollChatToBottom();
+    });
+
+    String safeText = _buildGeneralFallbackReply(q);
 
     try {
-      final liveMarketContext = await _getLiveMarketContext().timeout(
-        const Duration(milliseconds: 1500),
-        onTimeout: () =>
-            _cachedLiveMarketContext ?? 'Live Market Context: unavailable.',
-      );
-      final languageHint = _containsUrduScript(q)
-          ? 'User input uses Urdu script. Reply naturally in Urdu script.'
-          : 'User input uses Roman/English script. Reply naturally in polite Roman Urdu.';
-      final prompt =
-          '$_madadgarSystemInstruction\n$_liveContextUsageInstruction\n$languageHint\n$liveMarketContext\n\nUser query:\n$q';
+      String? text;
 
-      final response = await _aiService.getAIResponse(prompt);
-      final text = response.trim().isEmpty
-          ? 'معذرت، اس وقت جواب دستیاب نہیں۔ براہِ کرم دوبارہ کوشش کریں۔'
-          : response.trim();
+      try {
+        text = await _buildCommodityRateReply(q);
+      } catch (error) {
+        debugPrint('[Madadgar] commodity_reply_failed query=$q error=$error');
+      }
 
-      if (!mounted) return;
-      setState(() {
-        _chatResponse = text;
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _chatResponse = _containsUrduScript(q)
-            ? 'معذرت، ابھی جواب دینے میں مسئلہ آرہا ہے۔ براہِ کرم کچھ دیر بعد دوبارہ کوشش کریں۔'
-            : 'Maazrat, is waqt jawab dene mein masla aa raha hai. Meharbani karke thori dair baad dobara koshish karein.';
-      });
+      if ((text ?? '').trim().isEmpty) {
+        String liveMarketContext;
+        try {
+          liveMarketContext = await _getLiveMarketContext().timeout(
+            const Duration(milliseconds: 1500),
+            onTimeout: () =>
+                _cachedLiveMarketContext ?? 'Live Market Context: unavailable.',
+          );
+        } catch (error) {
+          debugPrint('[Madadgar] get_live_context_failed query=$q error=$error');
+          liveMarketContext =
+              _cachedLiveMarketContext ?? 'Live Market Context: unavailable.';
+        }
+
+        text = await _safeAiReply(
+          query: q,
+          liveMarketContext: liveMarketContext,
+        );
+      }
+
+      if ((text ?? '').trim().isNotEmpty) {
+        safeText = text!.trim();
+      }
+    } catch (error) {
+      debugPrint('[Madadgar] submit_chat_failed query=$q error=$error');
     } finally {
+      if (mounted) {
+        _appendMessage(text: safeText, isUser: false);
+      }
       _setChatLoading(false);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _scrollChatToBottom();
+      });
     }
   }
+}
+
+class _CommodityRateMatch {
+  const _CommodityRateMatch({
+    required this.commodityLabel,
+    required this.matchedAlias,
+    required this.locationLabel,
+    required this.rawQuintalRate,
+    required this.mannRate,
+    required this.rateDate,
+    required this.locationScore,
+  });
+
+  final String commodityLabel;
+  final String matchedAlias;
+  final String locationLabel;
+  final double rawQuintalRate;
+  final double mannRate;
+  final DateTime? rateDate;
+  final int locationScore;
+
+  bool isBetterThan(_CommodityRateMatch other) {
+    if (locationScore != other.locationScore) {
+      return locationScore > other.locationScore;
+    }
+
+    final thisDate = rateDate ?? DateTime.fromMillisecondsSinceEpoch(0);
+    final otherDate = other.rateDate ?? DateTime.fromMillisecondsSinceEpoch(0);
+    return thisDate.isAfter(otherDate);
+  }
+}
+
+class _AssistantChatMessage {
+  const _AssistantChatMessage({required this.text, required this.isUser});
+
+  final String text;
+  final bool isUser;
 }
 
 class _DragHandle extends StatelessWidget {

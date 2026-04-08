@@ -1256,6 +1256,30 @@ class MarketplaceService {
       );
     }
 
+    // CNIC verification guard: buyer must have an approved identity before bidding.
+    bool _isTruthy(dynamic v) {
+      if (v is bool) return v;
+      if (v is num) return v != 0;
+      final t = (v ?? '').toString().trim().toLowerCase();
+      return t == 'true' || t == '1' || t == 'yes';
+    }
+    final String verifyStatus =
+        (userData['verificationStatus'] ?? '').toString().trim().toLowerCase();
+    final bool cnicApproved =
+        _isTruthy(userData['cnicVerified']) ||
+        _isTruthy(userData['isCnicVerified']) ||
+        _isTruthy(userData['isCNICVerified']) ||
+        _isTruthy(userData['is_verified']) ||
+        _isTruthy(userData['isVerified']) ||
+        verifyStatus == 'approved' ||
+        verifyStatus == 'verified';
+    if (!cnicApproved) {
+      debugPrint(
+        '[BidFlow] cnic_gate_blocked listing=${bid.listingId} buyer=${user.uid} verificationStatus=$verifyStatus',
+      );
+      throw Exception('verification_required');
+    }
+
     final double basePrice =
         _safeNumber(listingData, 'startingPrice') ??
         _safeNumber(listingData, 'basePrice') ??

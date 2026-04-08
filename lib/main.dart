@@ -79,10 +79,28 @@ Future<void> _activateAppCheckSafely() async {
 }
 
 Future<void> main() async {
-  debugPrint('APP START REACHED MAIN');
   WidgetsFlutterBinding.ensureInitialized();
+  debugPrint('APP START REACHED MAIN');
   debugPrint('APP START BEFORE FIREBASE INIT');
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  bool hasDefaultFirebaseApp = true;
+  try {
+    Firebase.app();
+  } on FirebaseException {
+    hasDefaultFirebaseApp = false;
+  }
+  if (!hasDefaultFirebaseApp) {
+    try {
+      if (Firebase.apps.isEmpty) {
+        await Firebase.initializeApp(
+          options: DefaultFirebaseOptions.currentPlatform,
+        );
+      }
+    } on FirebaseException catch (e) {
+      if (e.code != 'duplicate-app') {
+        rethrow;
+      }
+    }
+  }
   debugPrint('APP START AFTER FIREBASE INIT');
   await _logRuntimeFirebaseIdentity();
   debugPrint('APP START BEFORE APP CHECK');
@@ -118,11 +136,6 @@ class InitializationService {
   }
 
   static Future<void> _initializeAll() async {
-    if (Firebase.apps.isEmpty) {
-      await Firebase.initializeApp(
-        options: DefaultFirebaseOptions.currentPlatform,
-      );
-    }
     _firebaseReady = true;
 
     try {

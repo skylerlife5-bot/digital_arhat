@@ -1,9 +1,6 @@
 ﻿import 'dart:async';
 
-import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
-
-import '../firebase_options.dart';
 
 enum StartupBootstrapState { initializing, ready, failed }
 
@@ -24,12 +21,6 @@ class StartupBootstrapService {
 
     try {
       await Future.delayed(const Duration(milliseconds: 400));
-
-      if (Firebase.apps.isEmpty) {
-        await Firebase.initializeApp(
-          options: DefaultFirebaseOptions.currentPlatform,
-        );
-      }
 
       state.value = StartupBootstrapState.ready;
     } catch (e) {

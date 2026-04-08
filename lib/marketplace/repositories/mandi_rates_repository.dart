@@ -239,34 +239,39 @@ class MandiRatesRepository {
     }
 
     final list = _dedupe(merged.values.toList(growable: false));
-    final strictCityOnly = _filterByUserCity(
+    final strictCityOnly = _filterByUserCityOrDistrict(
       rates: list,
       userCity: city,
+      userDistrict: district,
       cityAliases: cityAliases,
     );
+    final selected = strictCityOnly.isNotEmpty
+        ? strictCityOnly
+        : list.where(_isPunjabRate).toList(growable: false);
     _lastFetchTrace = MandiFetchTrace(
       fetchedDocs: fetchedDocs,
       parsedValidItems: parsedValidItems,
-      postDedupItems: strictCityOnly.length,
+      postDedupItems: selected.length,
     );
     debugPrint(
       '[MANDI_FETCH_TRACE] fetchedDocs=$fetchedDocs '
       'parsedValidItems=$parsedValidItems '
-      'postDedupItems=${strictCityOnly.length} '
+      'postDedupItems=${selected.length} '
       'strictCity=${city.isEmpty ? 'none' : city}',
     );
-    if (strictCityOnly.isNotEmpty) {
+    if (selected.isNotEmpty) {
       _memoryCache = _dedupe(<LiveMandiRate>[
-        ...strictCityOnly,
+        ...selected,
         ..._memoryCache,
       ]);
     }
-    return strictCityOnly.take(targetCount).toList(growable: false);
+    return selected.take(targetCount).toList(growable: false);
   }
 
-  List<LiveMandiRate> _filterByUserCity({
+  List<LiveMandiRate> _filterByUserCityOrDistrict({
     required List<LiveMandiRate> rates,
     required String userCity,
+    required String userDistrict,
     required List<String> cityAliases,
   }) {
     final normalizedAliases = cityAliases
@@ -274,17 +279,24 @@ class MandiRatesRepository {
         .where((value) => value.isNotEmpty)
         .toSet();
     final normalizedCity = userCity.trim().toLowerCase();
+    final normalizedDistrict = userDistrict.trim().toLowerCase();
     if (normalizedCity.isNotEmpty) {
       normalizedAliases.add(normalizedCity);
     }
-    if (normalizedAliases.isEmpty) return rates;
+    if (normalizedAliases.isEmpty && normalizedDistrict.isEmpty) return rates;
 
     return rates
         .where((rate) {
           final rateCity = rate.city.trim().toLowerCase();
-          if (rateCity.isEmpty) return false;
+          final rateDistrict = rate.district.trim().toLowerCase();
+          if (rateCity.isEmpty && rateDistrict.isEmpty) return false;
           if (!_isPunjabRate(rate)) return false;
-          return normalizedAliases.contains(rateCity);
+          final cityMatch = rateCity.isNotEmpty &&
+              normalizedAliases.contains(rateCity);
+          final districtMatch = normalizedDistrict.isNotEmpty &&
+              rateDistrict.isNotEmpty &&
+              rateDistrict == normalizedDistrict;
+          return cityMatch || districtMatch;
         })
         .toList(growable: false);
   }

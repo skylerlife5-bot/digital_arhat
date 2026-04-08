@@ -1,11 +1,8 @@
 import 'dart:io';
 
-import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
-
-import '../firebase_options.dart';
 
 class FirebaseService {
   FirebaseService._();
@@ -15,19 +12,8 @@ class FirebaseService {
   static Future<bool> initializeSafely() async {
     try {
       await _logAndroidPackageNameMismatchIfAny();
-      if (Firebase.apps.isEmpty) {
-        await Firebase.initializeApp(
-          options: DefaultFirebaseOptions.currentPlatform,
-        );
-      }
       return true;
     } on PlatformException catch (e) {
-      final combined = '${e.code} ${e.message ?? ''}'.toUpperCase();
-      if (combined.contains('DEVELOPER_ERROR')) {
-        debugPrint(_developerErrorGuidance());
-      }
-      return false;
-    } on FirebaseException catch (e) {
       final combined = '${e.code} ${e.message ?? ''}'.toUpperCase();
       if (combined.contains('DEVELOPER_ERROR')) {
         debugPrint(_developerErrorGuidance());
