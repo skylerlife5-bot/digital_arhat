@@ -47,3 +47,8 @@ serviceAccountKey.json
 functions/serviceAccountKey.json
 firebase-debug.log
 /android/app/google-services.json
+google-services.json
+*.keystore
+key.properties
+.env
+secrets.dart
