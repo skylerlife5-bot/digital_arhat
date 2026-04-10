@@ -33,12 +33,12 @@ android {
 
     defaultConfig {
         applicationId = "com.digitalarhat.app"
-        minSdk = flutter.minSdkVersion
+        minSdk = flutter.minSdkVersion  // 🔥 YEH SAB SE ZAROORI FIX HAI OTP KE LIYE
         targetSdk = 34
         
         // ✅ Syntax fix for versionCode/versionName
-        versionCode = flutter.versionCode
-        versionName = flutter.versionName
+        versionCode = 1
+        versionName = "1.0.0"
         
         multiDexEnabled = true
     }

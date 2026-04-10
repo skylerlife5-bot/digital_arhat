@@ -1,9 +1,32 @@
 ﻿import 'dart:convert';
 
+import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import '../firebase_options.dart';
 import 'phase1_notification_engine.dart';
+
+/// Top-level background/terminated state FCM handler.
+/// Must be top-level (not a class method) and annotated so the tree
+/// shaker keeps it alive in release builds.
+@pragma('vm:entry-point')
+Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  // Firebase may not be initialised yet in a fresh background isolate.
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+  } catch (_) {}
+  debugPrint(
+    '[FCM-Background] type=${message.data["type"]} '
+    'listingId=${message.data["listingId"]} '
+    'title=${message.notification?.title}',
+  );
+  // No UI work here — this isolate has no Flutter widget tree.
+  // Data-only processing (e.g. badge counts) can be done here if needed.
+}
 
 class NotificationService {
   static final FirebaseMessaging _messaging = FirebaseMessaging.instance;
@@ -46,10 +69,16 @@ class NotificationService {
         >()
         ?.createNotificationChannel(engagementChannel);
 
+    // Background / terminated handler — must also be registered here
+    // (belt-and-suspenders alongside the main() registration).
+    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+
+    // Foreground: show a local heads-up notification.
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       _showLocalNotification(message);
     });
 
+    // Background → foreground via notification tap.
     FirebaseMessaging.onMessageOpenedApp.listen((message) {
       if (onNotificationTap != null) {
         onNotificationTap(message);
@@ -66,19 +95,19 @@ class NotificationService {
     final String title = message.notification?.title ?? _titleForType(type);
     final String body = message.notification?.body ?? _bodyForType(type);
 
-    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+    final AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
       'engagement_alerts',
       'Engagement Alerts',
       importance: Importance.max,
       priority: Priority.high,
-      styleInformation: BigTextStyleInformation(''),
+      styleInformation: BigTextStyleInformation(body),
     );
 
     _localNotifications.show(
       id: DateTime.now().millisecondsSinceEpoch ~/ 1000,
       title: title,
       body: body,
-      notificationDetails: const NotificationDetails(android: androidDetails),
+      notificationDetails: NotificationDetails(android: androidDetails),
       payload: jsonEncode(
         _buildTapPayload(
           data: message.data,
@@ -87,6 +116,30 @@ class NotificationService {
           body: body,
         ),
       ),
+    );
+  }
+
+  /// Public API to show a local notification without an FCM message.
+  /// Use this to surface in-app events (e.g. bid accepted) as heads-up alerts.
+  static Future<void> showLocalNotification({
+    required String title,
+    required String body,
+    Map<String, dynamic>? data,
+  }) async {
+    final AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+      'engagement_alerts',
+      'Engagement Alerts',
+      importance: Importance.max,
+      priority: Priority.high,
+      styleInformation: BigTextStyleInformation(body),
+    );
+
+    await _localNotifications.show(
+      id: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      title: title,
+      body: body,
+      notificationDetails: NotificationDetails(android: androidDetails),
+      payload: data != null ? jsonEncode(data) : null,
     );
   }
 
@@ -178,18 +231,20 @@ class NotificationService {
   }
 
   static Future<void> showApprovedWinnerNotification() async {
+    const String body =
+        'Your bid was accepted. Contact is now unlocked. / آپ کی بولی قبول ہوگئی، رابطہ اَن لاک ہے';
     const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
       'engagement_alerts',
       'Engagement Alerts',
       importance: Importance.max,
       priority: Priority.high,
-      styleInformation: BigTextStyleInformation(''),
+      styleInformation: BigTextStyleInformation(body),
     );
 
     await _localNotifications.show(
       id: DateTime.now().millisecondsSinceEpoch ~/ 1000,
       title: 'Bid Accepted / بولی قبول ہوگئی',
-      body: 'Your bid was accepted. Contact is now unlocked. / آپ کی بولی قبول ہوگئی، رابطہ اَن لاک ہے',
+      body: body,
       notificationDetails: const NotificationDetails(android: androidDetails),
       payload: 'APPROVED_WINNER',
     );

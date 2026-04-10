@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class BidEligibilityResult {
@@ -17,6 +15,22 @@ class BidEligibilityResult {
 class BidEligibilityService {
   const BidEligibilityService._();
 
+  static double calculateMinIncrement(double currentBid) {
+    if (currentBid < 10000) {
+      return 100;
+    }
+    if (currentBid <= 50000) {
+      return 500;
+    }
+    if (currentBid <= 100000) {
+      return 1000;
+    }
+    if (currentBid <= 500000) {
+      return 2000;
+    }
+    return 5000;
+  }
+
   static double calculateMinimumAllowedBid(Map<String, dynamic> listingData) {
     final startingPrice = _toDouble(listingData['startingPrice']) ??
         _toDouble(listingData['basePrice']) ??
@@ -24,12 +38,7 @@ class BidEligibilityService {
         0;
     final currentHighest = _toDouble(listingData['highestBid']) ?? startingPrice;
     final baseline = currentHighest > startingPrice ? currentHighest : startingPrice;
-    final configuredIncrement = _toDouble(listingData['minBidIncrement']) ??
-        _toDouble(listingData['minimumIncrement']) ??
-        _toDouble(listingData['bidIncrement']) ??
-        0;
-    // Keep low-value auctions usable while still scaling with listing value.
-    final increment = configuredIncrement > 0 ? configuredIncrement : math.max(5, baseline * 0.01);
+    final increment = calculateMinIncrement(baseline);
     return baseline + increment;
   }
 

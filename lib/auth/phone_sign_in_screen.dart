@@ -42,6 +42,7 @@ class _PhoneSignInScreenState extends State<PhoneSignInScreen>
 
   String _phoneNumber = '+92';
   String? _verificationId;
+  int? _forceResendingToken;
   bool _isLoading = false;
   bool _isBiometricLoading = false;
   bool _isPasswordObscured = true;
@@ -130,6 +131,17 @@ class _PhoneSignInScreenState extends State<PhoneSignInScreen>
     FocusScope.of(context).unfocus();
     if (!_formKey.currentState!.validate()) return;
 
+    final String normalizedPhone = _normalizeE164Phone(_phoneNumber);
+    if (normalizedPhone.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          duration: Duration(seconds: 5),
+          content: Text('Please enter a valid Pakistani phone number.'),
+        ),
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
@@ -144,7 +156,8 @@ class _PhoneSignInScreenState extends State<PhoneSignInScreen>
       );
 
       await FirebaseAuth.instance.verifyPhoneNumber(
-        phoneNumber: _phoneNumber,
+        phoneNumber: normalizedPhone,
+        forceResendingToken: _forceResendingToken,
         timeout: const Duration(seconds: 60),
         verificationCompleted: (credential) async {
           await FirebaseAuth.instance.signInWithCredential(credential);
@@ -162,15 +175,17 @@ class _PhoneSignInScreenState extends State<PhoneSignInScreen>
         },
         verificationFailed: (error) {
           if (!mounted) return;
+          final String mappedMessage = _mapPhoneAuthError(error);
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
+            SnackBar(
               duration: Duration(seconds: 5),
-              content: Text(_otpVerificationIssueMessage),
+              content: Text(mappedMessage),
             ),
           );
         },
-        codeSent: (verificationId, _) async {
+        codeSent: (verificationId, resendToken) async {
           _verificationId = verificationId;
+          _forceResendingToken = resendToken;
           if (!mounted) return;
           await _showOtpBottomSheet();
         },
@@ -191,6 +206,47 @@ class _PhoneSignInScreenState extends State<PhoneSignInScreen>
         setState(() => _isLoading = false);
       }
     }
+  }
+
+  String _normalizeE164Phone(String raw) {
+    final String compact = raw.replaceAll(RegExp(r'[^0-9+]'), '').trim();
+    if (compact.isEmpty) return '';
+
+    if (compact.startsWith('+')) {
+      return compact.length >= 12 ? compact : '';
+    }
+
+    if (compact.startsWith('92') && compact.length == 12) {
+      return '+$compact';
+    }
+
+    if (compact.startsWith('03') && compact.length == 11) {
+      return '+92${compact.substring(1)}';
+    }
+
+    return '';
+  }
+
+  String _mapPhoneAuthError(FirebaseAuthException error) {
+    final String code = error.code.toLowerCase();
+
+    if (code.contains('invalid-phone-number')) {
+      return 'Please enter a valid Pakistani phone number.';
+    }
+    if (code.contains('too-many-requests')) {
+      return 'Too many attempts. Please try again later.';
+    }
+    if (code.contains('network-request-failed') || code.contains('network')) {
+      return 'Network issue. Please check internet and retry.';
+    }
+    if (code.contains('captcha-check-failed') ||
+        code.contains('invalid-app-credential') ||
+        code.contains('missing-client-identifier') ||
+        code.contains('app-not-authorized')) {
+      return 'Device app verification failed. Please update Google Play services and try again.';
+    }
+
+    return _otpVerificationIssueMessage;
   }
 
   Future<void> _showOtpBottomSheet() async {

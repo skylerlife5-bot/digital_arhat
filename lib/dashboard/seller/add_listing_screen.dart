@@ -119,6 +119,7 @@ class _AddListingScreenState extends State<AddListingScreen> {
   static const Color _darkGreenStart = AppColors.background;
   static const Color _darkGreenMid = AppColors.background;
   static const Color _darkGreenEnd = AppColors.cardSurface;
+  static const String _customCategoryLabel = 'Other / دیگر';
 
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
   final ImagePicker _picker = ImagePicker();
@@ -151,6 +152,8 @@ class _AddListingScreenState extends State<AddListingScreen> {
   final TextEditingController _breedController = TextEditingController();
   final TextEditingController _ageController = TextEditingController();
   final TextEditingController _fatController = TextEditingController();
+  final TextEditingController _customCategoryController =
+      TextEditingController();
 
   final TextEditingController _districtAutocompleteController =
       TextEditingController();
@@ -329,12 +332,18 @@ class _AddListingScreenState extends State<AddListingScreen> {
   List<String> get _productOptions =>
       CategoryConstants.itemsForCategoryId(_selectedCategoryOptionId);
 
-  List<String> get _categoryOptions => MarketHierarchy.listingCategories
-      .map((option) => option.bilingualLabel)
-      .toList(growable: false);
+  List<String> get _categoryOptions => <String>[
+    ...MarketHierarchy.listingCategories.map((option) => option.bilingualLabel),
+    _customCategoryLabel,
+  ];
+
+  bool get _isCustomCategorySelected =>
+      _selectedCategoryDisplay == _customCategoryLabel;
 
   String get _selectedCategoryDisplay =>
-      MarketHierarchy.listingCategoryLabelForId(_selectedCategoryOptionId);
+      _selectedCategoryOptionId == '__custom__'
+      ? _customCategoryLabel
+      : MarketHierarchy.listingCategoryLabelForId(_selectedCategoryOptionId);
 
   String get _selectedCategoryId => _selectedCategoryOptionId;
 
@@ -694,6 +703,7 @@ class _AddListingScreenState extends State<AddListingScreen> {
     _breedController.dispose();
     _ageController.dispose();
     _fatController.dispose();
+    _customCategoryController.dispose();
     _districtAutocompleteController.dispose();
     _videoController?.dispose();
     super.dispose();
@@ -3398,14 +3408,22 @@ class _AddListingScreenState extends State<AddListingScreen> {
       subcategoryLabel: _selectedProduct,
     );
 
+    final bool usingCustomCategory = _isCustomCategorySelected;
+    final String categoryValueForPayload = usingCustomCategory
+        ? _customCategoryController.text.trim()
+        : _selectedCategoryId;
+    final String categoryLabelForPayload = usingCustomCategory
+        ? _customCategoryController.text.trim()
+        : _selectedCategoryLabel;
+
     final listingData = <String, dynamic>{
       'sellerId': submitSellerUid,
       'sellerName':
           (widget.userData['name'] ?? widget.userData['fullName'] ?? '')
               .toString(),
       'mandiType': _selectedMandiType.wireValue,
-      'category': _selectedCategoryId,
-      'categoryLabel': _selectedCategoryLabel,
+      'category': categoryValueForPayload,
+      'categoryLabel': categoryLabelForPayload,
       'legacyCategory': _selectedMandiType.wireValue,
       'subcategory': _selectedSubcategoryId,
       'subcategoryLabel': _selectedSubcategoryLabel,
@@ -3560,6 +3578,7 @@ class _AddListingScreenState extends State<AddListingScreen> {
         'flags': _fraudPrecheck.flags,
         'status': _fraudPrecheck.status,
       },
+      if (usingCustomCategory) 'isCustomCategory': true,
       'estimatedValue': _marketAverage ?? 0,
       'isVerifiedSource': true,
     };
@@ -4751,6 +4770,12 @@ class _AddListingScreenState extends State<AddListingScreen> {
                           return null;
                         },
                         onSelected: (selected) {
+                          if (selected == _customCategoryLabel) {
+                            setState(() {
+                              _selectedCategoryOptionId = '__custom__';
+                            });
+                            return;
+                          }
                           final mapped = _listingCategoryFromLabel(selected);
                           if (mapped == null) return;
                           final nextUnit = MandiUnitMapper.resolve(
@@ -4764,9 +4789,26 @@ class _AddListingScreenState extends State<AddListingScreen> {
                             _selectedProduct = null;
                             _selectedRiceVariety = null;
                             _selectedUnitType = nextUnit;
+                            _customCategoryController.clear();
                           });
                         },
                       ),
+                      if (_isCustomCategorySelected) ...<Widget>[
+                        const SizedBox(height: 12),
+                        TextFormField(
+                          controller: _customCategoryController,
+                          style: const TextStyle(color: AppColors.primaryText),
+                          decoration: _fieldDecoration(
+                            'Enter Item Name / چیز کا نام لکھیں',
+                          ),
+                          validator: (value) {
+                            if ((value ?? '').trim().isEmpty) {
+                              return 'Please enter item name / براہ کرم نام لکھیں';
+                            }
+                            return null;
+                          },
+                        ),
+                      ],
                       const SizedBox(height: 12),
                       _buildSearchableSelectorField(
                         label: 'Subcategory / ذیلی زمرہ',

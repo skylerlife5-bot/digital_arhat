@@ -485,4 +485,99 @@ class BiddingService {
     }
     return '';
   }
+
+  /// Auto-resolves an expired auction by finding the highest bid and writing
+  /// winner details + status='completed' to Firestore.
+  /// Idempotent: skips if listing is already resolved or not yet expired.
+  Future<void> resolveExpiredListing(
+    String listingId,
+    Map<String, dynamic> listingData,
+  ) async {
+    // 1. Determine actual end time (prefer explicit endTime / bidExpiryTime field).
+    final DateTime? endTime =
+        _toDate(listingData['endTime'])?.toUtc() ??
+        _toDate(listingData['bidExpiryTime'])?.toUtc();
+
+    if (endTime != null && DateTime.now().toUtc().isBefore(endTime)) return;
+
+    // If no endTime field, fall back to createdAt + 24h.
+    if (endTime == null) {
+      final DateTime? createdAt = _toDate(listingData['createdAt'])?.toUtc();
+      if (createdAt == null) return;
+      if (DateTime.now().toUtc().isBefore(
+        createdAt.add(const Duration(hours: 24)),
+      )) return;
+    }
+
+    // 2. Only resolve listings that are still active/live.
+    final String currentStatus =
+        (listingData['status'] ??
+                listingData['listingStatus'] ??
+                listingData['auctionStatus'] ??
+                '')
+            .toString()
+            .trim()
+            .toLowerCase();
+    if (currentStatus != 'active' && currentStatus != 'live') return;
+
+    // 3. Single read to confirm status from Firestore (avoids stale local data).
+    final DocumentReference<Map<String, dynamic>> listingRef =
+        _firestore.collection('listings').doc(listingId);
+    final freshSnap = await listingRef.get();
+    if (!freshSnap.exists) return;
+    final freshStatus =
+        (freshSnap.data()?['status'] ??
+                freshSnap.data()?['listingStatus'] ??
+                '')
+            .toString()
+            .trim()
+            .toLowerCase();
+    if (freshStatus != 'active' && freshStatus != 'live') return;
+
+    // 4. Query bids subcollection for the highest bid.
+    final QuerySnapshot<Map<String, dynamic>> bidsSnap = await _firestore
+        .collection('listings')
+        .doc(listingId)
+        .collection('bids')
+        .orderBy('bidAmount', descending: true)
+        .limit(1)
+        .get();
+
+    if (bidsSnap.docs.isEmpty) {
+      // No bids — mark as expired with no winner.
+      await listingRef.update({
+        'status': 'expired_unsold',
+        'listingStatus': 'expired_unsold',
+        'resolvedAt': FieldValue.serverTimestamp(),
+        'autoResolvedByClient': true,
+      });
+      debugPrint('[AuctionResolve] listingId=$listingId no_bids → expired_unsold');
+      return;
+    }
+
+    // 5. Extract winner data from top bid.
+    final Map<String, dynamic> topBid = bidsSnap.docs.first.data();
+    final String winnerId = (topBid['buyerId'] ?? '').toString().trim();
+    final String winnerName =
+        (topBid['buyerName'] ?? 'Winner').toString().trim();
+    final double winningAmount = _toDouble(topBid['bidAmount']) ?? 0.0;
+
+    // 6. Write completed status + winner fields atomically.
+    await listingRef.update({
+      'status': 'completed',
+      'listingStatus': 'completed',
+      'auctionStatus': 'completed',
+      'winnerId': winnerId,
+      'winnerName': winnerName,
+      'winningAmount': winningAmount,
+      'resolvedAt': FieldValue.serverTimestamp(),
+      'autoResolvedByClient': true,
+    });
+
+    debugPrint(
+      '[AuctionResolve] resolved listingId=$listingId '
+      'winnerId=$winnerId winnerName=$winnerName '
+      'winningAmount=${winningAmount.toStringAsFixed(2)}',
+    );
+  }
 }

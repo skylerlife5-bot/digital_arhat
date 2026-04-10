@@ -173,6 +173,62 @@ class _BidDialogState extends State<BidDialog> {
     }
   }
 
+  bool _hasProfileValue(dynamic value) {
+    if (value == null) return false;
+    if (value is String) return value.trim().isNotEmpty;
+    if (value is Map) return value.isNotEmpty;
+    if (value is Iterable) return value.isNotEmpty;
+    return value.toString().trim().isNotEmpty;
+  }
+
+  Future<bool> _ensureIdCardProfileBeforeBid() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return false;
+
+    final userSnap = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .get();
+    final Map<String, dynamic> userData =
+        userSnap.data() ?? <String, dynamic>{};
+
+    final bool hasIdCard = _hasProfileValue(userData['idCard']);
+    final bool hasCnic = _hasProfileValue(userData['cnic']);
+
+    if (hasIdCard && hasCnic) {
+      return true;
+    }
+
+    if (!mounted) return false;
+    final bool? goToUpload = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Account Verification Required'),
+          content: const Text(
+            'Account Verification Required: To maintain a safe marketplace, please verify your ID card before placing your first bid.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Upload ID Card'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (goToUpload == true && mounted) {
+      Navigator.of(context).pushNamed(Routes.masterSignUp);
+    }
+
+    return false;
+  }
+
   void _submitBid() async {
     if (_isSubmitting) return;
 
@@ -201,6 +257,11 @@ class _BidDialogState extends State<BidDialog> {
           ),
         );
       }
+      return;
+    }
+
+    final bool canProceed = await _ensureIdCardProfileBeforeBid();
+    if (!canProceed) {
       return;
     }
 

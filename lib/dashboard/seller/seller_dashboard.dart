@@ -255,6 +255,8 @@ class _SellerDashboardState extends State<SellerDashboard> {
             ),
             const SizedBox(height: 10),
             _buildPrimaryActionGrid(),
+            const SizedBox(height: 12),
+            _buildMarketIntelligenceCard(),
             const SizedBox(height: 14),
             const _SectionTitle(titleEn: 'Action Center', titleUr: 'اہم الرٹس'),
             const SizedBox(height: 8),
@@ -627,6 +629,100 @@ class _SellerDashboardState extends State<SellerDashboard> {
           },
         ),
       ],
+    );
+  }
+
+  Widget _buildMarketIntelligenceCard() {
+    return Semantics(
+      button: true,
+      label: 'Explore Live Mandi',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () {
+            HapticFeedback.mediumImpact();
+            Navigator.of(context).pushNamed(
+              Routes.buyerDashboard,
+              arguments: const <String, dynamic>{},
+            );
+          },
+          child: Ink(
+            width: double.infinity,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Color(0xFF184D36), Color(0xFF0F3B29)],
+              ),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: _gold.withValues(alpha: 0.45), width: 1.2),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.25),
+                  blurRadius: 12,
+                  offset: const Offset(0, 6),
+                ),
+              ],
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+              child: Row(
+                children: [
+                  Container(
+                    width: 54,
+                    height: 54,
+                    decoration: BoxDecoration(
+                      color: _gold.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Icon(
+                      Icons.storefront_rounded,
+                      size: 32,
+                      color: _gold,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'لائیو منڈی دیکھیں / Explore Live Mandi',
+                          style: TextStyle(
+                            color: AppColors.primaryText,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 15,
+                          ),
+                        ),
+                        SizedBox(height: 4),
+                        Directionality(
+                          textDirection: TextDirection.rtl,
+                          child: Text(
+                            'مال بیچنے سے پہلے مارکیٹ کے ریٹس چیک کریں (Check market rates before posting).',
+                            style: TextStyle(
+                              color: AppColors.secondaryText,
+                              fontFamily: 'JameelNoori',
+                              fontSize: 13,
+                              height: 1.25,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Icon(
+                    Icons.arrow_forward_ios,
+                    color: _gold.withValues(alpha: 0.95),
+                    size: 18,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 

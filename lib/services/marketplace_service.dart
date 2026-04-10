@@ -1247,6 +1247,21 @@ class MarketplaceService {
 
     final userSnap = await _db.collection('users').doc(user.uid).get();
     final userData = userSnap.data() ?? <String, dynamic>{};
+
+    bool _hasProfileValue(dynamic value) {
+      if (value == null) return false;
+      if (value is String) return value.trim().isNotEmpty;
+      if (value is Map) return value.isNotEmpty;
+      if (value is Iterable) return value.isNotEmpty;
+      return value.toString().trim().isNotEmpty;
+    }
+
+    final bool hasIdCard = _hasProfileValue(userData['idCard']);
+    final bool hasCnic = _hasProfileValue(userData['cnic']);
+    if (!hasIdCard || !hasCnic) {
+      throw Exception('account_verification_required');
+    }
+
     final blockStatus = TrustSafetyService.evaluateBidBlock(userData: userData);
     if (blockStatus.isBlocked) {
       throw Exception(

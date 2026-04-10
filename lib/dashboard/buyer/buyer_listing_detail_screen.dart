@@ -8,6 +8,7 @@ import 'bid_bottom_sheet.dart';
 import '../../services/buyer_engagement_service.dart';
 import '../../services/auction_lifecycle_service.dart';
 import '../../services/bid_eligibility_service.dart';
+import '../../services/bidding_service.dart';
 import '../../services/trust_safety_service.dart';
 import '../../theme/app_colors.dart';
 import '../../core/location_display_helper.dart';
@@ -42,6 +43,7 @@ class _BuyerListingDetailScreenState extends State<BuyerListingDetailScreen> {
   final BuyerEngagementService _engagementService = BuyerEngagementService();
   final AuctionLifecycleService _auctionLifecycleService =
       AuctionLifecycleService();
+  final BiddingService _biddingService = BiddingService();
 
   @override
   void initState() {
@@ -94,11 +96,36 @@ class _BuyerListingDetailScreenState extends State<BuyerListingDetailScreen> {
   }
 
   bool _isExpired(Map<String, dynamic> listing) {
+    // Prefer explicit endTime / bidExpiryTime field for accuracy.
+    final endTime =
+        _readDate(listing['endTime']) ?? _readDate(listing['bidExpiryTime']);
+    if (endTime != null) return DateTime.now().toUtc().isAfter(endTime);
+    // Fallback: createdAt + 24 hours.
     final createdAt = _readDate(listing['createdAt']);
     if (createdAt == null) return false;
     return DateTime.now().toUtc().isAfter(
       createdAt.add(const Duration(hours: 24)),
     );
+  }
+
+  /// Silently resolves an expired auction listing in Firestore.
+  /// Fire-and-forget; errors are swallowed so UI is never blocked.
+  void _silentlyResolveIfExpired(Map<String, dynamic> data) {
+    if (!_isExpired(data)) return;
+    final status =
+        (data['status'] ??
+                data['listingStatus'] ??
+                data['auctionStatus'] ??
+                '')
+            .toString()
+            .trim()
+            .toLowerCase();
+    if (status == 'completed' ||
+        status == 'expired_unsold' ||
+        status == 'bid_accepted') return;
+    _biddingService
+        .resolveExpiredListing(widget.listingId, data)
+        .catchError((_) {});
   }
 
   Future<_RiskReport> _computeRisk(Map<String, dynamic> listing) async {
@@ -265,6 +292,7 @@ class _BuyerListingDetailScreenState extends State<BuyerListingDetailScreen> {
               }
 
               _ensureRiskLoaded(data);
+              _silentlyResolveIfExpired(data);
 
               final expired = _isExpired(data);
               final item = _firstText(data, const [

@@ -74,6 +74,7 @@ Future<void> _activateAppCheckSafely() async {
         ? const AppleDebugProvider()
         : const AppleDeviceCheckProvider(),
   );
+  await FirebaseAppCheck.instance.setTokenAutoRefreshEnabled(true);
   debugPrint('[AppCheck] Activation succeeded');
   _appCheckActivated = true;
 }
@@ -106,6 +107,11 @@ Future<void> main() async {
   debugPrint('APP START BEFORE APP CHECK');
   await _activateAppCheckSafely();
   debugPrint('APP START AFTER APP CHECK');
+
+  // Register the FCM background/terminated handler before runApp so it is
+  // active even when the Dart isolate is freshly spawned with no widget tree.
+  FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+
   runApp(const DigitalArhatApp());
 }
 
