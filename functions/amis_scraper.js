@@ -3,6 +3,8 @@ const cheerio = require('cheerio');
 const admin = require('firebase-admin');
 const fs = require('fs');
 
+const SCRAPER_API_KEY = 'YOUR_API_KEY_HERE';
+
 function initFirebaseAdminFromWorkflowSecret() {
   const secretName = 'GOOGLE_APPLICATION_CREDENTIALS';
   const secretValue = process.env[secretName];
@@ -167,21 +169,9 @@ async function scrapeUrduPointByTargets(url, targets) {
   const seen = new Set();
 
   try {
-    const response = await axios.get(url, {
+    const scraperUrl = `http://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&url=${encodeURIComponent(url)}`;
+    const response = await axios.get(scraperUrl, {
       timeout: 20000,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9,ur;q=0.8',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
-        'Sec-Fetch-User': '?1',
-        'Cache-Control': 'max-age=0',
-      },
     });
 
     const $ = cheerio.load(response.data);
