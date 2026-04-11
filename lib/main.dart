@@ -19,10 +19,71 @@ import 'services/analytics_service.dart';
 import 'services/deep_link_service.dart';
 import 'services/notification_service.dart';
 import 'services/phase1_notification_engine.dart';
-import 'theme/app_theme.dart';
+import 'theme/app_colors.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 bool _appCheckActivated = false;
+
+ThemeData _globalMandiTheme() {
+  // Matches the dark-green + gold palette used in Welcome/Master Sign Up flow.
+  const Color mandiDarkGreen = AppColors.background;
+  const Color mandiGold = AppColors.accentGold;
+  const Color inputFill = AppColors.cardSurface;
+
+  final ColorScheme colorScheme = const ColorScheme.dark().copyWith(
+    primary: mandiGold,
+    secondary: mandiGold,
+    surface: inputFill,
+    onPrimary: AppColors.ctaTextDark,
+    onSecondary: AppColors.ctaTextDark,
+    onSurface: AppColors.primaryText,
+    onError: AppColors.primaryText,
+  );
+
+  return ThemeData(
+    brightness: Brightness.dark,
+    scaffoldBackgroundColor: mandiDarkGreen,
+    colorScheme: colorScheme,
+    useMaterial3: true,
+    elevatedButtonTheme: ElevatedButtonThemeData(
+      style: ElevatedButton.styleFrom(
+        backgroundColor: mandiGold,
+        foregroundColor: AppColors.ctaTextDark,
+        disabledBackgroundColor: mandiGold.withValues(alpha: 0.45),
+        disabledForegroundColor: AppColors.ctaTextDark.withValues(alpha: 0.7),
+        textStyle: const TextStyle(fontWeight: FontWeight.w700),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    ),
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: inputFill,
+      labelStyle: const TextStyle(color: AppColors.primaryText),
+      hintStyle: TextStyle(color: AppColors.secondaryText.withValues(alpha: 0.9)),
+      prefixIconColor: mandiGold,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: mandiGold.withValues(alpha: 0.35)),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: mandiGold.withValues(alpha: 0.35)),
+      ),
+      focusedBorder: const OutlineInputBorder(
+        borderRadius: BorderRadius.all(Radius.circular(12)),
+        borderSide: BorderSide(color: mandiGold, width: 1.4),
+      ),
+      errorBorder: const OutlineInputBorder(
+        borderRadius: BorderRadius.all(Radius.circular(12)),
+        borderSide: BorderSide(color: AppColors.urgencyRed, width: 1.2),
+      ),
+      focusedErrorBorder: const OutlineInputBorder(
+        borderRadius: BorderRadius.all(Radius.circular(12)),
+        borderSide: BorderSide(color: AppColors.urgencyRed, width: 1.4),
+      ),
+    ),
+  );
+}
 
 Future<void> _logRuntimeFirebaseIdentity() async {
   try {
@@ -264,7 +325,7 @@ class DigitalArhatApp extends StatelessWidget {
       title: 'Digital Arhat',
       debugShowCheckedModeBanner: false,
       navigatorKey: navigatorKey,
-      theme: AppTheme.darkTheme,
+      theme: _globalMandiTheme(),
       routes: <String, WidgetBuilder>{...Routes.getRoutes()},
         initialRoute: Routes.authWrapper,
       onUnknownRoute: (_) => MaterialPageRoute(

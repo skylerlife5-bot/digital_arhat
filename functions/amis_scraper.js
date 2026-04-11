@@ -3,7 +3,7 @@ const cheerio = require('cheerio');
 const admin = require('firebase-admin');
 const fs = require('fs');
 
-const SCRAPER_API_KEY = 'YOUR_API_KEY_HERE';
+const SCRAPER_API_KEY = 'f127410665f688aadc22a5f8427baf12';
 
 function initFirebaseAdminFromWorkflowSecret() {
   const secretName = 'GOOGLE_APPLICATION_CREDENTIALS';
